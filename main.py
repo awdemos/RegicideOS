@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import subprocess
+import urllib.request
 import sys
 import tomllib
-import argparse
 from dataclasses import dataclass
 
 @dataclass
@@ -20,7 +21,7 @@ def die(message: str) -> None:
     """This is a function to exit the program with a die message."""
 
     print(f"{Colours.red}[ERROR]{Colours.endc} {message}", file=sys.stderr)
-    exit(1)
+    sys.exit(1)
 
 def parse_args():
     """This is a function to handle the parsing of command line args passed to the program."""
@@ -84,10 +85,7 @@ class VarChecker:
 
         drives = get_drives()
 
-        if self.check_var in drives:
-            return True
-        else:
-            return False
+        return self.check_var in drives
 
 def parse_config(config_file: str) -> dict:
     """
@@ -129,7 +127,7 @@ def parse_config(config_file: str) -> dict:
             else:
                 die(f"Missing required variable {required_varibles[i]} - exiting!")
 
-    exit(1) # Temporary - for development/debugging
+    sys.exit(1) # Temporary - for development/debugging
     return config_parsed
 
 def get_drives() -> list:
@@ -166,16 +164,22 @@ def mount(drive: str, stage4_url: str) -> None:
     subprocess.run(["mount", "--label", "HOME", "/mnt/home"])
 
     folder_paths: list = [r'/mnt/overlay/var',r'/mnt/overlay/varw',r'/mnt/overlay/etc',r'/mnt/overlay/etcw']
-    
+
     for i in range (len(folder_paths)):
         if not os.path.exists(folder_paths[i]):
             os.makedirs(folder_paths[i])
 
-    subprocess.run(["rm", "-f", "/mnt/xenia/roots/root.img"])
-    subprocess.run(["wget", "-O", "/mnt/xenia/roots/root.img", stage4_url]) # TODO: use requests instead of shelling out
+    if os.path.isfile("/mnt/xenia/roots/root.img"):
+        os.remove("/mnt/xenia/roots/root.img")
+
+    print(f"{Colours.yellow}[LOG] Downloading root image - this will take a while.")
+    urllib.request.urlretrieve(stage4_url, "/mnt/xenia/roots/root.img")
+    print(f"{Colours.green}[LOG] Root image succesfully downloaded!")
 
 def main():
-    """The main function."""
+    """The *DEVELOPMENT* main function."""
+    if not os.path.isdir("/sys/firmware/efi"): # Checking that host system supports UEFI.
+        die("This installer does not currently support BIOS systems. Please (if possible) enable UEFI.")
 
     install_drive = "" # Temporary - for development/debugging
 
