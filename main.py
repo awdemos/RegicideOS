@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import subprocess
+import sys
 import tomllib
 import argparse
 from dataclasses import dataclass
@@ -15,10 +16,10 @@ class Colours:
     yellow: str = "\033[33m"
     blue: str = "\033[34m"
 
-def die(message):
+def die(message: str) -> None:
     """This is a function to exit the program with a die message."""
 
-    print(f"{Colours.red}[ERROR]{Colours.endc} {message}")
+    print(f"{Colours.red}[ERROR]{Colours.endc} {message}", file=sys.stderr)
     exit(1)
 
 def parse_args():
@@ -35,7 +36,9 @@ def parse_args():
         dest='config_name',
         help='Run the installer automated from a toml config file.'
     )
+
     args = parser.parse_args()
+
     if args.config_name is not None:
         if len(args.config_name) > 1:
             die("Mutiple config files provided - only 1 can be parsed.")
@@ -43,12 +46,50 @@ def parse_args():
         interactive: bool = True
     else:
         interactive: bool = False
-    #print(args.config_name[0])
 
-def var_checker(config_type, config_value) -> bool:
-    return True
+    # print(args.config_name[0])
 
-def parse_config(config_file) -> dict:
+class VarChecker:
+    """
+    This is a class to ensure the validity of variables passed to the script.
+
+    Attributes:
+        var_type      (string): Contains the type of variable to check.
+        check_var (string): Contains the contents of the variable to check.
+    """
+
+    def __init__(self, var_type: str, check_var: str) -> None:
+        """
+        The constructors for the VarChecker class.
+
+        Parameters:
+            var_type  (string): Contains the type of variable to check.
+            check_var (string): Contains the contents of the variable to check.
+        """
+
+        self.var_type: str = var_type
+        self.check_var: str = check_var
+
+    def checker(self) -> bool:
+        """The function to sort the type of variable to sort, and call the correct function."""
+
+        match self.var_type:
+            case "drive":
+                return self.drive()
+            case other:
+                return False
+
+    def drive(self) -> bool:
+        """The function to validate the drive variable."""
+
+        drives = get_drives()
+
+        if self.check_var in drives:
+            return True
+        else:
+            return False
+
+def parse_config(config_file: str) -> dict:
     """
     The is the function to parse the toml config file.
 
@@ -59,26 +100,30 @@ def parse_config(config_file) -> dict:
     with open(config_file, "rb") as file:
         config_parsed = tomllib.load(file)
 
-    required_varibles = ["drive"]
+    required_varibles: list = ["drive"]
 
     for i in range(len(required_varibles)):
         if not required_varibles[i] in config_parsed.keys():
-            user_input = input(f"{Colours.red}[ERROR]{Colours.endc} The specified configuration file {config_file} is missing the required key {required_varibles[i]}. Would you like to specify it now? (Y/n) ")
+            user_input: str = input(f"{Colours.red}[ERROR]{Colours.endc} The specified configuration file {config_file} is missing the required key {required_varibles[i]}. Would you like to specify it now? (Y/n) ")
             match user_input.lower():
                 case "" | "y" | "yes":
-                    append_new_key = True
+                    append_new_key: bool = True
                 case "n" | "no":
-                    append_new_key = False
+                    append_new_key: bool = False
                 case other:
                     die("Invalid input - exiting!")
             if append_new_key:
-                user_input = input(f"Please enter the value you would like to use for {required_varibles[i]}: ")
-                if not var_checker(required_varibles[i], user_input):
+                user_input: str = input(f"Please enter the value you would like to use for {required_varibles[i]}: ")
+                var_checker = VarChecker(required_varibles[i], user_input)
+
+                if not var_checker.checker():
                     die(f"{user_input} is an invalid entry for the key {required_varibles[i]} - exiting!")
-                append_data = f"{required_varibles[i]} = {user_input}\n"
-                file = open(config_file, "a")
-                file.write(append_data)
-                file.close()
+
+                append_data: str = f"{required_varibles[i]} = {user_input}\n"
+
+                with open(config_file, "a") as file:
+                    file.write(append_data)
+
                 config_parsed[required_varibles[i]] = user_input
                 print(config_parsed)
             else:
@@ -87,40 +132,18 @@ def parse_config(config_file) -> dict:
     exit(1) # Temporary - for development/debugging
     return config_parsed
 
-class DriveHandler():
-    """This is a class to handle drives."""
+def get_drives() -> list:
+    """The function to get all possible drives for installation."""
 
-    def __init__(self):
-        """
-        The constructors for the Drive_Handler class.
+    all_drives_array = next(os.walk('/sys/block'))[1]
 
-        Parameters:
-            drives       (array): Contains all suitable drives for installation.
-            is_removable (array): Contains removable setting of drive (correspondes to drives)
-        """
+    supported_types: list = ["sd", "nvme", "mmcblk"]
 
-        self.drives = []
-        self.is_removable = []
-    def get_drives(self):
-        """The function to get all possible drives for installation."""
+    drives: list = [i for i in all_drives_array if any(i.startswith(drivetype) for drivetype in supported_types)]
 
-        all_drives_array = next(os.walk('/sys/block'))[1]
+    return drives
 
-        supported_types = ["sd", "nvme", "mmcblk"]
-
-        for i in range(len(all_drives_array)):
-            for j in range(len(supported_types)):
-                if all_drives_array[i].startswith(supported_types[j]):
-                    self.drives.append(all_drives_array[i])
-
-        for i in range(len(self.drives)):
-            file = open(f"/sys/block/{self.drives[i]}/removable","r")
-            file_contents: str = file.readline()
-            stripped_file = ''.join(file_contents.split())
-            self.is_removable.append(stripped_file)
-            file.close()
-
-def mount(drive, stage4_url):
+def mount(drive: str, stage4_url: str) -> None:
     """
     The function to mount all required filesystems for the install.
 
@@ -131,34 +154,35 @@ def mount(drive, stage4_url):
 
     if not os.path.exists(r'/mnt/xenia'):
         os.makedirs(r'/mnt/xenia')
-    folder_paths = [r'/mnt/xenia', r'/mnt/xenia/roots', r'/mnt/xenia/overlay', r'/mnt/xenia/root', r'/mnt/xenia/home']
+
+    folder_paths: list = [r'/mnt/xenia', r'/mnt/xenia/roots', r'/mnt/xenia/overlay', r'/mnt/xenia/root', r'/mnt/xenia/home']
+
     for i in range (len(folder_paths)):
         if not os.path.exists(folder_paths[i]):
             os.makedirs(folder_paths[i])
+
     subprocess.run(["mount", "--label", "ROOTS", "/mnt/roots"])
     subprocess.run(["mount", "--label", "OVERLAY", "/mnt/overlay"])
     subprocess.run(["mount", "--label", "HOME", "/mnt/home"])
 
-    folder_paths = [r'/mnt/overlay/var',r'/mnt/overlay/varw',r'/mnt/overlay/etc',r'/mnt/overlay/etcw']
+    folder_paths: list = [r'/mnt/overlay/var',r'/mnt/overlay/varw',r'/mnt/overlay/etc',r'/mnt/overlay/etcw']
+    
     for i in range (len(folder_paths)):
         if not os.path.exists(folder_paths[i]):
             os.makedirs(folder_paths[i])
+
     subprocess.run(["rm", "-f", "/mnt/xenia/roots/root.img"])
-    # TODO: use requests instead of shelling out
-    subprocess.run(["wget", "-O", "/mnt/xenia/roots/root.img", stage4_url])
-    
+    subprocess.run(["wget", "-O", "/mnt/xenia/roots/root.img", stage4_url]) # TODO: use requests instead of shelling out
+
 def main():
     """The main function."""
+
+    install_drive = "" # Temporary - for development/debugging
 
     parse_args()
     parse_config("config.toml")
 
-    drive_handler = DriveHandler()
-    drive_handler.get_drives()
-    
-    print(drive_handler.drives)
-    print(drive_handler.is_removable)
-    mount(drive_handler.drives, "https://repo.xenialinux.com/releases/current/root.img")
+    mount(install_drive, "https://repo.xenialinux.com/releases/current/root.img")
 
 if __name__ == '__main__':
     main()
