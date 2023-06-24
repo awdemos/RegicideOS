@@ -23,7 +23,7 @@ def die(message: str) -> None:
     print(f"{Colours.red}[ERROR]{Colours.endc} {message}", file=sys.stderr)
     sys.exit(1)
 
-def parse_args():
+def parse_args() -> list:
     """This is a function to handle the parsing of command line args passed to the program."""
 
     parser = argparse.ArgumentParser(
@@ -43,10 +43,14 @@ def parse_args():
     if args.config_name is not None:
         if len(args.config_name) > 1:
             die("Mutiple config files provided - only 1 can be parsed.")
-        config_file: string = args.config_name
-        interactive: bool = True
+        config_file: list = args.config_name[0]
     else:
-        interactive: bool = False
+        config_file: list = []
+
+    print(config_file) # debugging
+    print(type(config_file)) # debugging
+
+    return config_file
 
     # print(args.config_name[0])
 
@@ -117,7 +121,7 @@ def parse_config(config_file: str) -> dict:
                 if not var_checker.checker():
                     die(f"{user_input} is an invalid entry for the key {required_varibles[i]} - exiting!")
 
-                append_data: str = f"{required_varibles[i]} = {user_input}\n"
+                append_data: str = f"{required_varibles[i]} = \"{user_input}\"\n"
 
                 with open(config_file, "a") as file:
                     file.write(append_data)
@@ -127,7 +131,6 @@ def parse_config(config_file: str) -> dict:
             else:
                 die(f"Missing required variable {required_varibles[i]} - exiting!")
 
-    sys.exit(1) # Temporary - for development/debugging
     return config_parsed
 
 def get_drives() -> list:
@@ -172,19 +175,69 @@ def mount(drive: str, stage4_url: str) -> None:
     if os.path.isfile("/mnt/xenia/roots/root.img"):
         os.remove("/mnt/xenia/roots/root.img")
 
-    print(f"{Colours.yellow}[LOG] Downloading root image - this will take a while.")
+    print(f"{Colours.yellow}[LOG]{Colours.endc} Downloading root image - this will take a while.")
     urllib.request.urlretrieve(stage4_url, "/mnt/xenia/roots/root.img")
-    print(f"{Colours.green}[LOG] Root image succesfully downloaded!")
+    print(f"{Colours.green}[LOG]{Colours.endc} Root image succesfully downloaded!")
+
+    subprocess.run(["mount", "-o", "ro,loop", "-t", "squashfs", "/mnt/roots/root.img", "/mnt/root"])
+
+    if "nvme" in drive:
+        subprocess.run(["mount", f"/dev/{drive}p1", "/mnt/root/boot/efi"])
+    else:
+        subprocess.run(["mount", f"/dev/{drive}1", "/mnt/root/boot/efi"])
+
+    subprocess.run(["mount", "-t", "proc", "/proc", "/mnt/root/proc"])
+    subprocess.run(["mount", "--rbind", "/dev", "/mnt/root/dev"])
+    subprocess.run(["mount", "--bind", "/run", "/mnt/root/run"])
+    subprocess.run(["mount", "--make-slave", "/mnt/root/run"])
+    subprocess.run(["mount", "--move", "/mnt/home", "/mnt/root/home"])
+
+def partition_drives(drive: str) -> None:
+    """
+    The function to partition and format the drives.
+
+    Parameters:
+        drive (string): Contains the drive to install to.
+    """
+
+    if "nvme" in drive:
+        subprocess.run(["mkfs.vfat", "-F", "32", f"{drive}p1"])
+        subprocess.run(["fatlabel", f"{drive}p1", "EFI"])
+        subprocess.run(["yes", "|", "pvcreate", "-ff", f"{drive}p2"])
+        subprocess.run(["umount", "/mnt/{roots,overlay,root}"])
+        subprocess.run(["yes", "|", "lvremove", "-ff", "/dev/vg0"])
+        subprocess.run(["yes", "|", "vgcreate", "-ff", "vg0", f"{drive}p2"])
+    else:
+        subprocess.run(["mkfs.vfat", "-F", "32", f"{drive}1"])
+        subprocess.run(["fatlabel", f"{drive}1", "EFI"])
+        subprocess.run(["yes", "|", "pvcreate", "-ff", f"{drive}2"])
+        subprocess.run(["umount", "/mnt/{roots,overlay,root}"])
+        subprocess.run(["yes", "|", "lvremove", "-ff", "/dev/vg0"])
+        subprocess.run(["yes", "|", "vgcreate", "-ff", "vg0", f"{drive}2"])
+
+    subprocess.run(["yes", "|", "mkfs.ext4", "/dev/vg0/roots", "-L", "ROOTS"])
+    subprocess.run(["yes", "|", "mkfs.ext4", "/dev/vg0/overlay", "-L", "OVERLAY"])
+    subprocess.run(["yes", "|", "mkfs.ext4", "/dev/vg0/home", "-L", "HOME"])
+
+def chroot() -> None:
+    """The function to run the required chroot commands."""
+
+    subprocess.run(["chroot", "/mnt/root", "grub-install", "--modules=lvm", "--target=\"x86_64-efi\"", "--efi-directory=\"/boot/efi\"", "--boot-directory=\"/boot/efi\""])
+    subprocess.run(["chroot", "/mnt/root", "grub-mkconfig", "-o", "/boot/efi/grub/grub.cfg"])
+    subprocess.run(["chroot", "/mnt/root", "chown", "xenia:xenia", "/home/xenia"])
 
 def main():
-    """The *DEVELOPMENT* main function."""
     if not os.path.isdir("/sys/firmware/efi"): # Checking that host system supports UEFI.
         die("This installer does not currently support BIOS systems. Please (if possible) enable UEFI.")
 
-    install_drive = "" # Temporary - for development/debugging
+    config_file = parse_args()
 
-    parse_args()
-    parse_config("config.toml")
+    if len(config_file) == 0:
+        die("Installer does not currently support interactive mode!")
+
+    config_parsed = parse_config(str(config_file[0]))
+
+    install_drive = config_parsed['drive']
 
     mount(install_drive, "https://repo.xenialinux.com/releases/current/root.img")
 
