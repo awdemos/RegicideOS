@@ -54,7 +54,7 @@ def execute(command_string: str, override: bool = False) -> str:
 
 def partition_drive(drive: str, layout: list) -> bool:
     command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
-    drive_size: str = execute("lsblk -o SIZE /dev/sda | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
+    drive_size: str = execute(f"lsblk -o SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
     drive_size_class = drive_size[-1:]
 
     for partition in layout:
