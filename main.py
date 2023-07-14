@@ -144,7 +144,7 @@ def get_drives() -> list:
 
     return drives
 
-def mount(drive: str, stage4_url: str) -> None:
+def download_image(drive: str, stage4_url: str) -> None:
     """
     The function to mount all required filesystems for the install.
 
@@ -152,25 +152,6 @@ def mount(drive: str, stage4_url: str) -> None:
         drive      (string): Contains the drive to install too.
         stage4_url (string): Contains the link to the latest stage4 rootfs.
     """
-
-    if not os.path.exists(r'/mnt/xenia'):
-        os.makedirs(r'/mnt/xenia')
-
-    folder_paths: list = [r'/mnt/xenia', r'/mnt/xenia/roots', r'/mnt/xenia/overlay', r'/mnt/xenia/root', r'/mnt/xenia/home']
-
-    for i in range (len(folder_paths)):
-        if not os.path.exists(folder_paths[i]):
-            os.makedirs(folder_paths[i])
-
-    subprocess.run(["mount", "--label", "ROOTS", "/mnt/roots"])
-    subprocess.run(["mount", "--label", "OVERLAY", "/mnt/overlay"])
-    subprocess.run(["mount", "--label", "HOME", "/mnt/home"])
-
-    folder_paths: list = [r'/mnt/overlay/var',r'/mnt/overlay/varw',r'/mnt/overlay/etc',r'/mnt/overlay/etcw']
-
-    for i in range (len(folder_paths)):
-        if not os.path.exists(folder_paths[i]):
-            os.makedirs(folder_paths[i])
 
     if os.path.isfile("/mnt/xenia/roots/root.img"):
         os.remove("/mnt/xenia/roots/root.img")
@@ -200,24 +181,27 @@ def partition_drives(drive: str) -> None:
         drive (string): Contains the drive to install to.
     """
 
-    if "nvme" in drive:
-        subprocess.run(["mkfs.vfat", "-F", "32", f"{drive}p1"])
-        subprocess.run(["fatlabel", f"{drive}p1", "EFI"])
-        subprocess.run(["yes", "|", "pvcreate", "-ff", f"{drive}p2"])
-        subprocess.run(["umount", "/mnt/{roots,overlay,root}"])
-        subprocess.run(["yes", "|", "lvremove", "-ff", "/dev/vg0"])
-        subprocess.run(["yes", "|", "vgcreate", "-ff", "vg0", f"{drive}p2"])
-    else:
-        subprocess.run(["mkfs.vfat", "-F", "32", f"{drive}1"])
-        subprocess.run(["fatlabel", f"{drive}1", "EFI"])
-        subprocess.run(["yes", "|", "pvcreate", "-ff", f"{drive}2"])
-        subprocess.run(["umount", "/mnt/{roots,overlay,root}"])
-        subprocess.run(["yes", "|", "lvremove", "-ff", "/dev/vg0"])
-        subprocess.run(["yes", "|", "vgcreate", "-ff", "vg0", f"{drive}2"])
+    try:
+        os.system(f"sgdisk -o -n 1::+500M -t 1:EF00 -c 1:\"boot\" -n 2::: -t 2:8300 -c 2:\"root\" -p {drive}")
 
-    subprocess.run(["yes", "|", "mkfs.ext4", "/dev/vg0/roots", "-L", "ROOTS"])
-    subprocess.run(["yes", "|", "mkfs.ext4", "/dev/vg0/overlay", "-L", "OVERLAY"])
-    subprocess.run(["yes", "|", "mkfs.ext4", "/dev/vg0/home", "-L", "HOME"])
+        if "nvme" in drive:
+            os.system(f"mkfs.vfat -F 32 -n EFI {drive}p1")
+            os.system(f"mkfs.btrfs -L ROOTS {drive}p2")
+        else:
+            os.system(f"mkfs.vfat -F 32 -n EFI {drive}1")
+            os.system(f"mkfs.btrfs -L ROOTS {drive}2")
+
+        if not os.path.exists(r'/mnt/xenia'):
+            os.makedirs(r'/mnt/xenia')
+
+        os.system("mount -L ROOTS /mnt/xenia")
+        os.system("btrfs subvolume create /mnt/xenia/home")
+        os.system("btrfs subvolume create /mnt/xenia/overlay")
+        os.system("btrfs subvolume create /mnt/gentoo/overlay/etc")
+        os.system("btrfs subvolume create /mnt/gentoo/overlay/var")
+        os.system("btrfs subvolume create /mnt/gentoo/overlay/usr")
+    except:
+        die("Could not format partitions - exiting!")
 
 def chroot() -> None:
     """The function to run the required chroot commands."""
@@ -226,6 +210,11 @@ def chroot() -> None:
     subprocess.run(["chroot", "/mnt/root", "grub-mkconfig", "-o", "/boot/efi/grub/grub.cfg"])
     subprocess.run(["chroot", "/mnt/root", "chown", "xenia:xenia", "/home/xenia"])
 
+def interactive() -> None:
+    """The function to interactivly ask the user for configuration settings."""
+
+    
+
 def main():
     if not os.path.isdir("/sys/firmware/efi"): # Checking that host system supports UEFI.
         die("This installer does not currently support BIOS systems. Please (if possible) enable UEFI.")
@@ -233,7 +222,8 @@ def main():
     config_file = parse_args()
 
     if len(config_file) == 0:
-        die("Installer does not currently support interactive mode!")
+        # die("Installer does not currently support interactive mode!")
+        config_file = "auto-generated-configuration.toml"
 
     config_parsed = parse_config(str(config_file[0]))
 
