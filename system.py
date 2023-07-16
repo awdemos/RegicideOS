@@ -23,15 +23,17 @@ def download_root(url: str) -> None:
     urllib.request.urlretrieve(url, "/mnt/gentoo/root.img")
 
 
-def mount() -> None:
+def mount_roots() -> None:
     if not os.path.exists("/mnt/gentoo"):
         os.mkdir("/mnt/gentoo")
-    
-    if not os.path.exists("/mnt/root"):
-        os.mkdir("/mnt/root")
 
     common.info("Mounting roots on /mnt/gentoo")
     common.execute("mount -L ROOTS /mnt/gentoo")
+
+
+def mount() -> None:
+    if not os.path.exists("/mnt/root"):
+        os.mkdir("/mnt/root")
 
     common.info("Mounting root.img on /mnt/root")
     common.execute("mount -o ro,loop -t squashfs /mnt/gentoo/root.img /mnt/root")

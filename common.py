@@ -5,7 +5,7 @@ import drive
 
 PRETEND = True
 
-SIZE_CLASS = ["K", "M", "G", "T", "P"]
+SIZE_CLASS = ["", "K", "M", "G", "T", "P"]
 
 @dataclass
 class Colours:
