@@ -42,10 +42,13 @@ LAYOUTS = {
 }
 
 def partition_drive(drive: str, layout: list) -> bool:
-    vgs = common.execute("vgs | awk '{ print $1 }' | grep -vw VG").splitlines()
-    
-    for vg in vgs:
-        common.execute(f"vgchange -an {vg}")
+    common.execute(f"umount {drive}")
+    vgs = common.execute("vgs | awk '{ print $1 }' | grep -vw VG")
+
+    if vgs != None:
+        vgs = [line.strip().decode('UTF-8') for line in vgs.splitlines()]
+        for vg in vgs:
+            common.execute(f"vgchange -an {vg}")
     
     command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
     drive_size: str = common.get_drive_size(drive)
@@ -96,9 +99,9 @@ def format_drive(drive: str, layout: list) -> None:
 
             case "btrfs":
                 if "label" in partition:
-                    common.execute(f"mkfs.btrfs -L {partition['label']} {name}")
+                    common.execute(f"mkfs.btrfs -f -L {partition['label']} {name}")
                 else:
-                    common.execute(f"mkfs.btrfs {name}")
+                    common.execute(f"mkfs.btrfs -f {name}")
 
                 if "subvolumes" in partition:
                     common.execute(f"mkdir /mnt/temp")
