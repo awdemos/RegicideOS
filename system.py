@@ -42,8 +42,8 @@ def mount() -> None:
     common.execute("mount -L EFI /mnt/root/boot/efi")
 
     common.info("Mounting special filesystems")
-    common.execute("mount -t proc /proc /mnt/gentoo/proc")
-    common.execute("mount --rbind /dev /mnt/gentoo/dev")
-    common.execute("mount --rbind /sys /mnt/gentoo/sys")
-    common.execute("mount --bind /run /mnt/gentoo/run")
-    common.execute("mount --make-slave /mnt/gentoo/run")
+    common.execute("mount -t proc /proc /mnt/root/proc")
+    common.execute("mount --rbind /dev /mnt/root/dev")
+    common.execute("mount --rbind /sys /mnt/root/sys")
+    common.execute("mount --bind /run /mnt/root/run")
+    common.execute("mount --make-slave /mnt/root/run")
