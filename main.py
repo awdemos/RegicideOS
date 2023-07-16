@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import os
-import sys
 import tomllib
 
 import common
 import config
 import drive
+import system
 
 
 def parse_args() -> str:
@@ -60,7 +60,19 @@ def main():
 
     common.info(f"Formatting drive {config_parsed['drive']}")
     drive.format_drive(config_parsed['drive'], drive.LAYOUTS[config_parsed['filesystem']])
-    
+
+    common.info("Starting installation")
+    system.mount()
+
+    common.info("Downloading root image")
+    system.download_root(config_parsed["root_url"])
+
+    common.info("Installing bootloader")
+    system.install_bootloader()
+
+    common.info("Starting post-installation tasks")
+    system.post_install()
+
 
 if __name__ == '__main__':
     main()

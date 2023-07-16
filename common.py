@@ -75,10 +75,10 @@ def check_url(value: str) -> bool:
     try:
         response = requests.head(value)
 
-        if response.status_code == 200 and value.split("/")[-1] == "root.img":
+        if response.status_code == 200 and ".img" in value.split("/")[-1]:
             return True
         
-        warn("URL entered is not reachable, or does not end in root.img. Please try again.")
+        warn("URL entered is not reachable, or does not end in .img. Please try again.")
     except:
         warn("URL entered is not valid - did you forget 'https://'?")
     

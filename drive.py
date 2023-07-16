@@ -1,4 +1,4 @@
-import shutil
+import os
 
 import common
 
@@ -108,7 +108,9 @@ def format_drive(drive: str, layout: list) -> None:
                     common.execute(f"mkfs.btrfs -q -f {name}")
 
                 if "subvolumes" in partition:
-                    common.execute(f"mkdir /mnt/temp")
+                    if not os.path.exists("/mnt/temp"):
+                        os.mkdir("/mnt/temp")
+
                     common.execute(f"mount {name} /mnt/temp")
 
                     for subvolume in partition["subvolumes"]:
