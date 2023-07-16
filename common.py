@@ -50,8 +50,8 @@ def check_url(value: str) -> list:
         response = requests.head(value)
 
         if response.status_code == 200 and value.split("/")[-1] == "root.img":
-            return value
+            return True
     except:
         pass
     
-    return ["https://example.com/"]
+    return False
