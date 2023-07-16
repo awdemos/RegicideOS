@@ -35,7 +35,7 @@ def warn(message: str) -> None:
 
 def execute(command_string: str, override: bool = False) -> str:
     if not PRETEND or override:
-        command = subprocess.Popen(command_string.split(" "), stdout=subprocess.PIPE, shell=True)
+        command = subprocess.Popen(command_string, stdout=subprocess.PIPE, shell=True)
         out, _ = command.communicate()
         return out
 
