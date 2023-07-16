@@ -91,9 +91,9 @@ def format_drive(drive: str, layout: list) -> None:
         match partition["format"]:
             case "vfat":
                 if "label" in partition:
-                    common.execute(f"mkfs.vfat -q -F 32 -n {partition['label']} {name}")
+                    common.execute(f"mkfs.vfat -F 32 -n {partition['label']} {name}")
                 else:
-                    common.execute(f"mkfs.vfat -q -F 32 {name}")
+                    common.execute(f"mkfs.vfat -F 32 {name}")
 
             case "ext4":
                 if "label" in partition:
