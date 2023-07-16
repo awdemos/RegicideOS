@@ -62,10 +62,11 @@ def main():
     drive.format_drive(config_parsed['drive'], drive.LAYOUTS[config_parsed['filesystem']])
 
     common.info("Starting installation")
-    system.mount()
+    system.mount_roots()
 
     common.info("Downloading root image")
     system.download_root(config_parsed["root_url"])
+    system.mount()
 
     common.info("Installing bootloader")
     system.install_bootloader()
