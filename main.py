@@ -44,7 +44,11 @@ def main():
         with open(config_file, "rb") as file:
             config_file = tomllib.load(file)
 
+    common.info(f"Entering interactive mode. Default values are shown wrapped in square brackets like {common.Colours.blue}[this]{common.Colours.endc}. Press enter to accept the default.\n" if interactive else "Checking config")
+
     config_parsed = config.parse_config(config_file if config_file != "" else {}, interactive=interactive)
+
+    common.info(f"Done checking config.")
 
 if __name__ == '__main__':
     main()

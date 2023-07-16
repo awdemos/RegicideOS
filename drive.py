@@ -2,8 +2,6 @@ import shutil
 
 import common
 
-SIZE_CLASS = ["K", "M", "G", "T", "P"]
-
 LAYOUTS = {
     "traditional": [
         {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
@@ -45,7 +43,7 @@ LAYOUTS = {
 
 def partition_drive(drive: str, layout: list) -> bool:
     command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
-    drive_size: str = common.execute(f"lsblk -o SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
+    drive_size: str = common.get_drive_size()
     drive_size_class = drive_size[-1:]
 
     for partition in layout:
@@ -58,7 +56,7 @@ def partition_drive(drive: str, layout: list) -> bool:
 
             if partition_size < 1:
                 partition_size *= 1000
-                drive_size_class = SIZE_CLASS[SIZE_CLASS.index(drive_size_class)-1]
+                drive_size_class = common.SIZE_CLASS[common.SIZE_CLASS.index(drive_size_class)-1]
 
             partition_size = int(round(partition_size, 0))
             partition_size = str(partition_size) + drive_size_class
