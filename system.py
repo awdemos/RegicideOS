@@ -8,7 +8,7 @@ def chroot(command: str) -> None:
 
 
 def post_install() -> None:
-    chroot("chown xenia:xenia /home/xenia")
+    pass
 
 
 def install_bootloader() -> None:
