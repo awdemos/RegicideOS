@@ -42,7 +42,7 @@ LAYOUTS = {
 }
 
 def partition_drive(drive: str, layout: list) -> bool:
-    common.execute(f"umount -q {drive}")
+    common.execute(f"umount -ql {drive}?*")
     vgs = common.execute("vgs | awk '{ print $1 }' | grep -vw VG")
 
     if vgs != None:
