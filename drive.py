@@ -42,7 +42,7 @@ LAYOUTS = {
 }
 
 def partition_drive(drive: str, layout: list) -> bool:
-    common.execute(f"umount {drive}")
+    common.execute(f"umount -q {drive}")
     vgs = common.execute("vgs | awk '{ print $1 }' | grep -vw VG")
 
     if vgs != None:
@@ -50,7 +50,7 @@ def partition_drive(drive: str, layout: list) -> bool:
         for vg in vgs:
             common.execute(f"vgchange -an {vg}")
     
-    command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
+    command: str = f"cat <<EOF | sfdisk -q --wipe always --force {drive}\nlabel: gpt"
     drive_size: str = common.get_drive_size(drive)
     drive_size_class = drive_size[-1:]
 
@@ -91,21 +91,21 @@ def format_drive(drive: str, layout: list) -> None:
         match partition["format"]:
             case "vfat":
                 if "label" in partition:
-                    common.execute(f"mkfs.vfat -F 32 -n {partition['label']} {name}")
+                    common.execute(f"mkfs.vfat -q -F 32 -n {partition['label']} {name}")
                 else:
-                    common.execute(f"mkfs.vfat -F 32 {name}")
+                    common.execute(f"mkfs.vfat -q -F 32 {name}")
 
             case "ext4":
                 if "label" in partition:
-                    common.execute(f"mkfs.ext4 -L {partition['label']} {name}")
+                    common.execute(f"mkfs.ext4 -q -L {partition['label']} {name}")
                 else:
-                    common.execute(f"mkfs.ext4 {name}")
+                    common.execute(f"mkfs.ext4 -q {name}")
 
             case "btrfs":
                 if "label" in partition:
-                    common.execute(f"mkfs.btrfs -f -L {partition['label']} {name}")
+                    common.execute(f"mkfs.btrfs -q -f -L {partition['label']} {name}")
                 else:
-                    common.execute(f"mkfs.btrfs -f {name}")
+                    common.execute(f"mkfs.btrfs -q -f {name}")
 
                 if "subvolumes" in partition:
                     common.execute(f"mkdir /mnt/temp")
@@ -117,15 +117,15 @@ def format_drive(drive: str, layout: list) -> None:
                     common.execute(f"umount {name}")
             
             case "lvm":
-                common.execute(f"pvcreate -ff {name}")
-                common.execute(f"vgcreate -ff {partition['name']} {name}")
+                common.execute(f"yes | pvcreate -ff -q {name}")
+                common.execute(f"vgcreate -ff -q {partition['name']} {name}")
 
                 for i, lv in enumerate(partition["lvs"]):
                     if lv["size"] == True:
-                        common.execute(f"lvcreate -l 100%FREE -n lv{i} {partition['name']}")
+                        common.execute(f"lvcreate -q -l 100%FREE -n lv{i} {partition['name']}")
                     elif lv["size"][-1] == "%":
-                        common.execute(f"lvcreate -l {lv['size']}FREE -n lv{i} {partition['name']}")
+                        common.execute(f"lvcreate -q -l {lv['size']}FREE -n lv{i} {partition['name']}")
                     else:
-                        common.execute(f"lvcreate -L {lv['size']} -n lv{i} {partition['name']}")
+                        common.execute(f"lvcreate -q -L {lv['size']} -n lv{i} {partition['name']}")
 
                 format_drive(f"/dev/mapper/{partition['name']}-", partition["lvs"])
