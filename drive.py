@@ -80,7 +80,7 @@ def partition_drive(drive: str, layout: list) -> bool:
     common.execute(command)
 
 def format_drive(drive: str, layout: list) -> None:
-    name: str = common.execute(f"lsblk -o NAME --list | grep -m 1 {drive.split('/')[-1]}", override=True).strip().decode('UTF-8')
+    name: str = "/dev/" + common.execute(f"sudo lsblk -o NAME --list | grep -m 1 '{drive.split('/')[-1]}.'", override=True).strip().decode('UTF-8')
     
     for i, partition in enumerate(layout):
         name = name[:-1] + str(i+1)
