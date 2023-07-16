@@ -2,8 +2,6 @@ import shutil
 
 import common
 
-PRETEND = True
-
 SIZE_CLASS = ["K", "M", "G", "T", "P"]
 
 LAYOUTS = {

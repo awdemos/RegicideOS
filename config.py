@@ -7,7 +7,7 @@ def fix_config(config_file: dict, interactive: bool, key: str, valid: str, defau
     if not interactive:
         common.die(f"The value specified for '{key}' in the configuration file is not valid or missing. Valid options are: {valid}.")
     
-    new_value = input(f"Enter value for '{key}'. Valid options are {valid}.\n[{default}]: ")
+    new_value = input(f"Enter value for '{key}'. Valid options are {valid}.\n{common.Colours.blue}[{default}]{common.Colours.endc}: ")
     config_file[key] = new_value if new_value != "" else default
 
     parse_config(config_file, interactive=True)
