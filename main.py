@@ -2,6 +2,7 @@
 import argparse
 import os
 import sys
+import tomllib
 
 import common
 import config
@@ -18,9 +19,8 @@ def parse_args() -> str:
         '-c', '--config',
         dest='config_file',
         help='Run the installer automated from a toml config file.',
-        default='auto-generated-configuration.toml',
-        action="store",
-        required=True,
+        default='',
+        action="store"
     )
 
     args = parser.parse_args()
@@ -33,8 +33,18 @@ def main():
         common.die("This installer does not currently support BIOS systems. Please (if possible) enable UEFI.")
 
     config_file = parse_args()
+    interactive = True
 
-    config_parsed = config.parse_config(str(config_file))
+    if config_file != "":
+        interactive = False
+
+        if not os.path.isfile(config_file):
+            common.die(f"Config file {config_file} does not exist.")
+
+        with open(config_file, "rb") as file:
+            config_file = tomllib.load(file)
+
+    config_parsed = config.parse_config(config_file if config_file != "" else {}, interactive=interactive)
 
 if __name__ == '__main__':
     main()

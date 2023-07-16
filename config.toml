@@ -1,1 +1,3 @@
 drive = "/dev/sda"
+root_url = "https://repo.xenialinux.com/releases/current/root.img"
+filesystem = "lvm"

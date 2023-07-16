@@ -1,6 +1,6 @@
 import shutil
 
-from common import execute
+import common
 
 PRETEND = True
 
@@ -47,7 +47,7 @@ LAYOUTS = {
 
 def partition_drive(drive: str, layout: list) -> bool:
     command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
-    drive_size: str = execute(f"lsblk -o SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
+    drive_size: str = common.execute(f"lsblk -o SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
     drive_size_class = drive_size[-1:]
 
     for partition in layout:
@@ -73,52 +73,52 @@ def partition_drive(drive: str, layout: list) -> bool:
 
     command += "\nEOF"
     
-    execute(command)
+    common.execute(command)
 
 def format_drive(drive: str, layout: list) -> None:
-    name: str = execute(f"blkid -o device {drive}* | grep -vw -m 1 {drive}", override=True).strip().decode('UTF-8')
+    name: str = common.execute(f"blkid -o device {drive}* | grep -vw -m 1 {drive}", override=True).strip().decode('UTF-8')
     
     for i, partition in enumerate(layout):
         name = name[:-1] + str(i+1)
         match partition["format"]:
             case "vfat":
                 if "label" in partition:
-                    execute(f"mkfs.vfat -F 32 -n {partition['label']} {name}")
+                    common.execute(f"mkfs.vfat -F 32 -n {partition['label']} {name}")
                 else:
-                    execute(f"mkfs.vfat -F 32 {name}")
+                    common.execute(f"mkfs.vfat -F 32 {name}")
 
             case "ext4":
                 if "label" in partition:
-                    execute(f"mkfs.ext4 -L {partition['label']} {name}")
+                    common.execute(f"mkfs.ext4 -L {partition['label']} {name}")
                 else:
-                    execute(f"mkfs.ext4 {name}")
+                    common.execute(f"mkfs.ext4 {name}")
 
             case "btrfs":
                 if "label" in partition:
-                    execute(f"mkfs.btrfs -L {partition['label']} {name}")
+                    common.execute(f"mkfs.btrfs -L {partition['label']} {name}")
                 else:
-                    execute(f"mkfs.btrfs {name}")
+                    common.execute(f"mkfs.btrfs {name}")
 
                 if "subvolumes" in partition:
-                    execute(f"mkdir /mnt/temp")
-                    execute(f"mount {name} /mnt/temp")
+                    common.execute(f"mkdir /mnt/temp")
+                    common.execute(f"mount {name} /mnt/temp")
 
                     for subvolume in partition["subvolumes"]:
-                        execute(f"btrfs subvolume create /mnt/temp{subvolume}")
+                        common.execute(f"btrfs subvolume create /mnt/temp{subvolume}")
                     
-                    execute(f"umount {name}")
+                    common.execute(f"umount {name}")
             
             case "lvm":
-                execute(f"pvcreate -ff {name}")
-                execute(f"vgcreate -ff {partition['name']} {name}")
+                common.execute(f"pvcreate -ff {name}")
+                common.execute(f"vgcreate -ff {partition['name']} {name}")
 
                 for i, lv in enumerate(partition["lvs"]):
                     if lv["size"] == True:
-                        execute(f"lvcreate -l 100%FREE -n lv{i} {partition['name']}")
+                        common.execute(f"lvcreate -l 100%FREE -n lv{i} {partition['name']}")
                     elif lv["size"][-1] == "%":
-                        execute(f"lvcreate -l {lv['size']}FREE -n lv{i} {partition['name']}")
+                        common.execute(f"lvcreate -l {lv['size']}FREE -n lv{i} {partition['name']}")
                     else:
-                        execute(f"lvcreate -L {lv['size']} -n lv{i} {partition['name']}")
+                        common.execute(f"lvcreate -L {lv['size']} -n lv{i} {partition['name']}")
 
                 format_drive(f"/dev/mapper/{partition['name']}-", partition["lvs"])
         
