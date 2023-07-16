@@ -42,6 +42,11 @@ LAYOUTS = {
 }
 
 def partition_drive(drive: str, layout: list) -> bool:
+    vgs = common.execute("vgs | awk '{ print $1 }' | grep -vw VG").splitlines()
+    
+    for vg in vgs:
+        common.execute(f"vgchange -an {vg}")
+    
     command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
     drive_size: str = common.get_drive_size(drive)
     drive_size_class = drive_size[-1:]
