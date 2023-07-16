@@ -81,10 +81,13 @@ def partition_drive(drive: str, layout: list) -> bool:
 
 def format_drive(drive: str, layout: list) -> None:
     name: str = "/dev/" + common.execute(f"sudo lsblk -o NAME --list | grep -m 1 '{drive.split('/')[-1]}.'", override=True).strip().decode('UTF-8')
-    
+    name = name.replace("-", "/")
+    number = int(name[-1:])
+
     for i, partition in enumerate(layout):
-        name = name[:-1] + str(i+1)
-        name = name.replace("-", "/")
+        name = name[:-1] + str(number)
+        number += 1
+        
         match partition["format"]:
             case "vfat":
                 if "label" in partition:
