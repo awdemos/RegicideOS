@@ -1,4 +1,6 @@
-import subprocess, shutil
+import shutil
+
+from common import execute
 
 PRETEND = True
 
@@ -42,15 +44,6 @@ LAYOUTS = {
         },
     ],
 }
-
-def execute(command_string: str, override: bool = False) -> str:
-    if not PRETEND or override:
-        command = subprocess.Popen(command_string.strip(" "), stdout=subprocess.PIPE, shell=True)
-        out, _ = command.communicate()
-        return out
-        
-    print(f"[COMMAND]\n{command_string}")
-
 
 def partition_drive(drive: str, layout: list) -> bool:
     command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
