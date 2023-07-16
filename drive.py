@@ -84,7 +84,7 @@ def format_drive(drive: str, layout: list) -> None:
     
     for i, partition in enumerate(layout):
         name = name[:-1] + str(i+1)
-        name.replace("-", "/")
+        name = name.replace("-", "/")
         match partition["format"]:
             case "vfat":
                 if "label" in partition:
