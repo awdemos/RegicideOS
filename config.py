@@ -1,7 +1,5 @@
 import common
 
-from drive import LAYOUTS
-
 
 def fix_config(config_file: dict, interactive: bool, key: str, valid: str, default: str):
     if not interactive:

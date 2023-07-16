@@ -43,7 +43,7 @@ LAYOUTS = {
 
 def partition_drive(drive: str, layout: list) -> bool:
     command: str = f"cat <<EOF | sfdisk --wipe always --force {drive}\nlabel: gpt"
-    drive_size: str = common.get_drive_size()
+    drive_size: str = common.get_drive_size(drive)
     drive_size_class = drive_size[-1:]
 
     for partition in layout:
@@ -117,7 +117,3 @@ def format_drive(drive: str, layout: list) -> None:
                         common.execute(f"lvcreate -L {lv['size']} -n lv{i} {partition['name']}")
 
                 format_drive(f"/dev/mapper/{partition['name']}-", partition["lvs"])
-        
-
-# partition_drive("/dev/nvme0n1", LAYOUTS["traditional"])
-# format_drive("/dev/nvme0n1", LAYOUTS["traditional"])

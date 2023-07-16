@@ -6,6 +6,7 @@ import tomllib
 
 import common
 import config
+import drive
 
 
 def parse_args() -> str:
@@ -48,7 +49,18 @@ def main():
 
     config_parsed = config.parse_config(config_file if config_file != "" else {}, interactive=interactive)
 
-    common.info(f"Done checking config.")
+    common.info(f"Done checking config")
+
+    if interactive:
+        common.warn(f"Drive partitioning is about to start. After this process, drive {config_parsed['drive']} will be erased. Press enter to continue.")
+        input("")
+
+    common.info(f"Partitioning drive {config_parsed['drive']}")
+    drive.partition_drive(config_parsed['drive'], drive.LAYOUTS[config_parsed['filesystem']])
+
+    common.info(f"Formatting drive {config_parsed['drive']}")
+    drive.format_drive(config_parsed['drive'], drive.LAYOUTS[config_parsed['filesystem']])
+    
 
 if __name__ == '__main__':
     main()
