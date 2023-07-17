@@ -66,7 +66,7 @@ def main():
 
     common.info("Downloading root image")
     system.download_root(config_parsed["root_url"])
-    system.mount()
+    system.mount(config_parsed["filesystem"])
 
     common.info("Installing bootloader")
     system.install_bootloader()

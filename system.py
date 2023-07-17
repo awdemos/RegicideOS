@@ -8,7 +8,7 @@ def chroot(command: str) -> None:
 
 
 def post_install() -> None:
-    pass
+    chroot("chown xenia:xenia /home/xenia")
 
 
 def install_bootloader() -> None:
@@ -31,7 +31,7 @@ def mount_roots() -> None:
     common.execute("mount -L ROOTS /mnt/gentoo")
 
 
-def mount() -> None:
+def mount(layout: str) -> None:
     if not os.path.exists("/mnt/root"):
         os.mkdir("/mnt/root")
 
@@ -47,3 +47,8 @@ def mount() -> None:
     common.execute("mount --rbind /sys /mnt/root/sys")
     common.execute("mount --bind /run /mnt/root/run")
     common.execute("mount --make-slave /mnt/root/run")
+
+    if layout == "btrfs":
+        common.execute("mount -L ROOTS -o subvol=home /mnt/root/home")
+    else:
+        common.execute("mount -L HOME /mnt/root/home")
