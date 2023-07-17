@@ -1,3 +1,3 @@
-drive = "/dev/sda"
-root_url = "https://repo.xenialinux.com/releases/current/root.img"
-filesystem = "lvm"
+drive = "/dev/sda" # Drive to install to
+root_url = "https://repo.xenialinux.com/releases/current/root.img" # Root image to download
+filesystem = "btrfs" # Filesystem layout
