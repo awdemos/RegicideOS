@@ -8,6 +8,8 @@ def chroot(command: str) -> None:
 
 
 def post_install() -> None:
+    common.info("Setting up xenia home directory")
+    os.mkdir("/mnt/root/home/xenia")
     chroot("chown xenia:xenia /home/xenia")
 
 

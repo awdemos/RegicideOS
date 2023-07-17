@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import drive
 
-PRETEND = True
+PRETEND = False
 
 SIZE_CLASS = ["", "K", "M", "G", "T", "P"]
 
