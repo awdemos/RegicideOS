@@ -52,7 +52,6 @@ def partition_drive(drive: str, layout: list) -> bool:
     
     command: str = f"cat <<EOF | sfdisk -q --wipe always --force {drive}\nlabel: gpt"
     drive_size: str = common.get_drive_size(drive)
-    drive_size_class = drive_size[-1:]
 
     for partition in layout:
         size: str = ""
@@ -60,15 +59,8 @@ def partition_drive(drive: str, layout: list) -> bool:
         if partition["size"] == True:
             size = ""
         elif partition["size"][-1] == "%":
-            partition_size: float = float(drive_size[:-1]) * (float(partition["size"][:-1])/100)
-
-            if partition_size < 1:
-                partition_size *= 1000
-                drive_size_class = common.SIZE_CLASS[common.SIZE_CLASS.index(drive_size_class)-1]
-
-            partition_size = int(round(partition_size, 0))
-            partition_size = str(partition_size) + drive_size_class
-
+            partition_size: float = drive_size[:-1] * float(partition["size"][:-1])/100
+            partition_size = round(partition_size, 0)
             size = f"size={partition_size}, "
         else:
             size = f"size={partition['size']}, "

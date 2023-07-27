@@ -5,8 +5,6 @@ import drive
 
 PRETEND = False
 
-SIZE_CLASS = ["", "K", "M", "G", "T", "P"]
-
 @dataclass
 class Colours:
     """This is a class to hold the ascii escape sequences for printing colours."""
@@ -42,19 +40,15 @@ def execute(command_string: str, override: bool = False) -> str:
     print(f"[COMMAND]\n{command_string}")
 
 
-def get_drive_size(drive: str) -> str:
-    return execute(f"lsblk -o SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
+def get_drive_size(drive: str) -> int:
+    return int(execute(f"lsblk -bo SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8'))
 
 
 def check_drive_size(value: str = "") -> bool:
-    drive_size: str = get_drive_size(value)
+    drive_size: int = get_drive_size(value)
 
-    if SIZE_CLASS.index(drive_size[-1:]) > SIZE_CLASS.index("G"):
+    if drive_size > 12884901888:
         return True
-
-    if drive_size[-1:] == "G":
-        if float(drive_size[:-1]) >= 12:
-            return True
     
     return False
 
