@@ -45,11 +45,12 @@ def execute(command_string: str, override: bool = False) -> str:
 
 
 def get_drive_size(drive: str) -> int:
-    return int(
-        execute(f"lsblk -bo SIZE {drive} | grep -v -m 1 SIZE", override=True)
-        .strip()
-        .decode("UTF-8")
-    )
+    drive_size = execute(f"lsblk -bo SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
+
+    if drive_size != "":
+        return int(drive_size)
+    
+    return 0
 
 
 def check_drive_size(value: str = "") -> bool:
