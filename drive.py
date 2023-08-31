@@ -77,7 +77,7 @@ def partition_drive(drive: str, layout: list) -> bool:
 
 def format_drive(drive: str, layout: list) -> None:
     name: str = "/dev/" + common.execute(
-        f"sudo lsblk -o NAME --list | grep -m 1 '{drive.split('/')[-1]}.'",
+        f"lsblk -o NAME --list | grep -m 1 '{drive.split('/')[-1]}.'",
         override=True,
     ).strip().decode("UTF-8")
     name = name.replace("-", "/")
