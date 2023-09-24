@@ -13,15 +13,15 @@ def parse_args() -> str:
     """This is a function to handle the parsing of command line args passed to the program."""
 
     parser = argparse.ArgumentParser(
-        prog='Xenia Installer',
-        description='Program to install Xenia Linux.'
+        prog="Xenia Installer", description="Program to install Xenia Linux."
     )
     parser.add_argument(
-        '-c', '--config',
-        dest='config_file',
-        help='Run the installer automated from a toml config file.',
-        default='',
-        action="store"
+        "-c",
+        "--config",
+        dest="config_file",
+        help="Run the installer automated from a toml config file.",
+        default="",
+        action="store",
     )
 
     args = parser.parse_args()
@@ -30,8 +30,11 @@ def parse_args() -> str:
 
 
 def main():
-    if not os.path.isdir("/sys/firmware/efi"): # Checking that host system supports UEFI.
-        common.die("This installer does not currently support BIOS systems. Please (if possible) enable UEFI.")
+    # Checking that host system supports UEFI.
+    if not os.path.isdir("/sys/firmware/efi"):
+        common.die(
+            "This installer does not currently support BIOS systems. Please (if possible) enable UEFI."
+        )
 
     config_file = parse_args()
     interactive = True
@@ -45,21 +48,33 @@ def main():
         with open(config_file, "rb") as file:
             config_file = tomllib.load(file)
 
-    common.info(f"Entering interactive mode. Default values are shown wrapped in square brackets like {common.Colours.blue}[this]{common.Colours.endc}. Press enter to accept the default.\n" if interactive else "Checking config")
+    common.info(
+        f"Entering interactive mode. Default values are shown wrapped in square brackets like {common.Colours.blue}[this]{common.Colours.endc}. Press enter to accept the default.\n"
+        if interactive
+        else "Checking config"
+    )
 
-    config_parsed = config.parse_config(config_file if config_file != "" else {}, interactive=interactive)
+    config_parsed = config.parse_config(
+        config_file if config_file != "" else {}, interactive=interactive
+    )
 
     common.info(f"Done checking config")
 
     if interactive:
-        common.warn(f"Drive partitioning is about to start. After this process, drive {config_parsed['drive']} will be erased. Press enter to continue.")
+        common.warn(
+            f"Drive partitioning is about to start. After this process, drive {config_parsed['drive']} will be erased. Press enter to continue."
+        )
         input("")
 
     common.info(f"Partitioning drive {config_parsed['drive']}")
-    drive.partition_drive(config_parsed['drive'], drive.LAYOUTS[config_parsed['filesystem']])
+    drive.partition_drive(
+        config_parsed["drive"], drive.LAYOUTS[config_parsed["filesystem"]]
+    )
 
     common.info(f"Formatting drive {config_parsed['drive']}")
-    drive.format_drive(config_parsed['drive'], drive.LAYOUTS[config_parsed['filesystem']])
+    drive.format_drive(
+        config_parsed["drive"], drive.LAYOUTS[config_parsed["filesystem"]]
+    )
 
     common.info("Starting installation")
     system.mount_roots()
@@ -75,5 +90,5 @@ def main():
     system.post_install()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

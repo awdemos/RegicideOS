@@ -1,9 +1,13 @@
-import subprocess, os, sys, requests
+import subprocess
+import os
+import sys
+import requests
 from dataclasses import dataclass
 
 import drive
 
 PRETEND = False
+
 
 @dataclass
 class Colours:
@@ -41,7 +45,12 @@ def execute(command_string: str, override: bool = False) -> str:
 
 
 def get_drive_size(drive: str) -> int:
-    return int(execute(f"lsblk -bo SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8'))
+    drive_size = execute(f"lsblk -bo SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
+
+    if drive_size != "":
+        return int(drive_size)
+    
+    return 0
 
 
 def check_drive_size(value: str = "") -> bool:
@@ -49,14 +58,18 @@ def check_drive_size(value: str = "") -> bool:
 
     if drive_size > 12884901888:
         return True
-    
+
     return False
 
 
 def get_drives(value: str = "") -> list:
     """The function to get all possible drives for installation."""
 
-    all_drives_array = [f"/dev/{item}" for item in next(os.walk('/sys/block'))[1] if check_drive_size(f"/dev/{item}")]
+    all_drives_array = [
+        f"/dev/{item}"
+        for item in next(os.walk("/sys/block"))[1]
+        if check_drive_size(f"/dev/{item}")
+    ]
 
     return all_drives_array
 
@@ -71,9 +84,9 @@ def check_url(value: str) -> bool:
 
         if response.status_code == 200 and ".img" in value.split("/")[-1]:
             return True
-        
+
         warn("URL entered is not reachable, or does not end in .img. Please try again.")
     except:
         warn("URL entered is not valid - did you forget 'https://'?")
-    
+
     return False
