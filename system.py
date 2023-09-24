@@ -4,7 +4,7 @@ import urllib
 
 
 def chroot(command: str) -> None:
-    common.execute(f"chroot /mnt/root /bin/bash <<\"EOT\"\n{command}\nEOT")
+    common.execute(f'chroot /mnt/root /bin/bash <<"EOT"\n{command}\nEOT')
 
 
 def post_install() -> None:
@@ -14,8 +14,10 @@ def post_install() -> None:
 
 
 def install_bootloader() -> None:
-    chroot("""grub-install --modules=lvm --target="x86_64-efi" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
-grub-mkconfig -o /boot/efi/grub/grub.cfg""")
+    chroot(
+        """grub-install --modules=lvm --target="x86_64-efi" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+grub-mkconfig -o /boot/efi/grub/grub.cfg"""
+    )
 
 
 def download_root(url: str) -> None:

@@ -1,2 +1,7 @@
-# Xenia Linux Installer
-**NOTE: This installer is very much wip, and is not ready for use. Instead, please refer to https://gitlab.com/xenia-group/xenia-linux/-/blob/main/README.md for installation instructions.**
+# Installer
+
+The Xenia Linux TUI installer.
+
+## Config
+
+This installer can optionally take a config file in the form of a toml file: `sudo ./main.py -c config.toml`. See the example `config.toml` for details. 
