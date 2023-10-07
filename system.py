@@ -8,9 +8,7 @@ def chroot(command: str) -> None:
 
 
 def post_install() -> None:
-    common.info("Setting up xenia home directory")
-    os.mkdir("/mnt/root/home/xenia")
-    chroot("chown xenia:xenia /home/xenia")
+    common.info("No post-install tasks. Done!")
 
 
 def install_bootloader() -> None:
@@ -51,10 +49,3 @@ def mount(layout: str) -> None:
     common.execute("mount --rbind /sys /mnt/root/sys")
     common.execute("mount --bind /run /mnt/root/run")
     common.execute("mount --make-slave /mnt/root/run")
-
-    if layout == "btrfs":
-        common.execute("mount -L ROOTS -o subvol=home /mnt/root/home")
-    elif layout == "btrfs_encryption":
-        common.execute("mount /dev/mapper/xenia -o subvol=home /mnt/root/home")
-    else:
-        common.execute("mount -L HOME /mnt/root/home")
