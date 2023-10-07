@@ -39,6 +39,27 @@ LAYOUTS = {
             "type": "linux",
         },
     ],
+    "btrfs_encryption_dev": [
+        {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
+        {"size": "8G", "label": "ROOTS", "format": "ext4", "type": "linux"},
+        {
+            "size": True,
+            "label": "XENIA",
+            "format": "luks",
+            "inside": {
+                "size": True,
+                "format": "btrfs",
+                "subvolumes": [
+                    "/home",
+                    "/overlay",
+                    "/overlay/etc",
+                    "/overlay/var",
+                    "/overlay/usr",
+                ],
+            },
+            "type": "linux",
+        },
+    ],
 }
 
 
@@ -76,16 +97,33 @@ def partition_drive(drive: str, layout: list) -> bool:
 
 
 def format_drive(drive: str, layout: list) -> None:
+    # formats drives i suppose
+
+    # i think this is used for lvm to find the lv* - fuck lvm layout for making me do this.
+    # aside: why do we support LVM in the installer? it's not legacy as we changed the naming scheme (wont work on < 0.3). 
+    #        FUCK LVM, ALL MY HOMIES HATE LVM
+    #
+    # just think of this as finding the drive we are installing to, same with number as the partition.
+    # this is stupid messy and I am SURE there is a better way to do this, but oh well - it works.
+
     name: str = "/dev/" + common.execute(
         f"lsblk -o NAME --list | grep -m 1 '{drive.split('/')[-1]}.'",
         override=True,
     ).strip().decode("UTF-8")
-    name = name.replace("-", "/")
-    number = int(name[-1:])
+
+    noNum = False
+
+    if name == "/dev/": # the drive passed in doesnt have partitions/numbers at the end (luks inside partition)
+        name = drive
+        noNum = True
+    else:
+        name = name.replace("-", "/")
+        number = int(name[-1:])
 
     for i, partition in enumerate(layout):
-        name = name[:-1] + str(number)
-        number += 1
+        if not noNum:
+            name = name[:-1] + str(number) # enumerates partitions
+            number += 1
 
         match partition["format"]:
             case "vfat":
@@ -136,3 +174,14 @@ def format_drive(drive: str, layout: list) -> None:
                         )
 
                 format_drive(f"/dev/mapper/{partition['name']}-", partition["lvs"])
+
+            case "luks":
+                common.execute(f"cryptsetup -q luksFormat {name}")
+                common.execute(
+                    f"cryptsetup -q config {name} --label {partition['label']}"
+                )
+                common.execute(
+                    f"cryptsetup luksOpen /dev/disk/by-label/{partition['label']} xenia"
+                )
+
+                format_drive(f"/dev/mapper/xenia", [partition["inside"]])
