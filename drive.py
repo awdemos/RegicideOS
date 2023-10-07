@@ -39,6 +39,23 @@ LAYOUTS = {
             "type": "linux",
         },
     ],
+    "btrfs_encryption": [
+        {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
+        {"size": "8G", "label": "ROOTS", "format": "ext4", "type": "linux"},
+        {"size": True, "label": "XENIA", "format": "luks", "inside": {
+            "size": True,
+            "format": "btrfs",
+            "subvolumes": [
+                "/home",
+                "/overlay",
+                "/overlay/etc",
+                "/overlay/var",
+                "/overlay/usr",
+            ],
+            "type": "linux",
+        }, 
+        "type": "linux"},
+    ]
 }
 
 
@@ -136,3 +153,10 @@ def format_drive(drive: str, layout: list) -> None:
                         )
 
                 format_drive(f"/dev/mapper/{partition['name']}-", partition["lvs"])
+
+            case "luks":
+                common.execute(f"cryptsetup -q luksFormat {name}")
+                common.execute(f"cryptsetup -q config {name} --label {partition['label']}")
+                common.execute(f"cryptsetup luksOpen /dev/disk/by-label/{partition['label']} xenia")
+
+                format_drive(f"/dev/mapper/xenia", [partition["inside"]])
