@@ -39,7 +39,7 @@ LAYOUTS = {
             "type": "linux",
         },
     ],
-    "btrfs_encryption": [
+    "btrfs_encryption_dev": [
         {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
         {"size": "8G", "label": "ROOTS", "format": "ext4", "type": "linux"},
         {
