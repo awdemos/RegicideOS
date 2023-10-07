@@ -100,7 +100,8 @@ def format_drive(drive: str, layout: list) -> None:
     # formats drives i suppose
 
     # i think this is used for lvm to find the lv* - fuck lvm layout for making me do this.
-    # aside: why do we support LVM in the installer? it's not legacy as we changed the naming scheme. FUCK LVM, ALL MY HOMIES HATE LVM
+    # aside: why do we support LVM in the installer? it's not legacy as we changed the naming scheme (wont work on < 0.3). 
+    #        FUCK LVM, ALL MY HOMIES HATE LVM
     #
     # just think of this as finding the drive we are installing to, same with number as the partition.
     # this is stupid messy and I am SURE there is a better way to do this, but oh well - it works.
@@ -110,16 +111,19 @@ def format_drive(drive: str, layout: list) -> None:
         override=True,
     ).strip().decode("UTF-8")
 
-    if name == "/dev/": # the drive passed in doesnt have partitions/numbers at the end (luks)
+    noNum = False
+
+    if name == "/dev/": # the drive passed in doesnt have partitions/numbers at the end (luks inside partition)
         name = drive
-        number = ""
+        noNum = True
     else:
         name = name.replace("-", "/")
         number = int(name[-1:])
 
     for i, partition in enumerate(layout):
-        name = name[:-1] + str(number)
-        number += 1 if type(number) == int else "" # special case for LUKS
+        if not noNum:
+            name = name[:-1] + str(number) # enumerates partitions
+            number += 1
 
         match partition["format"]:
             case "vfat":
