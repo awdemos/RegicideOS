@@ -54,5 +54,7 @@ def mount(layout: str) -> None:
 
     if layout == "btrfs":
         common.execute("mount -L ROOTS -o subvol=home /mnt/root/home")
+    elif layout == "btrfs_encryption":
+        common.execute("mount /dev/mapper/xenia -o subvol=home /mnt/root/home")
     else:
         common.execute("mount -L HOME /mnt/root/home")
