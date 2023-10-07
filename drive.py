@@ -56,7 +56,6 @@ LAYOUTS = {
                     "/overlay/var",
                     "/overlay/usr",
                 ],
-                "type": "linux",
             },
             "type": "linux",
         },
