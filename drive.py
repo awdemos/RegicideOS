@@ -110,7 +110,7 @@ def format_drive(drive: str, layout: list) -> None:
         override=True,
     ).strip().decode("UTF-8")
 
-    if name == "": # the drive passed in doesnt have partitions/numbers at the end (luks)
+    if name == "/dev/": # the drive passed in doesnt have partitions/numbers at the end (luks)
         name = drive
         number = ""
     else:
