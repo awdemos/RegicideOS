@@ -101,6 +101,10 @@ def format_drive(drive: str, layout: list) -> None:
         f"lsblk -o NAME --list | grep -m 1 '{drive.split('/')[-1]}.'",
         override=True,
     ).strip().decode("UTF-8")
+
+    if name == "":
+        name = drive
+
     name = name.replace("-", "/")
     number = int(name[-1:])
 
