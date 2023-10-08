@@ -111,7 +111,7 @@ def partition_drive(drive: str, layout: list) -> bool:
         command += f"\n{size}type={partition['type']}"
 
     if not is_efi():
-        command += "\ntype=c"
+        command += "\ntype=21686148-6449-6E6F-744E-656564454649"
 
     command += "\nEOF"
 
