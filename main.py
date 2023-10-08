@@ -30,12 +30,6 @@ def parse_args() -> str:
 
 
 def main():
-    # Checking that host system supports UEFI.
-    if not os.path.isdir("/sys/firmware/efi"):
-        common.die(
-            "This installer does not currently support BIOS systems. Please (if possible) enable UEFI."
-        )
-
     config_file = parse_args()
     interactive = True
 
