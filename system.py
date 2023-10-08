@@ -11,11 +11,17 @@ def post_install() -> None:
     common.info("No post-install tasks. Done!")
 
 
-def install_bootloader(platform) -> None:
-    chroot(
-        f"""grub-install --modules=lvm --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+def install_bootloader(platform, device="/dev/vda") -> None:
+    if "efi" in platform:
+        chroot(
+            f"""grub-install --modules=lvm --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
 grub-mkconfig -o /boot/efi/grub/grub.cfg"""
-    )
+        )
+    else:
+        chroot(
+            f"""grub-install --modules=lvm --target="{platform}" --boot-directory="/boot/efi" {device}
+grub-mkconfig -o /boot/efi/grub/grub.cfg"""
+        )
 
 
 def download_root(url: str) -> None:

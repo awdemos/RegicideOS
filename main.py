@@ -80,7 +80,7 @@ def main():
     system.mount(config_parsed["filesystem"])
 
     common.info("Installing bootloader")
-    system.install_bootloader("x86_64-efi" if drive.is_efi() else "i386-pc")
+    system.install_bootloader("x86_64-efi" if drive.is_efi() else "i386-pc", device=config_parsed["drive"])
 
     common.info("Starting post-installation tasks")
     system.post_install()
