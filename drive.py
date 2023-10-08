@@ -98,7 +98,7 @@ def partition_drive(drive: str, layout: list) -> bool:
 
         if partition["size"] == True:
             if not is_efi():
-                size = f"size={(running_drive_size*1024)}K, " # convert to Kibibites instead of using sectors
+                size = f"size={(running_drive_size/1024)}K, " # convert to Kibibites instead of using sectors
         elif partition["size"][-1] == "%":
             partition_size: float = drive_size * (float(partition["size"][:-1]) / 100)
             partition_size = round(partition_size, 0)
