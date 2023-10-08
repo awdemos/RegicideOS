@@ -33,6 +33,8 @@ def main():
     config_file = parse_args()
     interactive = True
 
+    common.info("BIOS detected." if not drive.is_efi else "EFI detected.")
+
     if config_file != "":
         interactive = False
 
@@ -53,8 +55,6 @@ def main():
     )
 
     common.info(f"Done checking config")
-
-    common.info("BIOS detected." if not drive.is_efi else "EFI detected.")
 
     if interactive:
         common.warn(

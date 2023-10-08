@@ -64,7 +64,7 @@ LAYOUTS = {
 
 
 def is_efi() -> bool:
-    return os.path.exists("/sys/firmware/efi")
+    return os.path.isdir("/sys/firmware/efi")
 
 
 def partition_drive(drive: str, layout: list) -> bool:
