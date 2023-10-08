@@ -83,7 +83,7 @@ def partition_drive(drive: str, layout: list) -> bool:
         size: str = ""
 
         if partition["size"] == True:
-            if is_efi:
+            if is_efi():
                 size = ""
             else:
                 size = "size=-1M, "
@@ -98,7 +98,7 @@ def partition_drive(drive: str, layout: list) -> bool:
 
         command += f"\n{size}type={partition['type']}"
 
-    if not is_efi:
+    if not is_efi():
         command += "\ntype=c"
 
     command += "\nEOF"

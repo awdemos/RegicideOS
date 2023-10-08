@@ -11,9 +11,9 @@ def post_install() -> None:
     common.info("No post-install tasks. Done!")
 
 
-def install_bootloader() -> None:
+def install_bootloader(platform) -> None:
     chroot(
-        """grub-install --modules=lvm --target="x86_64-efi" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+        f"""grub-install --modules=lvm --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
 grub-mkconfig -o /boot/efi/grub/grub.cfg"""
     )
 
