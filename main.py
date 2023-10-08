@@ -30,14 +30,10 @@ def parse_args() -> str:
 
 
 def main():
-    # Checking that host system supports UEFI.
-    if not os.path.isdir("/sys/firmware/efi"):
-        common.die(
-            "This installer does not currently support BIOS systems. Please (if possible) enable UEFI."
-        )
-
     config_file = parse_args()
     interactive = True
+
+    common.info("BIOS detected." if not drive.is_efi() else "EFI detected.")
 
     if config_file != "":
         interactive = False
@@ -84,7 +80,7 @@ def main():
     system.mount(config_parsed["filesystem"])
 
     common.info("Installing bootloader")
-    system.install_bootloader()
+    system.install_bootloader("x86_64-efi" if drive.is_efi() else "i386-pc", device=config_parsed["drive"])
 
     common.info("Starting post-installation tasks")
     system.post_install()

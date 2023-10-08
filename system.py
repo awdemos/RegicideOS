@@ -8,16 +8,20 @@ def chroot(command: str) -> None:
 
 
 def post_install() -> None:
-    common.info("Setting up xenia home directory")
-    os.mkdir("/mnt/root/home/xenia")
-    chroot("chown xenia:xenia /home/xenia")
+    common.info("No post-install tasks. Done!")
 
 
-def install_bootloader() -> None:
-    chroot(
-        """grub-install --modules=lvm --target="x86_64-efi" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+def install_bootloader(platform, device="/dev/vda") -> None:
+    if "efi" in platform:
+        chroot(
+            f"""grub-install --modules=lvm --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
 grub-mkconfig -o /boot/efi/grub/grub.cfg"""
-    )
+        )
+    else:
+        chroot(
+            f"""grub-install --modules=lvm --target="{platform}" --boot-directory="/boot/efi" {device}
+grub-mkconfig -o /boot/efi/grub/grub.cfg"""
+        )
 
 
 def download_root(url: str) -> None:
@@ -51,8 +55,3 @@ def mount(layout: str) -> None:
     common.execute("mount --rbind /sys /mnt/root/sys")
     common.execute("mount --bind /run /mnt/root/run")
     common.execute("mount --make-slave /mnt/root/run")
-
-    if layout == "btrfs":
-        common.execute("mount -L ROOTS -o subvol=home /mnt/root/home")
-    else:
-        common.execute("mount -L HOME /mnt/root/home")
