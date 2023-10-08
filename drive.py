@@ -63,6 +63,10 @@ LAYOUTS = {
 }
 
 
+def is_efi() -> bool:
+    return os.path.exists("/sys/firmware/efi")
+
+
 def partition_drive(drive: str, layout: list) -> bool:
     common.execute(f"umount -ql {drive}?*")
     vgs = common.execute("vgs | awk '{ print $1 }' | grep -vw VG")
@@ -79,7 +83,10 @@ def partition_drive(drive: str, layout: list) -> bool:
         size: str = ""
 
         if partition["size"] == True:
-            size = ""
+            if is_efi:
+                size = ""
+            else:
+                size = "size=-1M, "
         elif partition["size"][-1] == "%":
             partition_size: float = (
                 drive_size[:-1] * float(partition["size"][:-1]) / 100
@@ -90,6 +97,9 @@ def partition_drive(drive: str, layout: list) -> bool:
             size = f"size={partition['size']}, "
 
         command += f"\n{size}type={partition['type']}"
+
+    if not is_efi:
+        command += "\ntype=c"
 
     command += "\nEOF"
 

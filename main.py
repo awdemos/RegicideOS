@@ -60,6 +60,8 @@ def main():
 
     common.info(f"Done checking config")
 
+    common.info("BIOS detected." if not drive.is_efi else "EFI detected.")
+
     if interactive:
         common.warn(
             f"Drive partitioning is about to start. After this process, drive {config_parsed['drive']} will be erased. Press enter to continue."
