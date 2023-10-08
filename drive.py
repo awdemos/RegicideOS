@@ -63,6 +63,19 @@ LAYOUTS = {
 }
 
 
+def human_to_bytes(size) -> int:
+    sizes = {
+        "B": 1,
+        "K": 1024,
+        "M": 1024**2,
+        "G": 1024**3,
+        "T": 1024**4,
+        "P": 1024**5,
+    }
+
+    return int(size[:-1]) * sizes[size[-1]]
+
+
 def is_efi() -> bool:
     return os.path.isdir("/sys/firmware/efi")
 
@@ -77,23 +90,22 @@ def partition_drive(drive: str, layout: list) -> bool:
             common.execute(f"vgchange -an {vg}")
 
     command: str = f"cat <<EOF | sfdisk -q --wipe always --force {drive}\nlabel: gpt"
-    drive_size: str = common.get_drive_size(drive)
+    drive_size: int = common.get_drive_size(drive)
+    running_drive_size: int = -1048576  # for BIOS systems, -1M so there is space for bios boot
 
     for partition in layout:
         size: str = ""
 
         if partition["size"] == True:
-            if is_efi():
-                size = ""
-            else:
-                size = "size=-1M, "
+            if not is_efi():
+                size = f"size={(running_drive_size*1024)}K, " # convert to Kibibites instead of using sectors
         elif partition["size"][-1] == "%":
-            partition_size: float = (
-                drive_size[:-1] * float(partition["size"][:-1]) / 100
-            )
+            partition_size: float = drive_size * (float(partition["size"][:-1]) / 100)
             partition_size = round(partition_size, 0)
+            running_drive_size += partition_size
             size = f"size={partition_size}, "
         else:
+            running_drive_size += human_to_bytes(partition["size"])
             size = f"size={partition['size']}, "
 
         command += f"\n{size}type={partition['type']}"
@@ -110,7 +122,7 @@ def format_drive(drive: str, layout: list) -> None:
     # formats drives i suppose
 
     # i think this is used for lvm to find the lv* - fuck lvm layout for making me do this.
-    # aside: why do we support LVM in the installer? it's not legacy as we changed the naming scheme (wont work on < 0.3). 
+    # aside: why do we support LVM in the installer? it's not legacy as we changed the naming scheme (wont work on < 0.3).
     #        FUCK LVM, ALL MY HOMIES HATE LVM
     #
     # just think of this as finding the drive we are installing to, same with number as the partition.
@@ -123,7 +135,9 @@ def format_drive(drive: str, layout: list) -> None:
 
     noNum = False
 
-    if name == "/dev/": # the drive passed in doesnt have partitions/numbers at the end (luks inside partition)
+    if (
+        name == "/dev/"
+    ):  # the drive passed in doesnt have partitions/numbers at the end (luks inside partition)
         name = drive
         noNum = True
     else:
@@ -132,7 +146,7 @@ def format_drive(drive: str, layout: list) -> None:
 
     for i, partition in enumerate(layout):
         if not noNum:
-            name = name[:-1] + str(number) # enumerates partitions
+            name = name[:-1] + str(number)  # enumerates partitions
             number += 1
 
         match partition["format"]:
