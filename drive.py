@@ -91,7 +91,7 @@ def partition_drive(drive: str, layout: list) -> bool:
 
     command: str = f"cat <<EOF | sfdisk -q --wipe always --force {drive}\nlabel: gpt"
     drive_size: int = common.get_drive_size(drive)
-    running_drive_size: int = -1048576  # for BIOS systems, -1M so there is space for bios boot
+    running_drive_size: int = drive_size-1048576  # for BIOS systems, -1M so there is space for bios boot
 
     for partition in layout:
         size: str = ""
@@ -102,10 +102,10 @@ def partition_drive(drive: str, layout: list) -> bool:
         elif partition["size"][-1] == "%":
             partition_size: float = drive_size * (float(partition["size"][:-1]) / 100)
             partition_size = round(partition_size, 0)
-            running_drive_size += partition_size
+            running_drive_size -= partition_size
             size = f"size={partition_size}, "
         else:
-            running_drive_size += human_to_bytes(partition["size"])
+            running_drive_size -= human_to_bytes(partition["size"])
             size = f"size={partition['size']}, "
 
         command += f"\n{size}type={partition['type']}"
