@@ -1,0 +1,3 @@
+[applications]
+recommended = ["io.gitlab.librewolf-community", "org.mozilla.Thunderbird", "org.gnome.TextEditor", "org.gnome.Rhythmbox3", "org.gnome.Calculator", "org.gnome.Totem", "org.gnome.Loupe", "org.libreoffice.LibreOffice"]
+minimal = []

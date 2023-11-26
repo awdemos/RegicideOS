@@ -2,6 +2,8 @@ import subprocess
 import os
 import sys
 import requests
+import re
+import tomllib
 from dataclasses import dataclass
 
 import drive
@@ -45,11 +47,15 @@ def execute(command_string: str, override: bool = False) -> str:
 
 
 def get_drive_size(drive: str) -> int:
-    drive_size = execute(f"lsblk -bo SIZE {drive} | grep -v -m 1 SIZE", override=True).strip().decode('UTF-8')
+    drive_size = (
+        execute(f"lsblk -bo SIZE {drive} | grep -v -m 1 SIZE", override=True)
+        .strip()
+        .decode("UTF-8")
+    )
 
     if drive_size != "":
         return int(drive_size)
-    
+
     return 0
 
 
@@ -78,6 +84,13 @@ def get_fs(value: str = "") -> list:
     return list(drive.LAYOUTS.keys())
 
 
+def get_package_sets(value: str = "") -> list:
+    with open("system.toml", "rb") as system_conf:
+        sets = list(tomllib.load(system_conf)["applications"].keys())
+
+    return sets
+
+
 def check_url(value: str) -> bool:
     try:
         response = requests.head(value)
@@ -88,5 +101,18 @@ def check_url(value: str) -> bool:
         warn("URL entered is not reachable, or does not end in .img. Please try again.")
     except:
         warn("URL entered is not valid - did you forget 'https://'?")
+
+    return False
+
+
+def check_username(value: str) -> bool:
+    if value == "":
+        return True
+
+    matches = re.match(r"[a-z_][a-z0-9_]{0,30}", value)
+
+    if matches != None:
+        if matches[0] == value:
+            return True
 
     return False

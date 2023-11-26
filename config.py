@@ -41,10 +41,21 @@ def parse_config(config_file: dict, interactive: bool = False) -> dict or str:
         "root_url": {
             "func": common.check_url,
             "mode": "check",
-            "default": "https://repo.xenialinux.com/releases/current/root.img",
+            "default": "https://repo.xenialinux.com/releases/current/root-systemd.img",
             "valid_text": "a URL that points to a root.img",
         },
         "filesystem": {"func": common.get_fs, "mode": "execute", "default": "btrfs"},
+        "username": {
+            "func": common.check_username,
+            "mode": "check",
+            "default": "",
+            "valid_text": "a username to use for the main account (leave empty for none)",
+        },
+        "applications": {
+            "func": common.get_package_sets,
+            "mode": "execute",
+            "default": "recommended",
+        },
     }
 
     for key in VALIDITY:
