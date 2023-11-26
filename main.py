@@ -77,13 +77,13 @@ def main():
 
     common.info("Downloading root image")
     system.download_root(config_parsed["root_url"])
-    system.mount(config_parsed["filesystem"])
+    system.mount()
 
     common.info("Installing bootloader")
     system.install_bootloader("x86_64-efi" if drive.is_efi() else "i386-pc", device=config_parsed["drive"])
 
     common.info("Starting post-installation tasks")
-    system.post_install()
+    system.post_install(config_parsed)
 
 
 if __name__ == "__main__":

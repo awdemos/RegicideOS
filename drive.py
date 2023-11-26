@@ -2,6 +2,8 @@ import os
 
 import common
 
+from time import sleep
+
 LAYOUTS = {
     "traditional": [
         {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
@@ -39,7 +41,7 @@ LAYOUTS = {
             "type": "linux",
         },
     ],
-    "btrfs_encryption_dev": [
+    "btrfs_encryption_dev": [ # change name in post_install as well
         {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
         {"size": "8G", "label": "ROOTS", "format": "ext4", "type": "linux"},
         {
@@ -116,6 +118,8 @@ def partition_drive(drive: str, layout: list) -> bool:
     command += "\nEOF"
 
     common.execute(command)
+    sleep(2)
+    common.execute(f"partprobe {drive}")
 
 
 def format_drive(drive: str, layout: list) -> None:
@@ -152,9 +156,9 @@ def format_drive(drive: str, layout: list) -> None:
         match partition["format"]:
             case "vfat":
                 if "label" in partition:
-                    common.execute(f"mkfs.vfat -F 32 -n {partition['label']} {name}")
+                    common.execute(f"mkfs.vfat -I -F 32 -n {partition['label']} {name}")
                 else:
-                    common.execute(f"mkfs.vfat -F 32 {name}")
+                    common.execute(f"mkfs.vfat -I -F 32 {name}")
 
             case "ext4":
                 if "label" in partition:
