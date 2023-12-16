@@ -79,10 +79,13 @@ def post_install(config: dict) -> None:
             tomllib.load(system_conf)["applications"][config["applications"]]
         )
 
-    chroot(f"touch /etc/declare && echo '{flatpaks}' > /etc/declare/flatpak")
-    chroot(
-        "systemctl enable declareflatpak && rc-update add declareflatpak"
-    )  # I don't care anymore. (i'll fix later)
+    if len(flatpaks) != 0:
+        chroot(f"touch /etc/declare && echo '{flatpaks}' > /etc/declare/flatpak")
+
+        if not os.path.exists("/mnt/root/usr/bin/rc-service"): 
+            chroot("systemctl enable declareflatpak")
+        else:
+            chroot("rc-update add declareflatpak")
 
 
 def install_bootloader(platform, device="/dev/vda") -> None:
