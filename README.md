@@ -1,7 +1,7 @@
 # Installer
 
-The Xenia Linux TUI installer.
+The installation tool for Xenia Linux.
 
-## Config
+## Usage
 
-This installer can optionally take a config file in the form of a toml file: `sudo ./main.py -c config.toml`. See the example `config.toml` for details. 
+Refer to [wiki](https://wiki.xenialinux.com/en/latest/installation/guided-install.html).
