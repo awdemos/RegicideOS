@@ -93,12 +93,12 @@ def get_package_sets(value: str = "") -> list:
 
 def check_url(value: str) -> bool:
     try:
-        response = requests.head(value)
+        response = requests.head(f"{value}Manifest.toml")
 
-        if response.status_code == 200 and ".img" in value.split("/")[-1]:
+        if response.status_code == 200:
             return True
 
-        warn("URL entered is not reachable, or does not end in .img. Please try again.")
+        warn("URL entered is not reachable, or there is no Manifest.toml available. Please try again.")
     except:
         warn("URL entered is not valid - did you forget 'https://'?")
 
