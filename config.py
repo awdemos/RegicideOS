@@ -9,7 +9,7 @@ ARCH_TABLE = {
     "x86_64": "amd64"
 }
 
-arch = ARCH_TABLE[subprocess.run(["uname", "-m"], shell=True, capture_output=True, text=True).stdout.strip()]
+arch = ARCH_TABLE[subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip()]
 
 def get_flavours(ret):
     manifest = tomllib.load(urllib.request.urlopen(f"{ret['repository']}Manifest.toml"))
