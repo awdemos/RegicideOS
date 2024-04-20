@@ -57,7 +57,7 @@ def post_install(config: dict) -> None:
 
     if config["username"] != "":
         common.info("Creating user")
-        chroot(f"useradd {config['username']}")
+        chroot(f"useradd -m {config['username']}")
 
         valid = False
         while not valid:
