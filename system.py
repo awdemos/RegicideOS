@@ -91,19 +91,19 @@ def post_install(config: dict) -> None:
 def install_bootloader(platform, device="/dev/vda") -> None:
     # Check for grub binary, see if its grub2-install or grub-install
     if not os.path.exists("/mnt/root/usr/bin/grub-install"):
-        grub_install = "grub2-install"
+        grub = "grub2"
     else:
-        grub_install = "grub-install"
+        grub = "grub"
 
     if "efi" in platform:
         chroot(
-            f"""{grub_install} --modules=lvm --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
-grub-mkconfig -o /boot/efi/grub/grub.cfg"""
+            f"""{grub}-install --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+{grub}-mkconfig -o /boot/efi/grub/grub.cfg"""
         )
     else:
         chroot(
-            f"""{grub_install}--modules=lvm --target="{platform}" --boot-directory="/boot/efi" {device}
-grub-mkconfig -o /boot/efi/grub/grub.cfg"""
+            f"""{grub}-install --target="{platform}" --boot-directory="/boot/efi" {device}
+{grub}-mkconfig -o /boot/efi/grub/grub.cfg"""
         )
 
 
