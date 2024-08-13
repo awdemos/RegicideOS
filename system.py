@@ -82,21 +82,27 @@ def post_install(config: dict) -> None:
     if len(flatpaks) != 0:
         chroot(f"touch /etc/declare && echo '{flatpaks}' > /etc/declare/flatpak")
 
-        if not os.path.exists("/mnt/root/usr/bin/rc-service"): 
+        if not os.path.exists("/mnt/root/usr/bin/rc-service"):
             chroot("systemctl enable declareflatpak")
         else:
             chroot("rc-update add declareflatpak")
 
 
 def install_bootloader(platform, device="/dev/vda") -> None:
+    # Check for grub binary, see if its grub2-install or grub-install
+    if not os.path.exists("/mnt/root/usr/bin/grub-install"):
+        grub_install = "grub2-install"
+    else:
+        grub_install = "grub-install"
+
     if "efi" in platform:
         chroot(
-            f"""grub-install --modules=lvm --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+            f"""{grub_install} --modules=lvm --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
 grub-mkconfig -o /boot/efi/grub/grub.cfg"""
         )
     else:
         chroot(
-            f"""grub-install --modules=lvm --target="{platform}" --boot-directory="/boot/efi" {device}
+            f"""{grub_install}--modules=lvm --target="{platform}" --boot-directory="/boot/efi" {device}
 grub-mkconfig -o /boot/efi/grub/grub.cfg"""
         )
 
