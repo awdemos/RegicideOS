@@ -5,26 +5,6 @@ import common
 from time import sleep
 
 LAYOUTS = {
-    "traditional": [
-        {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
-        {"size": "8G", "label": "ROOTS", "format": "ext4", "type": "linux"},
-        {"size": "30%", "label": "OVERLAY", "format": "ext4", "type": "linux"},
-        {"size": True, "label": "HOME", "format": "ext4", "type": "linux"},
-    ],
-    "lvm": [
-        {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
-        {
-            "size": True,
-            "format": "lvm",
-            "name": "vg0",
-            "lvs": [
-                {"size": "8G", "label": "ROOTS", "format": "ext4"},
-                {"size": "30%", "label": "OVERLAY", "format": "ext4"},
-                {"size": True, "label": "HOME", "format": "ext4"},
-            ],
-            "type": "lvm",
-        },
-    ],
     "btrfs": [
         {"size": "512M", "label": "EFI", "format": "vfat", "type": "uefi"},
         {
