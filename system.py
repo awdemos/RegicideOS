@@ -97,12 +97,12 @@ def install_bootloader(platform, device="/dev/vda") -> None:
 
     if "efi" in platform:
         chroot(
-            f"""{grub}-install --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+            f"""{grub}-install --force --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
 {grub}-mkconfig -o /boot/efi/grub/grub.cfg"""
         )
     else:
         chroot(
-            f"""{grub}-install --target="{platform}" --boot-directory="/boot/efi" {device}
+            f"""{grub}-install --force --target="{platform}" --boot-directory="/boot/efi" {device}
 {grub}-mkconfig -o /boot/efi/grub/grub.cfg"""
         )
 
