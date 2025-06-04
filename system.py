@@ -72,7 +72,7 @@ def post_install(config: dict) -> None:
             else:
                 valid = True
 
-        chroot(f"usermod -aG wheel {config['username']}")
+        chroot(f"usermod -aG wheel,video {config['username']}")
 
     with open("system.toml", "rb") as system_conf:
         flatpaks = " ".join(
