@@ -80,12 +80,22 @@ def post_install(config: dict) -> None:
         )
 
     if len(flatpaks) != 0:
-        chroot(f"touch /etc/declare && echo '{flatpaks}' > /etc/declare/flatpak")
-
+        # Fix: Create /etc/declare as a directory, not a file
+        chroot("mkdir -p /etc/declare")
+        chroot(f"mkdir -p /etc/declare/flatpak")
+        chroot(f"echo '{flatpaks}' > /etc/declare/flatpak/list")
+        
+        # Only try to enable the service if it actually exists
         if not os.path.exists("/mnt/root/usr/bin/rc-service"):
-            chroot("systemctl enable declareflatpak")
+            if os.path.exists("/mnt/root/usr/lib/systemd/system/declareflatpak.service"):
+                chroot("systemctl enable declareflatpak")
+            else:
+                common.warn("declareflatpak.service not found, skipping service enablement")
         else:
-            chroot("rc-update add declareflatpak")
+            if os.path.exists("/mnt/root/etc/init.d/declareflatpak"):
+                chroot("rc-update add declareflatpak")
+            else:
+                common.warn("declareflatpak init script not found, skipping service enablement")
 
 
 def install_bootloader(platform, device="/dev/vda") -> None:
@@ -94,6 +104,9 @@ def install_bootloader(platform, device="/dev/vda") -> None:
         grub = "grub2"
     else:
         grub = "grub"
+
+    # Fix: Ensure the grub directory exists before generating config
+    chroot("mkdir -p /boot/efi/grub")
 
     if "efi" in platform:
         chroot(
