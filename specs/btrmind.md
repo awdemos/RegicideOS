@@ -5,8 +5,8 @@
 ---
 
 #### **1. Overview**  
-**System Name**: Btrfs-RL Storage Monitor  
-**Utility Name**: btrmind
+**System Name**: Btrfs-RL Storage Monitor 
+**Utility Name**: btrmind 
 **Objective**: Proactively manage disk utilization in Regicide OS using Btrfs features and reinforcement learning (RL). The system optimizes storage health by rewarding declining disk usage and penalizing critical thresholds (>90% and ≥99%).  
 **Language**: Rust  
 **Target OS**: Regicide OS (Linux-based, Btrfs-focused)  
