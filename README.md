@@ -23,6 +23,10 @@ Our mission is to build a secure, performant, and intelligent operating system w
 `Regicide` in this case refers strictly to the `kings` of the current operating system marketplace: Microsoft, C, and deterministic, human centric system administration and has no further social or political ramifications
 implied.
 
+Motivational slogan:
+
+> "The commits will keep coming until every single Red Hat Enterprise customer cancels their subscription."
+
 ---
 
 ## 🎯 Core Principles
