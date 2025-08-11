@@ -109,6 +109,9 @@ implied.
 
 ### Quick Install
 
+Boot a live CD on your machine. We reccomend the Fedora live install disk. Then open a terminal
+and perform the following commands:
+
 ```bash
 # Clone the repository
 git clone https://github.com/awdemos/RegicideOS.git
