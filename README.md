@@ -20,6 +20,9 @@ RegicideOS is a forward-looking Linux distribution that has begun as a fork of X
 
 Our mission is to build a secure, performant, and intelligent operating system where every component that can be implemented in Rust will be migrated to Rust, and AI capabilities are integrated at the system level.
 
+`Regicide` in this case refers strictly to the `kings` of the current operating system marketplace: Microsoft, C, and deterministic, human centric system administration and has no further social or political ramifications
+implied.
+
 ---
 
 ## 🎯 Core Principles
@@ -30,8 +33,8 @@ Our mission is to build a secure, performant, and intelligent operating system w
 - **Performance**: Leverage Rust's zero-cost abstractions for optimal system performance
 
 ### 🤖 AI Integration
-- **Intelligent system management**: AI-driven optimization and resource allocation
-- **Predictive maintenance**: Proactive system health monitoring and issue resolution
+- **Intelligent system management**: AI-driven optimization and resource allocation utilizing Reenforcement Learning
+- **Predictive maintenance**: Proactive system health monitoring and issue resolution 
 - **User assistance**: Context-aware help and automation capabilities
 
 ### 🔮 Future-Proof Architecture
