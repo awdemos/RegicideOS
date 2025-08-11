@@ -1,5 +1,0 @@
-drive = "/dev/sda" # Drive to install to
-root_url = "https://repo.xenialinux.com/releases/current/root.img" # Root image to download
-filesystem = "btrfs" # Filesystem layout
-user = "xenia" # username to create (you will be prompted for a password if set)
-applications = "recommended" # package set to install (look in system.toml to find and edit them)
