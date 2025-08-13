@@ -40,9 +40,11 @@ Motivational slogan:
 - **Intelligent system management**: AI-driven optimization and resource allocation utilizing Reenforcement Learning
 - **Predictive maintenance**: Proactive system health monitoring and issue resolution 
 - **User assistance**: Context-aware help and automation capabilities
+- **Continual Reinforcement Learning**: Inspired by the techniques listed in [A Survey of Continual Reinforcement Learning
+](https://arxiv.org/abs/2506.21872)
 
 ### 🔮 Future-Proof Architecture
-- **Kernel transition**: Preparing for migration to the [Asterinas kernel](https://asterinas.github.io/) as it matures
+- **Kernel transition**: Readiness for migration to the [Asterinas kernel](https://asterinas.github.io/) as it matures
 - **Immutable system**: Read-only BTRFS filesystem for enhanced security and stability
 - **Container-native**: Built around containerized workflows for application isolation
 
