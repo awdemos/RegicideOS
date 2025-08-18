@@ -62,18 +62,23 @@ def get_drives(value: str = "") -> list:
 def get_fs(value: str = "") -> list:
     return list(LAYOUTS.keys())
 
-# Hardcoded package sets instead of reading from system.toml
 def get_package_sets(value: str = "") -> list:
+    """Get package sets from system.toml equivalent"""
+    # Hardcoded package sets instead of reading from system.toml
     return ["recommended", "minimal"]
 
 def get_flatpak_packages(applications_set: str) -> str:
     """Return flatpak packages for the given application set."""
     package_sets = {
         "recommended": [
-            # add whatever you want here
-            # "io.gitlab.librewolf-community", 
-            # "org.mozilla.Thunderbird", 
-            # "org.libreoffice.LibreOffice"
+            "io.gitlab.librewolf-community", 
+            "org.mozilla.Thunderbird", 
+            "org.gnome.TextEditor", 
+            "org.gnome.Rhythmbox3", 
+            "org.gnome.Calculator", 
+            "org.gnome.Totem", 
+            "org.gnome.Loupe", 
+            "org.libreoffice.LibreOffice"
         ],
         "minimal": []
     }
@@ -283,3 +288,290 @@ def fix_config(config_file: dict, interactive: bool, key: str, valid: str, defau
     return parse_config(config_file, interactive=True)
 
 def parse_config(config_file: dict, interactive: bool = False) -> dict:
+    """
+    Parses config file and presents an interactive mode if empty config is specified.
+    """
+    VALIDITY: dict = {
+        "drive": {"func": get_drives, "mode": "execute", "default": ""},
+        "repository": {
+            "func": check_url,
+            "mode": "check",
+            "default": "https://repo.xenialinux.com/releases/",
+            "valid_text": "a URL that points to a Xenia repository (remember the trailing slash)",
+        },
+        "flavour": {
+            "func": get_flavours,
+            "mode": "execute",
+            "default": "gnome-systemd",
+            "return": True,
+        },
+        "release_branch": {
+            "func": get_releases,
+            "mode": "execute",
+            "default": "main",
+            "return": True,
+        },
+        "filesystem": {"func": get_fs, "mode": "execute", "default": "btrfs"},
+        "username": {
+            "func": check_username,
+            "mode": "check",
+            "default": "",
+            "valid_text": "a username to use for the main account (leave empty for none)",
+        },
+        "applications": {
+            "func": get_package_sets,
+            "mode": "execute",
+            "default": "recommended",
+        },
+    }
+
+    for key in VALIDITY:
+        default = VALIDITY[key]["default"]
+
+        match VALIDITY[key]["mode"]:
+            case "execute":
+                if "return" in VALIDITY[key].keys():
+                    if VALIDITY[key]["return"] == True:
+                        valid = VALIDITY[key]["func"](ret=config_file) 
+                    else:
+                        valid = VALIDITY[key]["func"]()
+                else:
+                    valid = VALIDITY[key]["func"]()
+
+                if key not in config_file or config_file[key] not in valid:
+                    config_file = fix_config(
+                        config_file, interactive, key, valid, default
+                    )
+
+            case "check":
+                do_return = False
+                if "return" in VALIDITY[key].keys():
+                    do_return = VALIDITY[key]["return"]
+
+                if do_return:
+                    if key not in config_file or not VALIDITY[key]["func"](
+                        value=config_file[key], ret=config_file
+                    ):
+                        config_file = fix_config(
+                            config_file,
+                            interactive,
+                            key,
+                            VALIDITY[key]["valid_text"],
+                            default,
+                        )
+                else:
+                    if key not in config_file or not VALIDITY[key]["func"](
+                        value=config_file[key]
+                    ):
+                        config_file = fix_config(
+                            config_file,
+                            interactive,
+                            key,
+                            VALIDITY[key]["valid_text"],
+                            default,
+                        )
+
+    return config_file
+
+# ===== SYSTEM FUNCTIONS =====
+def mount_roots() -> None:
+    if not os.path.exists("/mnt/gentoo"):
+        os.mkdir("/mnt/gentoo")
+
+    info("Mounting roots on /mnt/gentoo")
+    execute("mount -L ROOTS /mnt/gentoo")
+
+def mount() -> None:
+    if not os.path.exists("/mnt/root"):
+        os.mkdir("/mnt/root")
+
+    info("Mounting root.img on /mnt/root")
+    execute("mount -o ro,loop -t squashfs /mnt/gentoo/root.img /mnt/root")
+
+    info("Mounting ESP on /mnt/root/boot/efi")
+    execute("mount -L EFI /mnt/root/boot/efi")
+
+    info("Mounting special filesystems")
+    execute("mount -t proc /proc /mnt/root/proc")
+    execute("mount --rbind /dev /mnt/root/dev")
+    execute("mount --rbind /sys /mnt/root/sys")
+    execute("mount --bind /run /mnt/root/run")
+    execute("mount --make-slave /mnt/root/run")
+
+def download_root(url: str) -> None:
+    if os.path.exists("/mnt/gentoo/root.img"):
+        os.remove("/mnt/gentoo/root.img")
+
+    urllib.request.urlretrieve(url, "/mnt/gentoo/root.img")
+
+def install_bootloader(platform, device="/dev/vda") -> None:
+    # Check for grub binary, see if its grub2-install or grub-install
+    if not os.path.exists("/mnt/root/usr/bin/grub-install"):
+        grub = "grub2"
+    else:
+        grub = "grub"
+
+    if "efi" in platform:
+        chroot(
+            f"""{grub}-install --force --target="{platform}" --efi-directory="/boot/efi" --boot-directory="/boot/efi"
+{grub}-mkconfig -o /boot/efi/{grub}/grub.cfg"""
+        )
+    else:
+        chroot(
+            f"""{grub}-install --force --target="{platform}" --boot-directory="/boot/efi" {device}
+{grub}-mkconfig -o /boot/efi/{grub}/grub.cfg"""
+        )
+
+def post_install(config: dict) -> None:
+    layout_name = config["filesystem"]
+    info("Mounting overlays & home")
+
+    etc_path = "/mnt/root/overlay/etc"
+    var_path = "/mnt/root/overlay/var"
+    usr_path = "/mnt/root/overlay/usr"
+
+    match layout_name:
+        case "btrfs":
+            execute("mount -L ROOTS -o subvol=overlay /mnt/root/overlay")
+            execute("mount -L ROOTS -o subvol=home /mnt/root/home")
+        case "btrfs_encryption_dev":
+            execute(
+                "mount /dev/mapper/xenia -o subvol=overlay /mnt/root/overlay"
+            )
+            execute("mount /dev/mapper/xenia -o subvol=home /mnt/root/home")
+        case _:
+            execute("mount -L OVERLAY /mnt/root/overlay")
+            execute("mount -L HOME /mnt/root/home")
+
+            etc_path = "/mnt/root/overlay"
+            var_path = "/mnt/root/overlay"
+            usr_path = "/mnt/root/overlay"
+
+    for path in [
+        etc_path + "/etc",
+        etc_path + "/etcw",
+        var_path + "/var",
+        var_path + "/varw",
+        usr_path + "/usr",
+        usr_path + "/usrw",
+    ]:
+        if not os.path.isdir(path):
+            os.mkdir(path)
+
+    execute(
+        f"mount -t overlay overlay -o lowerdir=/mnt/root/usr,upperdir={usr_path}/usr,workdir={usr_path}/usrw,ro /mnt/root/usr"
+    )
+    execute(
+        f"mount -t overlay overlay -o lowerdir=/mnt/root/etc,upperdir={etc_path}/etc,workdir={etc_path}/etcw,rw /mnt/root/etc"
+    )
+    execute(
+        f"mount -t overlay overlay -o lowerdir=/mnt/root/var,upperdir={var_path}/var,workdir={var_path}/varw,rw /mnt/root/var"
+    )
+
+    if config["username"] != "":
+        info("Creating user")
+        chroot(f"useradd -m {config['username']}")
+
+        valid = False
+        while not valid:
+            try:
+                subprocess.run(
+                    f"chroot /mnt/root /bin/bash -c 'passwd {config['username']}'",
+                    shell=True,
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                valid = False
+            else:
+                valid = True
+
+        chroot(f"usermod -aG wheel,video {config['username']}")
+
+    flatpaks = get_flatpak_packages(config["applications"])
+
+    if len(flatpaks) != 0:
+        chroot(f"touch /etc/declare && echo '{flatpaks}' > /etc/declare/flatpak")
+
+        if not os.path.exists("/mnt/root/usr/bin/rc-service"):
+            chroot("systemctl enable declareflatpak")
+        else:
+            chroot("rc-update add declareflatpak")
+
+# ===== MAIN FUNCTION =====
+def parse_args() -> str:
+    """This is a function to handle the parsing of command line args passed to the program."""
+    parser = argparse.ArgumentParser(
+        prog="RegicideOS Installer", description="Program to install RegicideOS."
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        dest="config_file",
+        help="Run the installer automated from a toml config file.",
+        default="",
+        action="store",
+    )
+
+    args = parser.parse_args()
+
+    return args.config_file
+
+def main():
+    config_file = parse_args()
+    interactive = True
+
+    info("BIOS detected." if not is_efi() else "EFI detected.")
+
+    if config_file != "":
+        interactive = False
+
+        if not os.path.isfile(config_file):
+            die(f"Config file {config_file} does not exist.")
+
+        with open(config_file, "rb") as file:
+            config_file = tomllib.load(file)
+
+    info(
+        f"Entering interactive mode. Default values are shown wrapped in square brackets like {Colours.blue}[this]{Colours.endc}. Press enter to accept the default.\n"
+        if interactive
+        else "Checking config"
+    )
+
+    config_parsed = parse_config(
+        config_file if config_file != "" else {}, interactive=interactive
+    )
+
+    info(f"Done checking config")
+
+    if interactive:
+        warn(
+            f"Drive partitioning is about to start. After this process, drive {config_parsed['drive']} will be erased. Press enter to continue."
+        )
+        input("")
+
+    info(f"Partitioning drive {config_parsed['drive']}")
+    partition_drive(
+        config_parsed["drive"], LAYOUTS[config_parsed["filesystem"]]
+    )
+
+    info(f"Formatting drive {config_parsed['drive']}")
+    format_drive(
+        config_parsed["drive"], LAYOUTS[config_parsed["filesystem"]]
+    )
+
+    info("Starting installation")
+    mount_roots()
+
+    info("Downloading root image")
+    root_url = get_url(config_parsed)
+    download_root(root_url)
+    mount()
+
+    info("Installing bootloader")
+    install_bootloader("x86_64-efi" if is_efi() else "i386-pc", device=config_parsed["drive"])
+
+    info("Starting post-installation tasks")
+    post_install(config_parsed)
+
+if __name__ == "__main__":
+    main()
