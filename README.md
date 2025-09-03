@@ -113,19 +113,73 @@ Motivational slogan:
 - UEFI or Legacy BIOS firmware
 - Internet connection
 
-### Quick Install
+### Installation Steps
 
-Boot a live CD on your machine. We reccomend the Fedora live install disk. Then open a terminal
-and perform the following commands:
+**Step 1: Boot Live Environment**
+
+**⚠️ IMPORTANT**: You must boot into a Linux live CD/USB environment to install RegicideOS. You will need to install the Rust toolchain.
+
+Download and create a bootable USB from: https://getfedora.org/en/workstation/download/
+
+Boot your target machine from this live environment before proceeding.
+
+**Step 2: Install RegicideOS**
+
+Once booted into the Fedora Live environment, open a terminal and run:
 
 ```bash
 # Clone the repository
 git clone https://github.com/awdemos/RegicideOS.git
 cd RegicideOS
 
-# Run the installer
-sudo ./installer.py
+# Build and run the Rust installer
+cd installer
+cargo build --release
+sudo ./target/release/installer
 ```
+
+### Advanced Installation Options
+
+The installer supports both interactive and automated installation modes:
+
+#### Interactive Mode (Default)
+```bash
+sudo ./target/release/installer
+```
+The installer will guide you through the setup process with prompts for each configuration option.
+
+#### Automated Installation
+```bash
+# Create a configuration file
+cat > regicide-config.toml << EOF
+drive = "/dev/sda"
+repository = "https://repo.xenialinux.com/releases/"
+flavour = "cosmic-desktop"
+release_branch = "main"
+filesystem = "btrfs"
+username = "your-username"
+applications = "recommended"
+EOF
+
+# Run with configuration
+sudo ./target/release/installer -c regicide-config.toml
+```
+
+#### Live Environment Requirements
+- **Live OS**: Fedora Live (recommended) or any Linux live environment
+- **Toolchain**: Rust compiler and Cargo
+- **Hardware**: 64-bit x86 processor, 12GB target disk space minimum (20GB recommended)
+- **Firmware**: UEFI or Legacy BIOS support
+- **Network**: Internet connection for downloading system image
+
+> **Note**: If using a different live environment, ensure the Rust toolchain is available:
+> ```bash
+> # On Debian/Ubuntu-based live systems
+> sudo apt update && sudo apt install rustc cargo
+> 
+> # On Arch-based live systems
+> sudo pacman -S rust
+> ```
 
 ---
 
@@ -134,8 +188,8 @@ sudo ./installer.py
 ### Phase 1: Foundation (Current)
 - [x] Core installer functionality
 - [x] BTRFS read-only system
+- [x] Rust rewrite of installer
 - [ ] Cosmic Desktop integration
-- [ ] Rust rewrite of installer
 - [ ] Rust replacements of core utilities
 - [ ] Basic local-only Rust-based AI integrations
 
@@ -151,7 +205,7 @@ sudo ./installer.py
 - [ ] Natural language system control
 
 ### Phase 4: Future Architecture
-- [ ] Asterinas kernel integration
+- [ ] Asterinas kernel integration. Probably in 2026-2027.
 - [ ] Complete Rust system stack
 - [ ] Advanced AI capabilities
 - [ ] Distributed system features
