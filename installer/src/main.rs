@@ -328,14 +328,18 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     // Wait for partitioning to complete and inform the kernel
     std::thread::sleep(std::time::Duration::from_secs(2));
     
-    // Try partprobe first, fallback to blockdev if it fails
+    // Try to inform kernel of partition changes (optional)
     if execute("which partprobe").is_ok() {
         if let Err(e) = execute(&format!("partprobe {}", drive)) {
-            eprintln!("partprobe failed: {}, trying blockdev fallback", e);
-            execute(&format!("blockdev --rereadpt {}", drive))?;
+            eprintln!("partprobe failed: {}, trying other methods", e);
+            // Try alternative approaches
+            let _ = execute(&format!("sfdisk -R {}", drive))
+                .or_else(|_| execute(&format!("hdparm -z {}", drive)))
+                .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
+            eprintln!("Note: Kernel partition refresh may have failed, relying on detection loop");
         }
     } else {
-        execute(&format!("blockdev --rereadpt {}", drive))?;
+        eprintln!("partprobe not available, relying on detection loop");
     }
     
     // Wait for kernel to recognize new partitions
@@ -869,7 +873,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     if config.applications.is_empty() || !package_sets.contains(&config.applications) {
         if interactive {
             println!("Available package sets: {:?}", package_sets);
-            config.applications = get_input("Enter applications set", "recommended");
+            config.applications = get_input("Enter applications set", "minimal");
         } else {
             die("Invalid or missing applications in config");
         }
