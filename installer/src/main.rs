@@ -123,57 +123,19 @@ async fn check_url(url: &str) -> bool {
 fn get_layouts() -> HashMap<String, Vec<Partition>> {
     let mut layouts = HashMap::new();
     
-    layouts.insert("btrfs".to_string(), vec![
-        Partition {
-            size: "512M".to_string(),
-            label: Some("EFI".to_string()),
-            format: "vfat".to_string(),
-            partition_type: "uefi".to_string(),
-            subvolumes: None,
-            inside: None,
-        },
-        Partition {
-            size: "rest".to_string(),
-            label: Some("ROOTS".to_string()),
-            format: "btrfs".to_string(),
-            partition_type: "linux".to_string(),
-            subvolumes: Some(vec![
-                "/home".to_string(),
-                "/overlay".to_string(),
-                "/overlay/etc".to_string(),
-                "/overlay/var".to_string(),
-                "/overlay/usr".to_string(),
-            ]),
-            inside: None,
-        },
-    ]);
-    
-    layouts.insert("btrfs_encryption_dev".to_string(), vec![
-        Partition {
-            size: "512M".to_string(),
-            label: Some("EFI".to_string()),
-            format: "vfat".to_string(),
-            partition_type: "uefi".to_string(),
-            subvolumes: None,
-            inside: None,
-        },
-        Partition {
-            size: "8G".to_string(),
-            label: Some("ROOTS".to_string()),
-            format: "ext4".to_string(),
-            partition_type: "linux".to_string(),
-            subvolumes: None,
-            inside: None,
-        },
-        Partition {
-            size: "rest".to_string(),
-            label: Some("XENIA".to_string()),
-            format: "luks".to_string(),
-            partition_type: "linux".to_string(),
-            subvolumes: None,
-            inside: Some(Box::new(Partition {
+    if is_efi() {
+        layouts.insert("btrfs".to_string(), vec![
+            Partition {
+                size: "512M".to_string(),
+                label: Some("EFI".to_string()),
+                format: "vfat".to_string(),
+                partition_type: "uefi".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
                 size: "rest".to_string(),
-                label: None,
+                label: Some("ROOTS".to_string()),
                 format: "btrfs".to_string(),
                 partition_type: "linux".to_string(),
                 subvolumes: Some(vec![
@@ -184,9 +146,132 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
                     "/overlay/usr".to_string(),
                 ]),
                 inside: None,
-            })),
-        },
-    ]);
+            },
+        ]);
+    } else {
+        layouts.insert("btrfs".to_string(), vec![
+            Partition {
+                size: "2M".to_string(),
+                label: None,
+                format: "".to_string(),
+                partition_type: "21686148-6449-6E6F-744E-656564454649".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
+                size: "512M".to_string(),
+                label: Some("BOOT".to_string()),
+                format: "ext4".to_string(),
+                partition_type: "linux".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
+                size: "rest".to_string(),
+                label: Some("ROOTS".to_string()),
+                format: "btrfs".to_string(),
+                partition_type: "linux".to_string(),
+                subvolumes: Some(vec![
+                    "/home".to_string(),
+                    "/overlay".to_string(),
+                    "/overlay/etc".to_string(),
+                    "/overlay/var".to_string(),
+                    "/overlay/usr".to_string(),
+                ]),
+                inside: None,
+            },
+        ]);
+    }
+    
+    if is_efi() {
+        layouts.insert("btrfs_encryption_dev".to_string(), vec![
+            Partition {
+                size: "512M".to_string(),
+                label: Some("EFI".to_string()),
+                format: "vfat".to_string(),
+                partition_type: "uefi".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
+                size: "8G".to_string(),
+                label: Some("ROOTS".to_string()),
+                format: "ext4".to_string(),
+                partition_type: "linux".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
+                size: "rest".to_string(),
+                label: Some("XENIA".to_string()),
+                format: "luks".to_string(),
+                partition_type: "linux".to_string(),
+                subvolumes: None,
+                inside: Some(Box::new(Partition {
+                    size: "rest".to_string(),
+                    label: None,
+                    format: "btrfs".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: Some(vec![
+                        "/home".to_string(),
+                        "/overlay".to_string(),
+                        "/overlay/etc".to_string(),
+                        "/overlay/var".to_string(),
+                        "/overlay/usr".to_string(),
+                    ]),
+                    inside: None,
+                })),
+            },
+        ]);
+    } else {
+        layouts.insert("btrfs_encryption_dev".to_string(), vec![
+            Partition {
+                size: "2M".to_string(),
+                label: None,
+                format: "".to_string(),
+                partition_type: "21686148-6449-6E6F-744E-656564454649".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
+                size: "512M".to_string(),
+                label: Some("BOOT".to_string()),
+                format: "ext4".to_string(),
+                partition_type: "linux".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
+                size: "8G".to_string(),
+                label: Some("ROOTS".to_string()),
+                format: "ext4".to_string(),
+                partition_type: "linux".to_string(),
+                subvolumes: None,
+                inside: None,
+            },
+            Partition {
+                size: "rest".to_string(),
+                label: Some("XENIA".to_string()),
+                format: "luks".to_string(),
+                partition_type: "linux".to_string(),
+                subvolumes: None,
+                inside: Some(Box::new(Partition {
+                    size: "rest".to_string(),
+                    label: None,
+                    format: "btrfs".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: Some(vec![
+                        "/home".to_string(),
+                        "/overlay".to_string(),
+                        "/overlay/etc".to_string(),
+                        "/overlay/var".to_string(),
+                        "/overlay/usr".to_string(),
+                    ]),
+                    inside: None,
+                })),
+            },
+        ]);
+    }
     
     layouts
 }
@@ -561,10 +646,10 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
     } else {
         chroot(&format!(
-            "{}-install --force --target=\"{}\" --boot-directory=\"/boot/efi\" {}",
+            "{}-install --force --target=\"{}\" --boot-directory=\"/boot\" {}",
             grub, platform, device
         ))?;
-        chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
+        chroot(&format!("{}-mkconfig -o /boot/{}/grub.cfg", grub, grub))?;
     }
     
     Ok(())
