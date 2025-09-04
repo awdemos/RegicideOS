@@ -129,11 +129,12 @@ Once booted into the Fedora Live environment, open a terminal and run:
 
 ```bash
 # Clone the repository
+package manager install: git curl gcc
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone https://github.com/awdemos/RegicideOS.git
-cd RegicideOS
+cd RegicideOS/installer
 
 # Build and run the Rust installer
-cd installer
 cargo build --release
 sudo ./target/release/installer
 ```

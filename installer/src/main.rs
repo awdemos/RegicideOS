@@ -45,7 +45,7 @@ fn print_banner() {
     ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝ ╚═════╝╚═╝╚═════╝ ╚══════╝ ╚═════╝ ╚══════╝
                                                                               
               🏰 A Rust-first, AI-powered Linux Distribution 🚀
-                          Cosmic Desktop • BTRFS • Secure
+                          Cosmic Fedora Desktop • BTRFS
     "#);
     println!("{}", Colours::ENDC);
 }
@@ -596,7 +596,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     }
 
     // RegicideOS only supports cosmic-desktop flavour
-    const REGICIDE_FLAVOUR: &str = "cosmic-desktop";
+    const REGICIDE_FLAVOUR: &str = "cosmic-fedora";
     if config.flavour.is_empty() {
         config.flavour = REGICIDE_FLAVOUR.to_string();
     } else if config.flavour != REGICIDE_FLAVOUR {
