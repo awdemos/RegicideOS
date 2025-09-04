@@ -327,7 +327,16 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     
     // Wait for partitioning to complete and inform the kernel
     std::thread::sleep(std::time::Duration::from_secs(2));
-    execute(&format!("partprobe {}", drive))?;
+    
+    // Try partprobe first, fallback to blockdev if it fails
+    if execute("which partprobe").is_ok() {
+        if let Err(e) = execute(&format!("partprobe {}", drive)) {
+            eprintln!("partprobe failed: {}, trying blockdev fallback", e);
+            execute(&format!("blockdev --rereadpt {}", drive))?;
+        }
+    } else {
+        execute(&format!("blockdev --rereadpt {}", drive))?;
+    }
     
     // Wait for kernel to recognize new partitions
     std::thread::sleep(std::time::Duration::from_secs(3));
