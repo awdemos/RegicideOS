@@ -364,57 +364,75 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 }
 
 fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
-    let name_output = execute(&format!("lsblk -o NAME --list | grep '{}.' | head -1", drive.split('/').last().unwrap_or("")))?;
-    let mut name = format!("/dev/{}", name_output.trim());
+    // Wait for kernel to recognize partitions - following Xenia approach
+    std::thread::sleep(std::time::Duration::from_secs(2));
     
-    let no_num = name == "/dev/";
-    if no_num {
-        name = drive.to_string();
-    } else {
-        name = name.replace("-", "/");
+    // Get partition list in a more reliable way following Xenia patterns
+    let drive_base = drive.split('/').last().unwrap_or("");
+    let mut partition_names = Vec::new();
+    
+    // Try to detect partitions using multiple approaches
+    if let Ok(partitions_output) = execute(&format!("lsblk -ln -o NAME {}", drive)) {
+        let mut detected_partitions: Vec<String> = partitions_output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter(|line| line.trim() != drive_base)  // Exclude the base drive
+            .map(|line| format!("/dev/{}", line.trim()))
+            .collect();
+        
+        if detected_partitions.len() == layout.len() {
+            partition_names = detected_partitions;
+        }
     }
     
-    let mut number = if !no_num && !name.is_empty() {
-        name.chars().last().unwrap_or('1').to_digit(10).unwrap_or(1)
-    } else {
-        1
-    };
+    // Fallback: use numbered approach if detection fails
+    if partition_names.len() != layout.len() {
+        partition_names.clear();
+        for i in 1..=layout.len() {
+            // Handle NVMe drives (e.g., /dev/nvme0n1 -> /dev/nvme0n1p1)
+            if drive.contains("nvme") || drive.chars().last().unwrap_or('a').is_ascii_digit() {
+                partition_names.push(format!("{}p{}", drive, i));
+            } else {
+                partition_names.push(format!("{}{}", drive, i));
+            }
+        }
+    }
 
-    for partition in layout {
-        let current_name = if !no_num {
-            format!("{}{}", &name[..name.len()-1], number)
-        } else {
-            name.clone()
-        };
+    for (i, partition) in layout.iter().enumerate() {
+        let current_name = &partition_names[i];
         
-        if !no_num {
-            number += 1;
+        // Verify partition exists before formatting
+        if !Path::new(current_name).exists() {
+            bail!("Partition {} does not exist", current_name);
         }
 
         match partition.format.as_str() {
             "vfat" => {
+                // Following Xenia's EFI partition formatting exactly
                 if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.vfat -I -F 32 -n {} {}", label, current_name))?;
+                    execute(&format!("mkfs.vfat -F 32 -n {} {}", label, current_name))?;
                 } else {
-                    execute(&format!("mkfs.vfat -I -F 32 {}", current_name))?;
+                    execute(&format!("mkfs.vfat -F 32 {}", current_name))?;
                 }
             }
             "ext4" => {
                 if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.ext4 -q -L {} {}", label, current_name))?;
+                    execute(&format!("mkfs.ext4 -L {} {}", label, current_name))?;
                 } else {
-                    execute(&format!("mkfs.ext4 -q {}", current_name))?;
+                    execute(&format!("mkfs.ext4 {}", current_name))?;
                 }
             }
             "btrfs" => {
+                // Following Xenia's BTRFS formatting approach
                 if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.btrfs -q -f -L {} {}", label, current_name))?;
+                    execute(&format!("mkfs.btrfs -L {} {}", label, current_name))?;
                 } else {
-                    execute(&format!("mkfs.btrfs -q -f {}", current_name))?;
+                    execute(&format!("mkfs.btrfs {}", current_name))?;
                 }
                 
+                // Create subvolumes following Xenia's exact approach
                 if let Some(ref subvolumes) = partition.subvolumes {
-                    let temp_mount = "/mnt/temp_btrfs";
+                    let temp_mount = "/mnt/gentoo";
                     fs::create_dir_all(temp_mount).ok();
                     execute(&format!("mount {} {}", current_name, temp_mount))?;
                     
@@ -423,7 +441,6 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                     
                     execute(&format!("umount {}", temp_mount))?;
-                    fs::remove_dir(temp_mount).ok();
                 }
             }
             "luks" => {
@@ -431,7 +448,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 
                 // Use ProcessCommand for interactive password input
                 let format_result = ProcessCommand::new("cryptsetup")
-                    .args(["-q", "luksFormat", &current_name])
+                    .args(["-q", "luksFormat", current_name])
                     .status();
                     
                 if !format_result.map(|s| s.success()).unwrap_or(false) {
@@ -442,7 +459,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     execute(&format!("cryptsetup -q config {} --label {}", current_name, label))?;
                     
                     let open_result = ProcessCommand::new("cryptsetup")
-                        .args(["luksOpen", &format!("/dev/disk/by-label/{}", label), "xenia"])
+                        .args(["luksOpen", &format!("/dev/disk/by-label/{}", label), "regicideos"])
                         .status();
                         
                     if !open_result.map(|s| s.success()).unwrap_or(false) {
@@ -450,14 +467,14 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                     
                     // Verify the device was created
-                    if !Path::new("/dev/mapper/xenia").exists() {
-                        bail!("LUKS device /dev/mapper/xenia was not created");
+                    if !Path::new("/dev/mapper/regicideos").exists() {
+                        bail!("LUKS device /dev/mapper/regicideos was not created");
                     }
                     
-                    "/dev/mapper/xenia".to_string()
+                    "/dev/mapper/regicideos".to_string()
                 } else {
                     let open_result = ProcessCommand::new("cryptsetup")
-                        .args(["luksOpen", &current_name, "xenia"])
+                        .args(["luksOpen", current_name, "regicideos"])
                         .status();
                         
                     if !open_result.map(|s| s.success()).unwrap_or(false) {
@@ -465,11 +482,11 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                     
                     // Verify the device was created
-                    if !Path::new("/dev/mapper/xenia").exists() {
-                        bail!("LUKS device /dev/mapper/xenia was not created");
+                    if !Path::new("/dev/mapper/regicideos").exists() {
+                        bail!("LUKS device /dev/mapper/regicideos was not created");
                     }
                     
-                    "/dev/mapper/xenia".to_string()
+                    "/dev/mapper/regicideos".to_string()
                 };
                 
                 if let Some(ref inside) = partition.inside {
@@ -593,14 +610,25 @@ fn mount() -> Result<()> {
     info("Mounting root.img on /mnt/root");
     execute("mount -o ro,loop -t squashfs /mnt/gentoo/root.img /mnt/root")?;
     
-    // Check if EFI label exists
-    if !Path::new("/dev/disk/by-label/EFI").exists() {
-        bail!("EFI partition not found. Partitioning may have failed.");
+    // Mount EFI partition - following Xenia's approach more closely
+    if is_efi() {
+        if !Path::new("/dev/disk/by-label/EFI").exists() {
+            bail!("EFI partition not found. Partitioning may have failed.");
+        }
+        
+        info("Mounting ESP on /mnt/root/boot/efi");
+        fs::create_dir_all("/mnt/root/boot/efi").ok();
+        execute("mount -L EFI /mnt/root/boot/efi")?;
+    } else {
+        // For BIOS systems, mount BOOT partition
+        if !Path::new("/dev/disk/by-label/BOOT").exists() {
+            bail!("BOOT partition not found. Partitioning may have failed.");
+        }
+        
+        info("Mounting BOOT on /mnt/root/boot");
+        fs::create_dir_all("/mnt/root/boot").ok();
+        execute("mount -L BOOT /mnt/root/boot")?;
     }
-    
-    info("Mounting ESP on /mnt/root/boot/efi");
-    fs::create_dir_all("/mnt/root/boot/efi").ok();
-    execute("mount -L EFI /mnt/root/boot/efi")?;
     
     info("Mounting special filesystems");
     execute("mount -t proc /proc /mnt/root/proc")?;
@@ -681,13 +709,13 @@ fn post_install(config: &Config) -> Result<()> {
             ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
         }
         "btrfs_encryption_dev" => {
-            if !Path::new("/dev/mapper/xenia").exists() {
-                bail!("LUKS device /dev/mapper/xenia not found");
+            if !Path::new("/dev/mapper/regicideos").exists() {
+                bail!("LUKS device /dev/mapper/regicideos not found");
             }
             fs::create_dir_all("/mnt/root/overlay").ok();
             fs::create_dir_all("/mnt/root/home").ok();
-            execute("mount /dev/mapper/xenia -o subvol=overlay /mnt/root/overlay")?;
-            execute("mount /dev/mapper/xenia -o subvol=home /mnt/root/home")?;
+            execute("mount /dev/mapper/regicideos -o subvol=overlay /mnt/root/overlay")?;
+            execute("mount /dev/mapper/regicideos -o subvol=home /mnt/root/home")?;
             ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
         }
         _ => {
@@ -891,7 +919,7 @@ fn cleanup_on_failure() {
     let _ = execute("umount /mnt/temp_btrfs 2>/dev/null");
     
     // Close LUKS devices
-    let _ = execute("cryptsetup close xenia 2>/dev/null");
+    let _ = execute("cryptsetup close regicideos 2>/dev/null");
     
     // Remove temporary directories
     let _ = fs::remove_dir_all("/mnt/temp_btrfs");
