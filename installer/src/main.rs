@@ -6,6 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command as ProcessCommand;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio;
 use toml;
 
@@ -65,7 +67,7 @@ fn execute(command: &str) -> Result<String> {
 }
 
 fn get_drive_size(drive: &str) -> Result<u64> {
-    let command = format!("lsblk -bo SIZE {} | grep -v -m 1 SIZE", drive);
+    let command = format!("lsblk -bo SIZE {} | grep -v SIZE | head -1", drive);
     let output = execute(&command)?;
     let size_str = output.trim();
     
@@ -190,9 +192,15 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
 }
 
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
-    execute(&format!("umount -ql {}?*", drive))?;
+    // Use sh -c to properly expand the glob pattern
+    execute(&format!("sh -c 'umount -ql {}?* 2>/dev/null || true'", drive))?;
     
-    let vgs_output = execute("vgs | awk '{ print $1 }' | grep -vw VG").unwrap_or_default();
+    // Check if LVM is available before trying to use it
+    let vgs_output = if Path::new("/sbin/vgs").exists() || Path::new("/usr/sbin/vgs").exists() {
+        execute("vgs | awk '{ print $1 }' | grep -vw VG").unwrap_or_default()
+    } else {
+        String::new()
+    };
     for vg in vgs_output.lines() {
         let vg = vg.trim();
         if !vg.is_empty() {
@@ -215,7 +223,7 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             let percentage: f64 = partition.size[..partition.size.len()-1].parse().unwrap_or(0.0);
             let partition_size = ((drive_size as f64) * (percentage / 100.0)) as u64;
             running_drive_size = running_drive_size.saturating_sub(partition_size);
-            format!("size={}, ", partition_size)
+            format!("size={}K, ", partition_size / 1024)
         } else {
             let partition_size = human_to_bytes(&partition.size)?;
             running_drive_size = running_drive_size.saturating_sub(partition_size);
@@ -232,14 +240,33 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     command += "\nEOF";
     execute(&command)?;
     
+    // Wait for partitioning to complete and inform the kernel
     std::thread::sleep(std::time::Duration::from_secs(2));
     execute(&format!("partprobe {}", drive))?;
+    
+    // Wait for kernel to recognize new partitions
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    
+    // Verify partitions were created
+    let mut attempts = 0;
+    loop {
+        let result = execute(&format!("lsblk {} | wc -l", drive));
+        if result.is_ok() && result.unwrap().trim().parse::<i32>().unwrap_or(0) > 1 {
+            break;
+        }
+        attempts += 1;
+        if attempts >= 10 {
+            warn("Partitions may not have been created properly");
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
     
     Ok(())
 }
 
 fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
-    let name_output = execute(&format!("lsblk -o NAME --list | grep -m 1 '{}.''", drive.split('/').last().unwrap_or("")))?;
+    let name_output = execute(&format!("lsblk -o NAME --list | grep '{}.' | head -1", drive.split('/').last().unwrap_or("")))?;
     let mut name = format!("/dev/{}", name_output.trim());
     
     let no_num = name == "/dev/";
@@ -289,25 +316,66 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 }
                 
                 if let Some(ref subvolumes) = partition.subvolumes {
-                    fs::create_dir_all("/mnt/temp").ok();
-                    execute(&format!("mount {} /mnt/temp", current_name))?;
+                    let temp_mount = "/mnt/temp_btrfs";
+                    fs::create_dir_all(temp_mount).ok();
+                    execute(&format!("mount {} {}", current_name, temp_mount))?;
                     
                     for subvolume in subvolumes {
-                        execute(&format!("btrfs subvolume create /mnt/temp{}", subvolume))?;
+                        execute(&format!("btrfs subvolume create {}{}", temp_mount, subvolume))?;
                     }
                     
-                    execute(&format!("umount {}", current_name))?;
+                    execute(&format!("umount {}", temp_mount))?;
+                    fs::remove_dir(temp_mount).ok();
                 }
             }
             "luks" => {
-                execute(&format!("cryptsetup -q luksFormat {}", current_name))?;
-                if let Some(ref label) = partition.label {
-                    execute(&format!("cryptsetup -q config {} --label {}", current_name, label))?;
-                    execute(&format!("cryptsetup luksOpen /dev/disk/by-label/{} xenia", label))?;
+                println!("Setting up LUKS encryption. You will be prompted to enter a password.");
+                
+                // Use ProcessCommand for interactive password input
+                let format_result = ProcessCommand::new("cryptsetup")
+                    .args(["-q", "luksFormat", &current_name])
+                    .status();
+                    
+                if !format_result.map(|s| s.success()).unwrap_or(false) {
+                    bail!("Failed to format LUKS partition");
                 }
                 
+                let luks_device = if let Some(ref label) = partition.label {
+                    execute(&format!("cryptsetup -q config {} --label {}", current_name, label))?;
+                    
+                    let open_result = ProcessCommand::new("cryptsetup")
+                        .args(["luksOpen", &format!("/dev/disk/by-label/{}", label), "xenia"])
+                        .status();
+                        
+                    if !open_result.map(|s| s.success()).unwrap_or(false) {
+                        bail!("Failed to open LUKS partition");
+                    }
+                    
+                    // Verify the device was created
+                    if !Path::new("/dev/mapper/xenia").exists() {
+                        bail!("LUKS device /dev/mapper/xenia was not created");
+                    }
+                    
+                    "/dev/mapper/xenia".to_string()
+                } else {
+                    let open_result = ProcessCommand::new("cryptsetup")
+                        .args(["luksOpen", &current_name, "xenia"])
+                        .status();
+                        
+                    if !open_result.map(|s| s.success()).unwrap_or(false) {
+                        bail!("Failed to open LUKS partition");
+                    }
+                    
+                    // Verify the device was created
+                    if !Path::new("/dev/mapper/xenia").exists() {
+                        bail!("LUKS device /dev/mapper/xenia was not created");
+                    }
+                    
+                    "/dev/mapper/xenia".to_string()
+                };
+                
                 if let Some(ref inside) = partition.inside {
-                    format_drive("/dev/mapper/xenia", &[*inside.clone()])?;
+                    format_drive(&luks_device, &[*inside.clone()])?;
                 }
             }
             _ => {}
@@ -408,9 +476,16 @@ async fn get_url(config: &Config) -> Result<String> {
 }
 
 fn mount_roots() -> Result<()> {
-    fs::create_dir_all("/mnt/gentoo").ok();
+    let mount_point = "/mnt/gentoo";
+    fs::create_dir_all(mount_point).ok();
+    
+    // Check if ROOTS label exists
+    if !Path::new("/dev/disk/by-label/ROOTS").exists() {
+        bail!("ROOTS partition not found. Partitioning may have failed.");
+    }
+    
     info("Mounting roots on /mnt/gentoo");
-    execute("mount -L ROOTS /mnt/gentoo")?;
+    execute(&format!("mount -L ROOTS {}", mount_point))?;
     Ok(())
 }
 
@@ -420,7 +495,13 @@ fn mount() -> Result<()> {
     info("Mounting root.img on /mnt/root");
     execute("mount -o ro,loop -t squashfs /mnt/gentoo/root.img /mnt/root")?;
     
+    // Check if EFI label exists
+    if !Path::new("/dev/disk/by-label/EFI").exists() {
+        bail!("EFI partition not found. Partitioning may have failed.");
+    }
+    
     info("Mounting ESP on /mnt/root/boot/efi");
+    fs::create_dir_all("/mnt/root/boot/efi").ok();
     execute("mount -L EFI /mnt/root/boot/efi")?;
     
     info("Mounting special filesystems");
@@ -434,15 +515,34 @@ fn mount() -> Result<()> {
 }
 
 async fn download_root(url: &str) -> Result<()> {
-    if Path::new("/mnt/gentoo/root.img").exists() {
-        fs::remove_file("/mnt/gentoo/root.img")?;
+    let root_img_path = "/mnt/gentoo/root.img";
+    
+    if Path::new(root_img_path).exists() {
+        fs::remove_file(root_img_path)?;
     }
     
     info(&format!("Downloading root image from {}", url));
     let response = reqwest::get(url).await?;
-    let bytes = response.bytes().await?;
-    fs::write("/mnt/gentoo/root.img", bytes)?;
     
+    if !response.status().is_success() {
+        bail!("Failed to download root image: HTTP {}", response.status());
+    }
+    
+    let bytes = response.bytes().await?;
+    
+    if bytes.is_empty() {
+        bail!("Downloaded root image is empty");
+    }
+    
+    fs::write(root_img_path, bytes)?;
+    
+    // Verify the file was written and has content
+    let metadata = fs::metadata(root_img_path)?;
+    if metadata.len() == 0 {
+        bail!("Root image file is empty after download");
+    }
+    
+    info(&format!("Downloaded {} bytes", metadata.len()));
     Ok(())
 }
 
@@ -455,14 +555,16 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
     if platform.contains("efi") {
         chroot(&format!(
-            "{}-install --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\"\n{}-mkconfig -o /boot/efi/{}/grub.cfg",
-            grub, platform, grub, grub
+            "{}-install --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\"",
+            grub, platform
         ))?;
+        chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
     } else {
         chroot(&format!(
-            "{}-install --force --target=\"{}\" --boot-directory=\"/boot/efi\" {}\n{}-mkconfig -o /boot/efi/{}/grub.cfg",
-            grub, platform, device, grub, grub
+            "{}-install --force --target=\"{}\" --boot-directory=\"/boot/efi\" {}",
+            grub, platform, device
         ))?;
+        chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
     }
     
     Ok(())
@@ -474,16 +576,31 @@ fn post_install(config: &Config) -> Result<()> {
 
     let (etc_path, var_path, usr_path) = match layout_name.as_str() {
         "btrfs" => {
+            fs::create_dir_all("/mnt/root/overlay").ok();
+            fs::create_dir_all("/mnt/root/home").ok();
             execute("mount -L ROOTS -o subvol=overlay /mnt/root/overlay")?;
             execute("mount -L ROOTS -o subvol=home /mnt/root/home")?;
             ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
         }
         "btrfs_encryption_dev" => {
+            if !Path::new("/dev/mapper/xenia").exists() {
+                bail!("LUKS device /dev/mapper/xenia not found");
+            }
+            fs::create_dir_all("/mnt/root/overlay").ok();
+            fs::create_dir_all("/mnt/root/home").ok();
             execute("mount /dev/mapper/xenia -o subvol=overlay /mnt/root/overlay")?;
             execute("mount /dev/mapper/xenia -o subvol=home /mnt/root/home")?;
             ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
         }
         _ => {
+            if !Path::new("/dev/disk/by-label/OVERLAY").exists() {
+                bail!("OVERLAY partition not found");
+            }
+            if !Path::new("/dev/disk/by-label/HOME").exists() {
+                bail!("HOME partition not found");
+            }
+            fs::create_dir_all("/mnt/root/overlay").ok();
+            fs::create_dir_all("/mnt/root/home").ok();
             execute("mount -L OVERLAY /mnt/root/overlay")?;
             execute("mount -L HOME /mnt/root/home")?;
             ("/mnt/root/overlay", "/mnt/root/overlay", "/mnt/root/overlay")
@@ -520,6 +637,7 @@ fn post_install(config: &Config) -> Result<()> {
         info("Creating user");
         chroot(&format!("useradd -m {}", config.username))?;
 
+        let mut attempts = 0;
         loop {
             let result = ProcessCommand::new("chroot")
                 .args(["/mnt/root", "/bin/bash", "-c", &format!("passwd {}", config.username)])
@@ -527,7 +645,14 @@ fn post_install(config: &Config) -> Result<()> {
                 
             match result {
                 Ok(status) if status.success() => break,
-                _ => continue,
+                _ => {
+                    attempts += 1;
+                    if attempts >= 3 {
+                        warn("Failed to set password after 3 attempts. User will need to set password manually.");
+                        break;
+                    }
+                    println!("Password setting failed. Please try again.");
+                }
             }
         }
 
@@ -659,8 +784,38 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     Ok(config)
 }
 
+fn cleanup_on_failure() {
+    warn("Cleaning up due to installation failure...");
+    
+    // Unmount filesystems
+    let _ = execute("umount -R /mnt/root 2>/dev/null");
+    let _ = execute("umount /mnt/gentoo 2>/dev/null");
+    let _ = execute("umount /mnt/temp_btrfs 2>/dev/null");
+    
+    // Close LUKS devices
+    let _ = execute("cryptsetup close xenia 2>/dev/null");
+    
+    // Remove temporary directories
+    let _ = fs::remove_dir_all("/mnt/temp_btrfs");
+    let _ = fs::remove_dir_all("/mnt/gentoo");
+    let _ = fs::remove_dir_all("/mnt/root");
+    
+    info("Cleanup completed");
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Set up cleanup handler
+    let cleanup_flag = Arc::new(AtomicBool::new(false));
+    let cleanup_flag_clone = cleanup_flag.clone();
+    
+    ctrlc::set_handler(move || {
+        if !cleanup_flag_clone.load(Ordering::Relaxed) {
+            cleanup_flag_clone.store(true, Ordering::Relaxed);
+            cleanup_on_failure();
+            std::process::exit(1);
+        }
+    }).expect("Error setting Ctrl-C handler");
     let matches = Command::new("RegicideOS Installer")
         .about("Program to install RegicideOS")
         .arg(
@@ -753,5 +908,8 @@ async fn main() -> Result<()> {
 
     info("Installation completed successfully!");
 
-    Ok(())
+    Ok(()).or_else(|e| {
+        cleanup_on_failure();
+        Err(e)
+    })
 }
