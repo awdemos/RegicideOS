@@ -276,6 +276,110 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
     layouts
 }
 
+fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>> {
+    info("Waiting for kernel to recognize new partitions...");
+    
+    let mut attempts = 0;
+    let max_attempts = 30; // Increased from 10
+    let drive_base = drive.split('/').last().unwrap_or("");
+    
+    loop {
+        // Try multiple detection methods
+        let mut partition_names = Vec::new();
+        
+        // Method 1: Use lsblk to detect partitions
+        if let Ok(partitions_output) = execute(&format!("lsblk -ln -o NAME {}", drive)) {
+            let detected_partitions: Vec<String> = partitions_output
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .filter(|line| line.trim() != drive_base)
+                .map(|line| format!("/dev/{}", line.trim()))
+                .collect();
+            
+            if detected_partitions.len() == expected_count {
+                // Verify all partitions actually exist as device files
+                let mut all_exist = true;
+                for part in &detected_partitions {
+                    if !Path::new(part).exists() {
+                        all_exist = false;
+                        break;
+                    }
+                }
+                if all_exist {
+                    partition_names = detected_partitions;
+                }
+            }
+        }
+        
+        // Method 2: Try numbered approach if lsblk detection fails
+        if partition_names.len() != expected_count {
+            partition_names.clear();
+            let mut all_exist = true;
+            for i in 1..=expected_count {
+                let part_name = if drive.contains("nvme") || drive.chars().last().unwrap_or('a').is_ascii_digit() {
+                    format!("{}p{}", drive, i)
+                } else {
+                    format!("{}{}", drive, i)
+                };
+                
+                if Path::new(&part_name).exists() {
+                    partition_names.push(part_name);
+                } else {
+                    all_exist = false;
+                    break;
+                }
+            }
+            
+            if !all_exist {
+                partition_names.clear();
+            }
+        }
+        
+        if partition_names.len() == expected_count {
+            info(&format!("Found {} partitions", expected_count));
+            return Ok(partition_names);
+        }
+        
+        attempts += 1;
+        if attempts >= max_attempts {
+            bail!("Partitions were not created properly after {} attempts. Expected {}, found {}", 
+                  max_attempts, expected_count, partition_names.len());
+        }
+        
+        // Exponential backoff with max delay
+        let delay = std::cmp::min(1000, 100 * attempts);
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+        
+        // Try to refresh partition table every few attempts
+        if attempts % 5 == 0 {
+            let _ = execute(&format!("partprobe {}", drive))
+                .or_else(|_| execute(&format!("sfdisk -R {}", drive)))
+                .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
+        }
+    }
+}
+
+fn set_efi_boot_flag(partition: &str) -> Result<()> {
+    // Set EFI boot flag using sgdisk if available
+    if execute("which sgdisk").is_ok() {
+        let partition_num = partition.chars().last()
+            .and_then(|c| c.to_digit(10))
+            .ok_or_else(|| anyhow::anyhow!("Could not determine partition number from {}", partition))?;
+        
+        let drive = if partition.contains("nvme") && partition.contains("p") {
+            partition.rsplit_once("p").unwrap().0
+        } else {
+            partition.trim_end_matches(char::is_numeric)
+        };
+        
+        execute(&format!("sgdisk --set-flag={}:boot:on {}", partition_num, drive))?;
+        info(&format!("Set EFI boot flag on partition {}", partition_num));
+    } else {
+        warn("sgdisk not available, skipping EFI boot flag");
+    }
+    Ok(())
+}
+
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     // Use sh -c to properly expand the glob pattern
     execute(&format!("sh -c 'umount -ql {}?* 2>/dev/null || true'", drive))?;
@@ -328,92 +432,101 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     // Wait for partitioning to complete and inform the kernel
     std::thread::sleep(std::time::Duration::from_secs(2));
     
-    // Try to inform kernel of partition changes (optional)
+    // Try to inform kernel of partition changes
     if execute("which partprobe").is_ok() {
         if let Err(e) = execute(&format!("partprobe {}", drive)) {
-            eprintln!("partprobe failed: {}, trying other methods", e);
+            warn(&format!("partprobe failed: {}, trying other methods", e));
             // Try alternative approaches
             let _ = execute(&format!("sfdisk -R {}", drive))
                 .or_else(|_| execute(&format!("hdparm -z {}", drive)))
                 .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
-            eprintln!("Note: Kernel partition refresh may have failed, relying on detection loop");
         }
     } else {
-        eprintln!("partprobe not available, relying on detection loop");
+        warn("partprobe not available, trying alternative methods");
+        let _ = execute(&format!("sfdisk -R {}", drive))
+            .or_else(|_| execute(&format!("hdparm -z {}", drive)))
+            .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
     }
     
-    // Wait for kernel to recognize new partitions
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    
-    // Verify partitions were created
-    let mut attempts = 0;
-    loop {
-        let result = execute(&format!("lsblk {} | wc -l", drive));
-        if result.is_ok() && result.unwrap().trim().parse::<i32>().unwrap_or(0) > 1 {
-            break;
-        }
-        attempts += 1;
-        if attempts >= 10 {
-            warn("Partitions may not have been created properly");
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
+    // Wait and verify partitions were created with improved detection
+    let _partition_names = wait_for_partitions(drive, layout.len())?;
     
     Ok(())
 }
 
-fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
-    // Wait for kernel to recognize partitions - following Xenia approach
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    
-    // Get partition list in a more reliable way following Xenia patterns
-    let drive_base = drive.split('/').last().unwrap_or("");
-    let mut partition_names = Vec::new();
-    
-    // Try to detect partitions using multiple approaches
-    if let Ok(partitions_output) = execute(&format!("lsblk -ln -o NAME {}", drive)) {
-        let mut detected_partitions: Vec<String> = partitions_output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .filter(|line| line.trim() != drive_base)  // Exclude the base drive
-            .map(|line| format!("/dev/{}", line.trim()))
-            .collect();
-        
-        if detected_partitions.len() == layout.len() {
-            partition_names = detected_partitions;
-        }
-    }
-    
-    // Fallback: use numbered approach if detection fails
-    if partition_names.len() != layout.len() {
-        partition_names.clear();
-        for i in 1..=layout.len() {
-            // Handle NVMe drives (e.g., /dev/nvme0n1 -> /dev/nvme0n1p1)
-            if drive.contains("nvme") || drive.chars().last().unwrap_or('a').is_ascii_digit() {
-                partition_names.push(format!("{}p{}", drive, i));
-            } else {
-                partition_names.push(format!("{}{}", drive, i));
+fn verify_filesystem(partition: &str, fs_type: &str) -> Result<()> {
+    match fs_type {
+        "vfat" => {
+            if execute("which fsck.fat").is_ok() {
+                let result = execute(&format!("fsck.fat -r {}", partition));
+                if result.is_err() {
+                    warn(&format!("FAT filesystem check failed for {}", partition));
+                } else {
+                    info(&format!("FAT filesystem verified for {}", partition));
+                }
             }
         }
+        "ext4" => {
+            if execute("which fsck.ext4").is_ok() {
+                let result = execute(&format!("fsck.ext4 -n {}", partition));
+                if result.is_err() {
+                    warn(&format!("ext4 filesystem check failed for {}", partition));
+                } else {
+                    info(&format!("ext4 filesystem verified for {}", partition));
+                }
+            }
+        }
+        "btrfs" => {
+            if execute("which btrfs").is_ok() {
+                let result = execute(&format!("btrfs check {}", partition));
+                if result.is_err() {
+                    warn(&format!("BTRFS filesystem check failed for {}", partition));
+                } else {
+                    info(&format!("BTRFS filesystem verified for {}", partition));
+                }
+            }
+        }
+        _ => {}
     }
+    Ok(())
+}
+
+fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
+    // Wait for kernel to recognize partitions and get reliable partition list
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    
+    // Use the same reliable detection as partition_drive
+    let partition_names = wait_for_partitions(drive, layout.len())?;
 
     for (i, partition) in layout.iter().enumerate() {
         let current_name = &partition_names[i];
         
-        // Verify partition exists before formatting
+        // Double-check partition exists before formatting
         if !Path::new(current_name).exists() {
             bail!("Partition {} does not exist", current_name);
         }
 
+        info(&format!("Formatting {} as {}", current_name, partition.format));
+        
         match partition.format.as_str() {
             "vfat" => {
-                // Following Xenia's EFI partition formatting exactly
+                // EFI partition formatting with validation
                 if let Some(ref label) = partition.label {
                     execute(&format!("mkfs.vfat -F 32 -n {} {}", label, current_name))?;
                 } else {
                     execute(&format!("mkfs.vfat -F 32 {}", current_name))?;
                 }
+                
+                // Set EFI boot flag if this is likely an EFI partition
+                if is_efi() && (partition.partition_type == "uefi" || 
+                               partition.label.as_ref().map_or(false, |l| l == "EFI")) {
+                    if let Err(e) = set_efi_boot_flag(current_name) {
+                        warn(&format!("Failed to set EFI boot flag: {}", e));
+                    }
+                }
+                
+                // Verify filesystem
+                verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
                 if let Some(ref label) = partition.label {
@@ -421,6 +534,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 } else {
                     execute(&format!("mkfs.ext4 {}", current_name))?;
                 }
+                verify_filesystem(current_name, "ext4")?;
             }
             "btrfs" => {
                 // Following Xenia's BTRFS formatting approach
@@ -442,6 +556,8 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     
                     execute(&format!("umount {}", temp_mount))?;
                 }
+                
+                verify_filesystem(current_name, "btrfs")?;
             }
             "luks" => {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
@@ -466,9 +582,15 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         bail!("Failed to open LUKS partition");
                     }
                     
-                    // Verify the device was created
+                    // Verify the device was created with timeout
+                    let mut attempts = 0;
+                    while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        attempts += 1;
+                    }
+                    
                     if !Path::new("/dev/mapper/regicideos").exists() {
-                        bail!("LUKS device /dev/mapper/regicideos was not created");
+                        bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
                     }
                     
                     "/dev/mapper/regicideos".to_string()
@@ -481,9 +603,15 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         bail!("Failed to open LUKS partition");
                     }
                     
-                    // Verify the device was created
+                    // Verify the device was created with timeout
+                    let mut attempts = 0;
+                    while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        attempts += 1;
+                    }
+                    
                     if !Path::new("/dev/mapper/regicideos").exists() {
-                        bail!("LUKS device /dev/mapper/regicideos was not created");
+                        bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
                     }
                     
                     "/dev/mapper/regicideos".to_string()
@@ -493,7 +621,9 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     format_drive(&luks_device, &[*inside.clone()])?;
                 }
             }
-            _ => {}
+            _ => {
+                warn(&format!("Unknown filesystem type: {}", partition.format));
+            }
         }
     }
     
@@ -590,17 +720,86 @@ async fn get_url(config: &Config) -> Result<String> {
     }
 }
 
-fn mount_roots() -> Result<()> {
-    let mount_point = "/mnt/gentoo";
-    fs::create_dir_all(mount_point).ok();
+fn find_partition_by_label(label: &str) -> Result<String> {
+    let label_path = format!("/dev/disk/by-label/{}", label);
     
-    // Check if ROOTS label exists
-    if !Path::new("/dev/disk/by-label/ROOTS").exists() {
-        bail!("ROOTS partition not found. Partitioning may have failed.");
+    // Method 1: Try by-label first
+    if Path::new(&label_path).exists() {
+        return Ok(format!("LABEL={}", label));
     }
     
-    info("Mounting roots on /mnt/gentoo");
-    execute(&format!("mount -L ROOTS {}", mount_point))?;
+    // Method 2: Try to find via blkid
+    if execute("which blkid").is_ok() {
+        if let Ok(output) = execute(&format!("blkid -L {}", label)) {
+            let device = output.trim();
+            if !device.is_empty() && Path::new(device).exists() {
+                return Ok(device.to_string());
+            }
+        }
+    }
+    
+    // Method 3: Search through all block devices
+    if let Ok(output) = execute("lsblk -fn -o NAME,LABEL") {
+        for line in output.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 && parts[1] == label {
+                let device = format!("/dev/{}", parts[0]);
+                if Path::new(&device).exists() {
+                    return Ok(device);
+                }
+            }
+        }
+    }
+    
+    bail!("Could not find partition with label: {}", label);
+}
+
+fn mount_with_retry(source: &str, target: &str, fs_type: Option<&str>, options: Option<&str>) -> Result<()> {
+    fs::create_dir_all(target).ok();
+    
+    let mut mount_cmd = format!("mount");
+    
+    if let Some(opts) = options {
+        mount_cmd.push_str(&format!(" -o {}", opts));
+    }
+    
+    if let Some(fs) = fs_type {
+        mount_cmd.push_str(&format!(" -t {}", fs));
+    }
+    
+    mount_cmd.push_str(&format!(" {} {}", source, target));
+    
+    // Try mounting with retries
+    let mut attempts = 0;
+    let max_attempts = 5;
+    
+    loop {
+        match execute(&mount_cmd) {
+            Ok(_) => {
+                info(&format!("Successfully mounted {} on {}", source, target));
+                return Ok(());
+            }
+            Err(e) => {
+                attempts += 1;
+                if attempts >= max_attempts {
+                    bail!("Failed to mount {} on {} after {} attempts: {}", source, target, max_attempts, e);
+                }
+                warn(&format!("Mount attempt {} failed, retrying in {}ms: {}", attempts, attempts * 500, e));
+                std::thread::sleep(std::time::Duration::from_millis(attempts * 500));
+            }
+        }
+    }
+}
+
+fn mount_roots() -> Result<()> {
+    let mount_point = "/mnt/gentoo";
+    
+    info("Finding ROOTS partition...");
+    let roots_device = find_partition_by_label("ROOTS")?;
+    
+    info("Mounting ROOTS partition on /mnt/gentoo");
+    mount_with_retry(&roots_device, mount_point, None, None)?;
+    
     Ok(())
 }
 
@@ -608,30 +807,25 @@ fn mount() -> Result<()> {
     fs::create_dir_all("/mnt/root").ok();
     
     info("Mounting root.img on /mnt/root");
-    execute("mount -o ro,loop -t squashfs /mnt/gentoo/root.img /mnt/root")?;
+    mount_with_retry("/mnt/gentoo/root.img", "/mnt/root", Some("squashfs"), Some("ro,loop"))?;
     
-    // Mount EFI partition - following Xenia's approach more closely
+    // Mount EFI or BOOT partition based on system type
     if is_efi() {
-        if !Path::new("/dev/disk/by-label/EFI").exists() {
-            bail!("EFI partition not found. Partitioning may have failed.");
-        }
+        info("Finding EFI partition...");
+        let efi_device = find_partition_by_label("EFI")?;
         
         info("Mounting ESP on /mnt/root/boot/efi");
-        fs::create_dir_all("/mnt/root/boot/efi").ok();
-        execute("mount -L EFI /mnt/root/boot/efi")?;
+        mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, None)?;
     } else {
-        // For BIOS systems, mount BOOT partition
-        if !Path::new("/dev/disk/by-label/BOOT").exists() {
-            bail!("BOOT partition not found. Partitioning may have failed.");
-        }
+        info("Finding BOOT partition...");
+        let boot_device = find_partition_by_label("BOOT")?;
         
         info("Mounting BOOT on /mnt/root/boot");
-        fs::create_dir_all("/mnt/root/boot").ok();
-        execute("mount -L BOOT /mnt/root/boot")?;
+        mount_with_retry(&boot_device, "/mnt/root/boot", None, None)?;
     }
     
     info("Mounting special filesystems");
-    execute("mount -t proc /proc /mnt/root/proc")?;
+    mount_with_retry("/proc", "/mnt/root/proc", Some("proc"), None)?;
     execute("mount --rbind /dev /mnt/root/dev")?;
     execute("mount --rbind /sys /mnt/root/sys")?;
     execute("mount --bind /run /mnt/root/run")?;
