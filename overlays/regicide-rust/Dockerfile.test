@@ -1,0 +1,44 @@
+# RegicideOS Overlay Test Environment
+# Based on Gentoo for realistic Portage testing
+
+FROM gentoo/stage3:latest
+
+# Install essential tools
+RUN emerge-webrsync && \
+    emerge --update --deep --newuse @world && \
+    emerge -v app-eselect/eselect-repository git && \
+    emerge -v dev-vcs/git && \
+    emerge -v virtual/rust && \
+    emerge -v sys-fs/btrfs-progs
+
+# Create test user and directories
+RUN useradd -m -G portage testuser && \
+    mkdir -p /var/db/repos && \
+    mkdir -p /var/lib/btrmind && \
+    mkdir -p /etc/btrmind
+
+# Set up Portage directories
+RUN mkdir -p /etc/portage/{package.accept_keywords,package.use,repos.conf}
+
+# Copy overlay to container
+COPY . /var/db/repos/regicide-overlay/
+
+# Set up overlay configuration
+RUN echo '[regicide-overlay]' > /etc/portage/repos.conf/regicide.conf && \
+    echo 'location = /var/db/repos/regicide-overlay' >> /etc/portage/repos.conf/regicide.conf && \
+    echo 'sync-type = git' >> /etc/portage/repos.conf/regicide.conf && \
+    echo 'sync-uri = https://github.com/awdemos/regicide-overlay.git' >> /etc/portage/repos.conf/regicide.conf && \
+    echo 'auto-sync = yes' >> /etc/portage/repos.conf/regicide.conf
+
+# Accept live ebuilds for RegicideOS tools
+RUN echo 'regicide-tools/* **' > /etc/portage/package.accept_keywords/regicide
+
+# Copy test scripts
+COPY test-in-docker.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/test-in-docker.sh
+
+# Set up working environment
+WORKDIR /home/testuser
+USER testuser
+
+CMD ["/usr/local/bin/test-in-docker.sh"]
