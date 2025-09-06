@@ -1,0 +1,46 @@
+--- a/config.toml.example
++++ b/config.toml.example
+@@ -480,6 +480,21 @@ change-id = 115898
+ # only use static libraries. If unset, the target's default linkage is used.
+ #crt-static = false
+ 
++# RegicideOS: Enhanced embedded target support
++[target.thumbv6m-none-eabi]
++cc = "arm-none-eabi-gcc"
++ar = "arm-none-eabi-ar"
++linker = "arm-none-eabi-gcc"
++
++[target.riscv32imc-unknown-none-elf]
++cc = "riscv32-unknown-elf-gcc"
++ar = "riscv32-unknown-elf-ar"
++linker = "riscv32-unknown-elf-gcc"
++
++[target.wasm32-unknown-unknown]
++# WebAssembly target for AI model deployment
++linker = "rust-lld"
++
+ # The root location of the musl installation directory. The library directory
+ # will also need to contain libunwind.a for backtrace to work.
+ #musl-root = "..."
+
+--- a/src/bootstrap/config.rs
++++ b/src/bootstrap/config.rs
+@@ -1123,6 +1123,18 @@ impl Config {
+                     target.cxx = cfg.cxx.map(PathBuf::from);
+                     target.ar = cfg.ar.map(PathBuf::from);
+                     target.ranlib = cfg.ranlib.map(PathBuf::from);
++                    
++                    // RegicideOS: Auto-configure embedded toolchains
++                    if triple.contains("thumbv") && triple.contains("none-eabi") {
++                        target.cc = Some(PathBuf::from("arm-none-eabi-gcc"));
++                        target.ar = Some(PathBuf::from("arm-none-eabi-ar"));
++                        target.linker = Some(PathBuf::from("arm-none-eabi-gcc"));
++                    }
++                    if triple.contains("riscv") && triple.contains("none-elf") {
++                        target.cc = Some(PathBuf::from("riscv32-unknown-elf-gcc"));
++                        target.ar = Some(PathBuf::from("riscv32-unknown-elf-ar"));
++                        target.linker = Some(PathBuf::from("riscv32-unknown-elf-gcc"));
++                    }
+                     target.linker = cfg.linker.map(PathBuf::from);
+                     target.crt_static = cfg.crt_static;
+                     target.musl_root = cfg.musl_root.map(PathBuf::from);

@@ -1,0 +1,18 @@
+# RegicideOS Rust Package Keywords
+# Enable testing versions for rapid development
+
+# Core Rust toolchain
+=dev-lang/rust-1.75.0-r1 ~amd64 ~arm64
+=dev-util/rust-analyzer-1.75.0 ~amd64 ~arm64
+
+# RegicideOS AI tools
+=app-misc/regicide-ai-tools-0.1.0 ~amd64 ~arm64
+
+# Embedded toolchains
+=cross-arm-none-eabi/gcc-13.2.0 ~amd64 ~arm64
+=cross-riscv32-unknown-elf/gcc-13.2.0 ~amd64 ~arm64
+
+# AI/ML frameworks (when available)
+=dev-rust/tch-0.14.0 ~amd64 ~arm64
+=dev-rust/candle-core-0.3.0 ~amd64 ~arm64
+=dev-rust/smartcore-0.3.0 ~amd64 ~arm64
