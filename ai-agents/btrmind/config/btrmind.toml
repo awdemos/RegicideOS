@@ -1,0 +1,58 @@
+# BtrMind Configuration File
+# AI-powered BTRFS storage monitoring and optimization
+
+[monitoring]
+# Path to monitor for BTRFS usage
+target_path = "/"
+
+# How often to collect metrics (seconds)
+poll_interval = 60
+
+# Window for trend analysis (hours)
+trend_analysis_window = 24
+
+[thresholds]
+# Disk usage percentage thresholds
+warning_level = 85.0    # Start monitoring more closely
+critical_level = 95.0   # Begin aggressive cleanup
+emergency_level = 98.0  # Emergency actions
+
+[actions]
+# Enable/disable specific cleanup actions
+enable_compression = true
+enable_balance = true
+enable_snapshot_cleanup = true
+enable_temp_cleanup = true
+
+# Paths to clean during temp cleanup
+temp_paths = [
+    "/tmp",
+    "/var/tmp", 
+    "/var/cache",
+    "/home/*/.cache"
+]
+
+# Number of snapshots to keep
+snapshot_keep_count = 10
+
+[learning]
+# Path to store the AI model
+model_path = "/var/lib/btrmind/model.safetensors"
+
+# How often to update the model (seconds)
+model_update_interval = 3600
+
+# Reward smoothing factor (0.0 - 1.0)
+reward_smoothing = 0.95
+
+# Exploration rate for action selection (0.0 - 1.0)
+exploration_rate = 0.1
+
+# Learning rate for neural network updates
+learning_rate = 0.001
+
+# Discount factor for future rewards
+discount_factor = 0.99
+
+# Global dry-run mode (for testing)
+dry_run = false
