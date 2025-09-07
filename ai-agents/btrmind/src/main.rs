@@ -46,6 +46,35 @@ enum Commands {
     Stats,
     /// Validate configuration
     Config,
+    /// Manage fragmentation model
+    Model {
+        #[command(subcommand)]
+        action: ModelAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModelAction {
+    /// Train a new fragmentation model
+    Train {
+        #[arg(long)]
+        data: Option<String>,
+        #[arg(long)]
+        output: Option<String>,
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long)]
+        validate: bool,
+    },
+    /// Rollback to a previous model version
+    Rollback {
+        #[arg(long)]
+        backup: String,
+    },
+    /// List available model backups
+    ListBackups,
+    /// Show model information
+    Info,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +282,150 @@ impl BtrMindAgent {
     }
 }
 
+async fn handle_model_command(action: ModelAction, agent: &BtrMindAgent) -> Result<()> {
+    use std::process::Command;
+    
+    match action {
+        ModelAction::Train { data, output, version, validate } => {
+            println!("=== Training Fragmentation Model ===");
+            
+            // Use config paths if not specified
+            let data_path = data.unwrap_or_else(|| agent.config.fragmentation_model.training_data_path.clone());
+            
+            let output_path = output.unwrap_or_else(|| agent.config.fragmentation_model.model_path.clone());
+            
+            // Check if training data exists
+            if !std::path::Path::new(&data_path).exists() {
+                eprintln!("Training data not found: {}", data_path);
+                eprintln!("Enable data collection in config and run monitoring to collect data.");
+                return Ok(());
+            }
+            
+            // Build Python command
+            let mut cmd = Command::new("python3");
+            cmd.arg("scripts/train_fragmentation_model.py")
+                .arg("--data").arg(&data_path)
+                .arg("--output").arg(&output_path);
+            
+            if let Some(ver) = version {
+                cmd.arg("--version").arg(ver);
+            }
+            
+            if validate {
+                cmd.arg("--validate");
+            }
+            
+            if agent.config.dry_run {
+                cmd.arg("--verbose");
+                println!("Dry run: would execute: {:?}", cmd);
+                return Ok(());
+            }
+            
+            // Execute training
+            let status = cmd.status()
+                .context("Failed to execute training script")?;
+            
+            if status.success() {
+                println!("✓ Model training completed successfully");
+                println!("Model saved to: {}", output_path);
+            } else {
+                eprintln!("✗ Model training failed");
+                return Err(anyhow::anyhow!("Training script failed"));
+            }
+        },
+        
+        ModelAction::Rollback { backup } => {
+            println!("=== Rolling Back Fragmentation Model ===");
+            
+            let output_path = agent.config.fragmentation_model.model_path.clone();
+            
+            // Check if backup exists
+            if !std::path::Path::new(&backup).exists() {
+                eprintln!("Backup file not found: {}", backup);
+                return Ok(());
+            }
+            
+            if agent.config.dry_run {
+                println!("Dry run: would rollback {} to {}", output_path, backup);
+                return Ok(());
+            }
+            
+            // Execute rollback
+            let mut cmd = Command::new("python3");
+            cmd.arg("scripts/train_fragmentation_model.py")
+                .arg("--rollback").arg(&backup)
+                .arg("--output").arg(&output_path);
+            
+            let status = cmd.status()
+                .context("Failed to execute rollback")?;
+            
+            if status.success() {
+                println!("✓ Rollback completed successfully");
+            } else {
+                eprintln!("✗ Rollback failed");
+                return Err(anyhow::anyhow!("Rollback failed"));
+            }
+        },
+        
+        ModelAction::ListBackups => {
+            println!("=== Available Model Backups ===");
+            
+            let output_path = agent.config.fragmentation_model.model_path.clone();
+            
+            let mut cmd = Command::new("python3");
+            cmd.arg("scripts/train_fragmentation_model.py")
+                .arg("--list-backups")
+                .arg("--output").arg(&output_path);
+            
+            let output = cmd.output()
+                .context("Failed to list backups")?;
+            
+            if output.status.success() {
+                println!("{}", String::from_utf8_lossy(&output.stdout));
+            } else {
+                eprintln!("Failed to list backups: {}", String::from_utf8_lossy(&output.stderr));
+            }
+        },
+        
+        ModelAction::Info => {
+            println!("=== Fragmentation Model Information ===");
+            
+            let model_path = agent.config.fragmentation_model.model_path.clone();
+            
+            match fragmentation_model::FragmentationModel::load(&model_path) {
+                Ok(model) => {
+                    let info = model.info();
+                    println!("Model Type: {}", info.model_type);
+                    println!("Training Date: {}", info.training_date);
+                    println!("Version: {}", model.metadata.version);
+                    println!("Number of Features: {}", info.n_features);
+                    println!("Feature Names: {}", info.feature_names.join(", "));
+                    
+                    if let Some(metrics) = &model.metrics {
+                        println!("\nPerformance Metrics:");
+                        println!("  Test RMSE: {:.3}", metrics.get("test_rmse").unwrap_or(&0.0));
+                        println!("  Test R²: {:.3}", metrics.get("test_r2").unwrap_or(&0.0));
+                        if let Some(n_samples) = metrics.get("n_samples") {
+                            println!("  Training Samples: {}", n_samples.round() as i32);
+                        }
+                    }
+                    
+                    println!("\nModel File: {}", model_path);
+                    println!("Using Model: {}", agent.config.fragmentation_model.use_model);
+                    println!("Fallback to Heuristic: {}", agent.config.fragmentation_model.fallback_to_heuristic);
+                },
+                Err(e) => {
+                    println!("Model not loaded: {}", e);
+                    println!("Model File: {}", model_path);
+                    println!("Status: Using heuristic fallback");
+                }
+            }
+        },
+    }
+    
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
@@ -302,6 +475,9 @@ async fn main() -> Result<()> {
             println!("Configuration validation:");
             println!("Config file: {:?}", cli.config);
             println!("✓ Configuration loaded successfully");
+        },
+        Some(Commands::Model { action }) => {
+            handle_model_command(action, &agent).await?;
         },
     }
     
