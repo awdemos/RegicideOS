@@ -1,1 +1,48 @@
-.claude/
+# Build artifacts
+target/
+*/target/
+**/target/
+
+# Rust
+Cargo.lock
+**/*.rs.bk
+
+# Go
+go.sum
+*.test
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary
+.tmp/
+*.tmp
+
+# Build outputs
+build/
+dist/
+output/
+*.iso
+*.img
+
+# Cache
+.cache/
+**/.cache/
+
+# AI models (can be large)  
+*.pt
+*.model
+*.safetensors
+
+# Environment
+.env
+.env.local
