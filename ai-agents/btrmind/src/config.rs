@@ -8,6 +8,7 @@ pub struct Config {
     pub thresholds: ThresholdConfig,
     pub actions: ActionConfig,
     pub learning: LearningConfig,
+    pub fragmentation_model: FragmentationModelConfig,
     #[serde(default)]
     pub dry_run: bool,
 }
@@ -64,6 +65,24 @@ pub struct LearningConfig {
     pub discount_factor: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FragmentationModelConfig {
+    #[serde(default = "default_fragmentation_model_path")]
+    pub model_path: String,
+    #[serde(default = "default_true")]
+    pub use_model: bool,
+    #[serde(default = "default_true")]
+    pub enable_data_collection: bool,
+    #[serde(default = "default_training_data_path")]
+    pub training_data_path: String,
+    #[serde(default = "default_min_samples")]
+    pub min_samples_for_training: u32,
+    #[serde(default = "default_true")]
+    pub fallback_to_heuristic: bool,
+    #[serde(default = "default_prediction_timeout")]
+    pub prediction_timeout_ms: u64,
+}
+
 // Default value functions
 fn default_target_path() -> String { "/".to_string() }
 fn default_poll_interval() -> u64 { 60 }
@@ -87,6 +106,10 @@ fn default_reward_smoothing() -> f64 { 0.95 }
 fn default_exploration_rate() -> f64 { 0.1 }
 fn default_learning_rate() -> f64 { 0.001 }
 fn default_discount_factor() -> f64 { 0.99 }
+fn default_fragmentation_model_path() -> String { "/etc/btrmind/fragmentation_model.json".to_string() }
+fn default_training_data_path() -> String { "/var/lib/btrmind/training_data.csv".to_string() }
+fn default_min_samples() -> u32 { 500 }
+fn default_prediction_timeout() -> u64 { 100 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -116,6 +139,15 @@ impl Default for Config {
                 exploration_rate: default_exploration_rate(),
                 learning_rate: default_learning_rate(),
                 discount_factor: default_discount_factor(),
+            },
+            fragmentation_model: FragmentationModelConfig {
+                model_path: default_fragmentation_model_path(),
+                use_model: true,
+                enable_data_collection: true,
+                training_data_path: default_training_data_path(),
+                min_samples_for_training: default_min_samples(),
+                fallback_to_heuristic: true,
+                prediction_timeout_ms: default_prediction_timeout(),
             },
             dry_run: false,
         }
