@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FragmentationModel {
@@ -13,6 +13,8 @@ pub struct FragmentationModel {
     pub feature_scales: Vec<f64>,
     pub feature_names: Vec<String>,
     pub metadata: ModelMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<std::collections::HashMap<String, f64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,10 +23,16 @@ pub struct ModelMetadata {
     pub training_date: String,
     pub framework: String,
     pub algorithm: String,
+    #[serde(default = "default_version")]
+    pub version: String,
+}
+
+fn default_version() -> String {
+    "1.0.0".to_string()
 }
 
 impl FragmentationModel {
-    /// Load model from JSON file
+    /// Load model from JSON file with versioning support
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         debug!("Loading fragmentation model from {:?}", path);
@@ -32,8 +40,20 @@ impl FragmentationModel {
         let start_time = Instant::now();
         
         if !path.exists() {
+            // Try to load from versioned backup
+            if let Some(backup_path) = Self::find_latest_backup(path) {
+                info!("Model not found, loading from backup: {:?}", backup_path);
+                return Self::load_from_file(&backup_path);
+            }
             anyhow::bail!("Fragmentation model file not found: {:?}", path);
         }
+        
+        Self::load_from_file(path)
+    }
+
+    /// Load model from specific file path
+    fn load_from_file(path: &Path) -> Result<Self> {
+        let start_time = Instant::now();
         
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read model file: {:?}", path))?;
@@ -53,6 +73,89 @@ impl FragmentationModel {
         info!("Features: {}", model.feature_names.len());
         
         Ok(model)
+    }
+
+    /// Create backup of current model before updating
+    pub fn create_backup<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(PathBuf::new());
+        }
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_name = format!("fragmentation_model_{}.json.bak", timestamp);
+        let backup_path = path.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(backup_name);
+
+        fs::copy(path, &backup_path)
+            .with_context(|| format!("Failed to create backup: {:?}", backup_path))?;
+
+        info!("Model backup created: {:?}", backup_path);
+
+        // Clean up old backups (keep last 5)
+        Self::cleanup_old_backups(path.parent().unwrap_or_else(|| Path::new(".")))?;
+
+        Ok(backup_path)
+    }
+
+    /// Find the latest backup model
+    fn find_latest_backup(path: &Path) -> Option<PathBuf> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        
+        if let Ok(entries) = fs::read_dir(parent) {
+            let mut backups: Vec<_> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let file_name = e.file_name();
+                    let name = file_name.to_string_lossy();
+                    name.starts_with("fragmentation_model_") && name.ends_with(".json.bak")
+                })
+                .collect();
+            
+            // Sort by modification time (newest first)
+            backups.sort_by(|a, b| {
+                let time_a = a.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                let time_b = b.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                time_b.cmp(&time_a)
+            });
+            
+            backups.pop().map(|e| e.path())
+        } else {
+            None
+        }
+    }
+
+    /// Clean up old backup files (keep last 5)
+    fn cleanup_old_backups<P: AsRef<Path>>(dir: P) -> Result<()> {
+        let dir = dir.as_ref();
+        
+        if let Ok(entries) = fs::read_dir(dir) {
+            let mut backups: Vec<_> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let file_name = e.file_name();
+                    let name = file_name.to_string_lossy();
+                    name.starts_with("fragmentation_model_") && name.ends_with(".json.bak")
+                })
+                .collect();
+            
+            // Sort by modification time (oldest first)
+            backups.sort_by(|a, b| {
+                let time_a = a.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                let time_b = b.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                time_a.cmp(&time_b)
+            });
+            
+            // Remove all but the newest 5
+            for backup in backups.iter().take(backups.len().saturating_sub(5)) {
+                if let Err(e) = fs::remove_file(&backup.path()) {
+                    warn!("Failed to remove old backup {:?}: {}", backup.path(), e);
+                }
+            }
+        }
+        
+        Ok(())
     }
     
     /// Predict fragmentation percentage using the trained model
@@ -224,7 +327,9 @@ mod tests {
                 training_date: "2024-01-01T00:00:00Z".to_string(),
                 framework: "scikit-learn".to_string(),
                 algorithm: "MLE with Gaussian noise".to_string(),
+                version: "1.0.0".to_string(),
             },
+            metrics: None,
         }
     }
     

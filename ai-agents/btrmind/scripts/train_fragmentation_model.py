@@ -9,9 +9,10 @@ Maximum Likelihood Estimation (MLE) with Gaussian noise assumption.
 import json
 import argparse
 import logging
+import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
 
 import pandas as pd
 import numpy as np
@@ -130,17 +131,68 @@ def train_model(X: np.ndarray, y: np.ndarray) -> Tuple[LinearRegression, Standar
     return model, scaler, metrics
 
 
+def create_backup(output_path: str) -> Optional[str]:
+    """Create a backup of the existing model file."""
+    output_file = Path(output_path)
+    if not output_file.exists():
+        return None
+    
+    # Create backup filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = output_file.parent / f"fragmentation_model_{timestamp}.json.bak"
+    
+    try:
+        shutil.copy2(output_path, backup_path)
+        logger.info(f"Created backup: {backup_path}")
+        return str(backup_path)
+    except Exception as e:
+        logger.warning(f"Failed to create backup: {e}")
+        return None
+
+
+def cleanup_old_backups(output_path: str, keep_count: int = 5) -> None:
+    """Clean up old backup files, keeping the most recent ones."""
+    output_file = Path(output_path)
+    backup_dir = output_file.parent
+    
+    # Find all backup files
+    backup_files = []
+    for file in backup_dir.glob("fragmentation_model_*.json.bak"):
+        backup_files.append((file.stat().st_mtime, file))
+    
+    # Sort by modification time (oldest first)
+    backup_files.sort()
+    
+    # Remove old backups, keeping the most recent ones
+    files_to_remove = len(backup_files) - keep_count
+    for i in range(files_to_remove):
+        if i < len(backup_files):
+            try:
+                backup_files[i][1].unlink()
+                logger.info(f"Removed old backup: {backup_files[i][1]}")
+            except Exception as e:
+                logger.warning(f"Failed to remove old backup {backup_files[i][1]}: {e}")
+
+
 def save_model(model: LinearRegression, scaler: StandardScaler, 
-               metrics: Dict[str, float], output_path: str) -> None:
-    """Save model parameters to JSON file."""
+               metrics: Dict[str, float], output_path: str, 
+               version: Optional[str] = None) -> None:
+    """Save model parameters to JSON file with versioning support."""
     logger.info(f"Saving model to {output_path}")
+    
+    # Create backup if existing model exists
+    backup_path = create_backup(output_path)
+    
+    # Clean up old backups
+    cleanup_old_backups(output_path)
     
     model_params = {
         'metadata': {
             'model_type': 'linear_regression',
             'training_date': datetime.now().isoformat(),
             'framework': 'scikit-learn',
-            'algorithm': 'MLE with Gaussian noise'
+            'algorithm': 'MLE with Gaussian noise',
+            'version': version or '1.0.0'
         },
         'coefficients': model.coef_.tolist(),
         'intercept': float(model.intercept_),
@@ -158,17 +210,36 @@ def save_model(model: LinearRegression, scaler: StandardScaler,
         'preprocessing': {
             'log_transform': ['file_count', 'avg_file_size_mb', 'write_frequency'],
             'standardization': True
-        }
+        },
+        'backup_info': {
+            'backup_created': backup_path is not None,
+            'backup_path': backup_path
+        } if backup_path else None
     }
     
     # Create output directory if it doesn't exist
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     
-    with open(output_path, 'w') as f:
-        json.dump(model_params, f, indent=2)
-    
-    logger.info("Model saved successfully")
+    # Write to temporary file first, then rename for atomic operation
+    temp_path = output_path + '.tmp'
+    try:
+        with open(temp_path, 'w') as f:
+            json.dump(model_params, f, indent=2)
+        
+        # Atomic rename
+        Path(temp_path).replace(output_path)
+        logger.info("Model saved successfully")
+        
+        if backup_path:
+            logger.info(f"Previous model backed up to: {backup_path}")
+            
+    except Exception as e:
+        # Clean up temporary file if it exists
+        if Path(temp_path).exists():
+            Path(temp_path).unlink()
+        logger.error(f"Failed to save model: {e}")
+        raise
 
 
 def validate_model(model_params: Dict[str, Any], X: np.ndarray, y: np.ndarray) -> None:
@@ -211,6 +282,53 @@ def validate_model(model_params: Dict[str, Any], X: np.ndarray, y: np.ndarray) -
     logger.info("Model validation completed")
 
 
+def rollback_model(output_path: str, backup_path: str) -> bool:
+    """Rollback to a previous model version."""
+    try:
+        backup_file = Path(backup_path)
+        if not backup_file.exists():
+            logger.error(f"Backup file not found: {backup_path}")
+            return False
+        
+        # Create backup of current model before rollback
+        current_backup = create_backup(output_path)
+        
+        # Copy backup to current location
+        shutil.copy2(backup_path, output_path)
+        logger.info(f"Successfully rolled back to: {backup_path}")
+        
+        if current_backup:
+            logger.info(f"Current model backed up to: {current_backup}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Rollback failed: {e}")
+        return False
+
+
+def list_backups(output_path: str) -> list:
+    """List available backup files."""
+    output_file = Path(output_path)
+    backup_dir = output_file.parent
+    
+    backups = []
+    for file in backup_dir.glob("fragmentation_model_*.json.bak"):
+        try:
+            stat = file.stat()
+            backups.append({
+                'path': str(file),
+                'size': stat.st_size,
+                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+        except Exception as e:
+            logger.warning(f"Could not read backup file {file}: {e}")
+    
+    # Sort by modification time (newest first)
+    backups.sort(key=lambda x: x['modified'], reverse=True)
+    return backups
+
+
 def main():
     """Main training pipeline."""
     parser = argparse.ArgumentParser(description='Train BtrMind fragmentation model')
@@ -218,11 +336,36 @@ def main():
     parser.add_argument('--output', required=True, help='Path to output model JSON file')
     parser.add_argument('--validate', action='store_true', help='Run validation after training')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--version', help='Model version string (e.g., 1.0.0)')
+    parser.add_argument('--rollback', help='Rollback to specific backup file')
+    parser.add_argument('--list-backups', action='store_true', help='List available backup files')
     
     args = parser.parse_args()
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Handle backup listing
+    if args.list_backups:
+        backups = list_backups(args.output)
+        if backups:
+            print("Available backup files:")
+            for i, backup in enumerate(backups, 1):
+                print(f"  {i}. {backup['path']}")
+                print(f"     Size: {backup['size']} bytes")
+                print(f"     Modified: {backup['modified']}")
+        else:
+            print("No backup files found")
+        return 0
+    
+    # Handle rollback
+    if args.rollback:
+        if rollback_model(args.output, args.rollback):
+            logger.info("Rollback completed successfully")
+            return 0
+        else:
+            logger.error("Rollback failed")
+            return 1
     
     try:
         # Load and prepare data
@@ -254,7 +397,7 @@ def main():
             'metrics': metrics
         }
         
-        save_model(model, scaler, metrics, args.output)
+        save_model(model, scaler, metrics, args.output, args.version)
         
         # Run validation if requested
         if args.validate:

@@ -84,7 +84,7 @@ impl ReinforcementLearner {
     
     pub fn select_best_action(&self, state: &State) -> Action {
         let disk_usage = state.features[0]; // 0-1 normalized
-        let free_space = state.features[1];  // 0-1 normalized (10GB = 1.0)
+        let _free_space = state.features[1];  // 0-1 normalized (10GB = 1.0)
         
         // Get candidate actions based on current state
         let candidate_actions = if disk_usage >= 0.98 { 
