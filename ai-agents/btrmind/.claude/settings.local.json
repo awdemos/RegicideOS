@@ -7,7 +7,8 @@
       "Bash(cargo test:*)",
       "Bash(cargo run:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(./demo_mle_fragmentation.sh:*)"
     ],
     "deny": [],
     "ask": []

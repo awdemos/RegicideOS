@@ -59,16 +59,37 @@ BtrMind continuously monitors:
 - **Disk Usage**: Overall filesystem utilization percentage
 - **Free Space Trends**: Rate of space consumption over time  
 - **Metadata Usage**: BTRFS-specific metadata overhead
-- **Fragmentation**: Filesystem fragmentation levels
+- **Fragmentation**: Filesystem fragmentation levels (MLE-based estimation)
 
-### 2. AI Decision Making
+### 2. MLE-Based Fragmentation Estimation
+BtrMind uses a sophisticated Maximum Likelihood Estimation (MLE) approach for fragmentation analysis:
+
+**Enhanced Metrics Collection:**
+- File count and size distribution
+- Write frequency patterns
+- Metadata usage analysis
+- Ground truth fragmentation proxies
+
+**Machine Learning Pipeline:**
+- Linear regression model with MLE optimization
+- Feature standardization and log transforms
+- Cross-validation and performance metrics
+- JSON model serialization for Rust integration
+
+**Features:**
+- 6-dimensional feature vector with preprocessing
+- Prediction clamping to [0, 100] range
+- Fallback to heuristic estimation if model unavailable
+- Sub-millisecond prediction performance
+
+### 3. AI Decision Making
 The reinforcement learning agent:
 - **Observes** current system state (4-dimensional state space)
 - **Selects** actions based on learned Q-values with ε-greedy exploration
 - **Executes** storage optimization actions
 - **Learns** from the results using reward feedback
 
-### 3. Actions
+### 4. Actions
 Available optimization actions:
 - **Delete Temp Files**: Clean `/tmp`, `/var/tmp`, cache directories
 - **Compress Files**: BTRFS compression and defragmentation
@@ -76,7 +97,7 @@ Available optimization actions:
 - **Cleanup Snapshots**: Remove old BTRFS snapshots
 - **No Operation**: Monitoring only
 
-### 4. Reward Function
+### 5. Reward Function
 The AI learns through this reward system:
 ```rust
 reward = space_freed * 10.0 - usage_penalties + efficiency_bonuses
@@ -109,6 +130,15 @@ temp_paths = ["/tmp", "/var/cache"]
 exploration_rate = 0.1      # AI exploration vs exploitation
 learning_rate = 0.001       # Neural network learning rate
 model_path = "/var/lib/btrmind/model.safetensors"
+
+[fragmentation_model]
+model_path = "/etc/btrmind/fragmentation_model.json"
+use_model = true
+enable_data_collection = false
+training_data_path = "/var/lib/btrmind/training_data.csv"
+min_samples_for_training = 500
+fallback_to_heuristic = true
+prediction_timeout_ms = 100
 ```
 
 ## AI Architecture
@@ -153,17 +183,60 @@ model_path = "/var/lib/btrmind/model.safetensors"
 ```
 btrmind/
 ├── src/
-│   ├── main.rs          # CLI and main application logic
-│   ├── config.rs        # Configuration management
-│   ├── btrfs.rs         # BTRFS monitoring and metrics
-│   ├── learning.rs      # Reinforcement learning implementation  
-│   └── actions.rs       # Storage optimization actions
+│   ├── main.rs              # CLI and main application logic
+│   ├── config.rs            # Configuration management
+│   ├── btrfs.rs             # BTRFS monitoring and metrics
+│   ├── learning.rs          # Reinforcement learning implementation  
+│   ├── actions.rs           # Storage optimization actions
+│   └── fragmentation_model.rs # MLE fragmentation model
+├── scripts/
+│   └── train_fragmentation_model.py # Model training script
 ├── config/
-│   └── btrmind.toml     # Default configuration
+│   └── btrmind.toml         # Default configuration
 ├── systemd/
-│   └── btrmind.service  # Systemd service definition
-└── tests/               # Unit and integration tests
+│   └── btrmind.service      # Systemd service definition
+├── demo_mle_fragmentation.sh # Feature demonstration
+└── tests/                   # Unit and integration tests
 ```
+
+### Training the Fragmentation Model
+
+**Data Collection:**
+1. Enable data collection in config:
+   ```toml
+   [fragmentation_model]
+   enable_data_collection = true
+   training_data_path = "/var/lib/btrmind/training_data.csv"
+   ```
+2. Run BtrMind to collect metrics:
+   ```bash
+   btrmind run  # Collect data until sufficient samples
+   ```
+
+**Model Training:**
+1. Install Python dependencies:
+   ```bash
+   pip install pandas scikit-learn numpy
+   ```
+2. Train the model:
+   ```bash
+   python3 scripts/train_fragmentation_model.py \
+       --data /var/lib/btrmind/training_data.csv \
+       --output /etc/btrmind/fragmentation_model.json \
+       --validate
+   ```
+
+**Model Deployment:**
+1. Update configuration to use the model:
+   ```toml
+   [fragmentation_model]
+   use_model = true
+   enable_data_collection = false  # Disable after training
+   ```
+2. Restart BtrMind:
+   ```bash
+   sudo systemctl restart btrmind
+   ```
 
 ### Testing
 
@@ -171,9 +244,15 @@ btrmind/
 # Run unit tests
 cargo test
 
+# Test fragmentation model specifically
+cargo test fragmentation_model
+
 # Test with dry-run mode
 btrmind --dry-run analyze
 btrmind --dry-run cleanup
+
+# Run feature demonstration
+./demo_mle_fragmentation.sh
 
 # Integration testing
 sudo systemctl start btrmind
