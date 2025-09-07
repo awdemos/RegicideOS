@@ -10,6 +10,7 @@ mod btrfs;
 mod learning;
 mod actions;
 mod config;
+mod fragmentation_model;
 
 use btrfs::BtrfsMonitor;
 use learning::{ReinforcementLearner, State};
@@ -56,6 +57,19 @@ pub struct SystemMetrics {
     pub fragmentation_percent: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancedSystemMetrics {
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub disk_usage_percent: f64,
+    pub free_space_mb: f64,
+    pub metadata_usage_percent: f64,
+    pub fragmentation_percent: f64,
+    pub file_count: u64,
+    pub avg_file_size_mb: f64,
+    pub write_frequency: f64,
+    pub fragmentation_proxy: f64,
+}
+
 pub struct BtrMindAgent {
     monitor: BtrfsMonitor,
     pub learner: ReinforcementLearner,
@@ -66,7 +80,22 @@ pub struct BtrMindAgent {
 
 impl BtrMindAgent {
     pub fn new(config: Config) -> Result<Self> {
-        let monitor = BtrfsMonitor::new(&config.monitoring.target_path)?;
+        let monitor = BtrfsMonitor::with_data_collection(
+            &config.monitoring.target_path,
+            if config.fragmentation_model.enable_data_collection {
+                Some(config.fragmentation_model.training_data_path.clone())
+            } else {
+                None
+            },
+            config.fragmentation_model.enable_data_collection,
+            if config.fragmentation_model.use_model {
+                Some(config.fragmentation_model.model_path.clone())
+            } else {
+                None
+            },
+            config.fragmentation_model.use_model,
+            config.fragmentation_model.fallback_to_heuristic
+        )?;
         let learner = ReinforcementLearner::new(&config.learning)?;
         let executor = ActionExecutor::new(config.actions.clone(), config.dry_run);
         

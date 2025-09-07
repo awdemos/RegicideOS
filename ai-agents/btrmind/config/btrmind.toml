@@ -3,7 +3,7 @@
 
 [monitoring]
 # Path to monitor for BTRFS usage
-target_path = "/"
+target_path = "/tmp"
 
 # How often to collect metrics (seconds)
 poll_interval = 60
@@ -53,6 +53,28 @@ learning_rate = 0.001
 
 # Discount factor for future rewards
 discount_factor = 0.99
+
+[fragmentation_model]
+# Path to fragmentation model JSON file
+model_path = "/etc/btrmind/fragmentation_model.json"
+
+# Enable MLE model vs heuristic fallback
+use_model = true
+
+# Enable training data collection
+enable_data_collection = false
+
+# Path to training data CSV
+training_data_path = "/var/lib/btrmind/training_data.csv"
+
+# Minimum samples required for training
+min_samples_for_training = 500
+
+# Fallback to heuristic if model fails
+fallback_to_heuristic = true
+
+# Model prediction timeout (ms)
+prediction_timeout_ms = 100
 
 # Global dry-run mode (for testing)
 dry_run = false
