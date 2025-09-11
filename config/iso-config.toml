@@ -1,0 +1,289 @@
+# RegicideOS ISO Configuration
+# TOML configuration for ISO creation process
+
+[iso]
+# Basic ISO information
+name = "RegicideOS"
+version = "1.0.0"
+architecture = "x86_64"
+label = "RegicideOS-1.0.0"
+publisher = "RegicideOS Team"
+application = "RegicideOS Live Installer"
+
+# ISO file settings
+output_filename = "regicideos-1.0.0-x86_64.iso"
+output_directory = "build/output"
+work_directory = "build/work"
+iso_directory = "build/iso"
+
+# Build settings
+force_rebuild = false
+dry_run = false
+keep_work_files = false
+compression_level = 6
+
+# Filesystem settings
+[filesystem]
+# Root filesystem configuration
+rootfs_type = "squashfs"
+rootfs_compression = "xz"
+rootfs_block_size = 131072
+
+# Required disk space (in bytes)
+min_disk_space = 21474836480  # 20GB
+recommended_disk_space = 32212254720  # 30GB
+
+# Memory requirements
+min_memory = 1073741824  # 1GB
+recommended_memory = 2147483648  # 2GB
+
+# Bootloader configuration
+[bootloader]
+# UEFI bootloader settings
+efi_bootloader = "grub"
+grub_theme = "regicideos"
+grub_timeout = 10
+grub_default_entry = 0
+
+# Boot menu entries
+[[bootloader.menu_entries]]
+name = "RegicideOS Live"
+title = "Start RegicideOS Live Environment"
+kernel = "/boot/vmlinuz"
+initrd = "/boot/initrd"
+kernel_params = ["boot=live", "live-media-path=/live", "quiet", "splash"]
+
+[[bootloader.menu_entries]]
+name = "RegicideOS Install"
+title = "Install RegicideOS to Disk"
+kernel = "/boot/vmlinuz"
+initrd = "/boot/initrd"
+kernel_params = ["install=1", "quiet", "splash"]
+
+[[bootloader.menu_entries]]
+name = "System Information"
+title = "View System Information"
+kernel = "/boot/vmlinuz"
+initrd = "/boot/initrd"
+kernel_params = ["info=1"]
+
+# Package configuration
+[packages]
+# Required packages for the live system
+required = [
+    "linux-kernel",
+    "systemd",
+    "grub",
+    "efibootmgr",
+    "btrfs-progs",
+    "squashfs-tools",
+    "networkmanager",
+    "cosmic-desktop",
+    "xorg-server",
+    "wayland",
+    "rust",
+    "cargo",
+    "python3",
+    "bash",
+    "coreutils"
+]
+
+# Optional packages
+optional = [
+    "firefox",
+    "libreoffice",
+    "gimp",
+    "vlc",
+    "steam",
+    "docker",
+    "virtualbox"
+]
+
+# AI agent packages
+ai_agents = [
+    "btrmind",
+    "portcl"
+]
+
+# Excluded packages (security or compatibility reasons)
+excluded = [
+    "bios-grub",
+    "legacy-bootloader",
+    "non-uefi-bootloaders"
+]
+
+# Security configuration
+[security]
+# Secure boot support
+secure_boot = true
+secure_boot_keys = "/usr/share/secure-boot/keys"
+
+# GPG signing
+gpg_sign = true
+gpg_key_id = "regicideos@regicideos.com"
+
+# Filesystem permissions
+strict_permissions = true
+immutable_directories = [
+    "/usr",
+    "/lib",
+    "/bin",
+    "/sbin"
+]
+
+# Network configuration
+[network]
+# Default network settings
+enable_network = true
+network_manager = true
+wireless_support = true
+
+# Required services
+required_services = [
+    "NetworkManager",
+    "systemd-resolved",
+    "systemd-timesyncd"
+]
+
+# Optional services
+optional_services = [
+    "btrmind",
+    "portcl",
+    "docker",
+    "ssh"
+]
+
+# Desktop environment
+[desktop]
+# Desktop configuration
+desktop_environment = "cosmic"
+display_manager = "cosmic-greeter"
+auto_login = false
+
+# Display settings
+default_resolution = "1920x1080"
+refresh_rate = 60
+color_depth = 24
+
+# Theme configuration
+theme = "regicideos"
+icon_theme = "regicideos-icons"
+cursor_theme = "regicideos-cursor"
+
+# User configuration
+[user]
+# Default user settings
+default_username = "regicide"
+default_password = "regicide"
+default_shell = "/bin/bash"
+default_groups = ["users", "wheel", "audio", "video", "storage"]
+
+# Home directory
+home_directory = "/home/regicide"
+auto_create_home = true
+
+# Sudo configuration
+sudo_access = true
+sudo_nopasswd = false
+
+# Localization
+[localization]
+# Language and locale settings
+default_locale = "en_US.UTF-8"
+default_timezone = "UTC"
+default_keyboard = "us"
+
+# Supported locales
+supported_locales = [
+    "en_US.UTF-8",
+    "en_GB.UTF-8",
+    "de_DE.UTF-8",
+    "fr_FR.UTF-8",
+    "es_ES.UTF-8",
+    "it_IT.UTF-8",
+    "ja_JP.UTF-8",
+    "ko_KR.UTF-8",
+    "zh_CN.UTF-8"
+]
+
+# Hardware support
+[hardware]
+# Hardware requirements and support
+cpu_architectures = ["x86_64", "amd64"]
+cpu_min_cores = 2
+cpu_min_speed = 1000  # MHz
+
+# Graphics support
+graphics_drivers = ["modesetting", "intel", "amd", "nvidia"]
+gpu_min_memory = 512  # MB
+
+# Storage support
+storage_drivers = ["btrfs", "squashfs"]
+required_features = ["uefi", "gpt"]
+
+# Validation configuration
+[validation]
+# Build validation settings
+validate_dependencies = true
+validate_configuration = true
+validate_bootloaders = true
+validate_filesystem = true
+validate_packages = true
+
+# ISO validation settings
+validate_iso = true
+validate_checksums = true
+validate_bootability = true
+test_mount = true
+
+# Security validation
+validate_secure_boot = true
+validate_signatures = true
+validate_permissions = true
+
+# Build configuration
+[build]
+# Build process settings
+parallel_jobs = 4
+keep_build_artifacts = true
+cleanup_on_success = false
+cleanup_on_failure = true
+
+# Logging configuration
+log_level = "info"
+log_file = "build/logs/iso-build.log"
+log_rotation = true
+max_log_size = 10485760  # 10MB
+
+# Build profiles
+[[build.profiles]]
+name = "minimal"
+description = "Minimal RegicideOS installation"
+excluded_packages = ["cosmic-desktop", "xorg-server", "wayland"]
+additional_params = ["headless=true"]
+
+[[build.profiles]]
+name = "standard"
+description = "Standard RegicideOS with Cosmic Desktop"
+default = true
+
+[[build.profiles]]
+name = "developer"
+description = "RegicideOS with development tools"
+additional_packages = ["rust", "cargo", "python3", "git", "vim", "emacs"]
+additional_params = ["devtools=true"]
+
+# Testing configuration
+[testing]
+# Test settings
+run_tests = true
+test_parallel = true
+test_timeout = 300  # seconds
+
+# Test categories
+test_categories = ["unit", "integration", "validation", "safety"]
+
+# Test environment
+test_memory = 2147483648  # 2GB
+test_disk_space = 10737418240  # 10GB
+test_network = false
