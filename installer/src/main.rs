@@ -1040,20 +1040,20 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
         die("Cannot access the Xenia Linux repository");
     }
 
-    // RegicideOS only supports cosmic-desktop flavour
+    // RegicideOS only supports cosmic-fedora flavour (available in Xenia repository)
     const REGICIDE_FLAVOUR: &str = "cosmic-fedora";
     if config.flavour.is_empty() {
         config.flavour = REGICIDE_FLAVOUR.to_string();
     } else if config.flavour != REGICIDE_FLAVOUR {
         if interactive {
-            warn(&format!("RegicideOS only supports the cosmic-desktop flavour. Using: {}", REGICIDE_FLAVOUR));
+            warn(&format!("RegicideOS only supports the cosmic-fedora flavour. Using: {}", REGICIDE_FLAVOUR));
             config.flavour = REGICIDE_FLAVOUR.to_string();
         } else {
-            die(&format!("RegicideOS only supports the cosmic-desktop flavour: {}", REGICIDE_FLAVOUR));
+            die(&format!("RegicideOS only supports the cosmic-fedora flavour: {}", REGICIDE_FLAVOUR));
         }
     }
 
-    // Verify the cosmic-desktop flavour is available in the repository
+    // Verify the cosmic-fedora flavour is available in the repository
     let flavours = get_flavours(&config.repository).await?;
     if !flavours.contains(&config.flavour) {
         die(&format!("The {} flavour is not available in the repository", config.flavour));

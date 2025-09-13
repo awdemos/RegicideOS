@@ -1,15 +1,16 @@
 # RegicideOS Rust Overlay
 
-**regicide-rust** is a Gentoo overlay providing enhanced Rust support for RegicideOS, including embedded development targets and AI-powered system management tools.
+A Gentoo overlay focused on providing cutting-edge Rust toolchains, applications, and libraries optimized for embedded and AI workloads for RegicideOS.
 
 ## Overview
 
-This overlay complements the GURU overlay by providing RegicideOS-specific customizations:
-
-- **Enhanced Rust Toolchain**: Modified with embedded target support
-- **AI Development Tools**: BtrMind, PortCL, and other AI agents  
-- **Cross-Compilation**: ARM Cortex-M and RISC-V targets
-- **System Integration**: Deep integration with RegicideOS architecture
+This overlay provides:
+- Latest stable Rust toolchains
+- Cross-compilation targets for embedded systems
+- AI/ML libraries and tools
+- System utilities rewritten in Rust
+- Performance-optimized Rust packages
+- Deep integration with RegicideOS architecture
 
 ## Installation
 
@@ -73,23 +74,40 @@ systemctl enable btrmind
 systemctl start btrmind
 ```
 
-## Package Hierarchy
+## Package Categories
 
 ### Priority System
 1. **regicide-rust** (Priority 10) - RegicideOS customizations
-2. **guru** (Priority 20) - Community packages  
+2. **guru** (Priority 20) - Community packages
 3. **gentoo** (Priority 50) - Main tree
 
 ### Package Categories
 
-#### dev-lang/rust
-- **Source**: Regicide overlay (modified)
-- **Enhancements**: Embedded targets, AI development optimizations
-- **USE flags**: `embedded_targets`, `ai_tools`
+#### dev-rust/*
+Rust toolchain packages:
+- `rust` - Latest stable Rust
+- `rust-nightly` - Nightly Rust toolchain
+- `rust-cross-*` - Cross-compilation toolchains
+- `rust-analyzer` - LSP for Rust
 
-#### dev-util/rustup
-- **Source**: GURU overlay (standard)
-- **Purpose**: Standard Rust toolchain management
+#### sys-apps/rust-*
+Rust system utilities:
+- `rust-utils` - Core utilities (ls, cat, grep replacements)
+- `rust-monitor` - System monitoring tools
+- `rust-security` - Security-focused utilities
+
+#### sci-libs/rust-*
+Rust AI/ML libraries:
+- `candle-rs` - ML inference engine
+- `tch-rs` - PyTorch bindings
+- `ndarray-rs` - Scientific computing
+- `polars-rs` - Data processing
+
+#### embedded-rust/*
+Embedded development tools:
+- `rust-embedded` - Embedded Rust toolchain
+- `rust-baremetal` - Bare-metal targets
+- `rust-rtos` - Real-time OS support
 
 #### app-misc/regicide-ai-tools
 - **Source**: Regicide overlay (exclusive)
