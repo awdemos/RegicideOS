@@ -117,70 +117,143 @@ Motivational slogan:
 
 **Step 1: Boot Live Environment**
 
-**⚠️ IMPORTANT**: You must boot into a Linux live CD/USB environment to install RegicideOS. You will need to install the Rust toolchain.
+**⚠️ IMPORTANT**: You must boot into a Linux live CD/USB environment to install RegicideOS. The minimal installer requires Rust toolchain to be available.
 
-Download and create a bootable USB from: https://getfedora.org/en/workstation/download/
+**Recommended Live Environments:**
+- **Fedora Workstation Live**: https://getfedora.org/en/workstation/download/
+- **Ubuntu Live**: https://ubuntu.com/download/desktop
+- **Arch Linux Live**: https://archlinux.org/download/
 
-Boot your target machine from this live environment before proceeding.
+Boot your target machine from the live environment and connect to the internet.
 
-**Step 2: Install RegicideOS**
+**Step 2: Quick Install (Recommended)**
 
-Once booted into the Fedora Live environment, open a terminal and run:
+For the fastest installation, use our pre-built minimal installer binary:
 
 ```bash
-# Clone the repository
-package manager install: git curl gcc
+# Download the pre-built installer
+curl -L -o regicide-installer https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
+
+# Make executable and run
+chmod +x regicide-installer
+sudo ./regicide-installer
+```
+
+**Step 3: Manual Install (Advanced)**
+
+If you need to build from source or use a custom configuration:
+
+```bash
+# Install required packages in live environment
+# For Fedora:
+sudo dnf install git curl gcc btrfs-progs
+
+# For Ubuntu/Debian:
+sudo apt update && sudo apt install git curl gcc btrfs-progs
+
+# For Arch:
+sudo pacman -S git curl gcc btrfs-progs
+
+# Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# Clone and build
 git clone https://github.com/awdemos/RegicideOS.git
 cd RegicideOS/installer
-
-# Build and run the Rust installer
 cargo build --release
 sudo ./target/release/installer
 ```
 
-### Advanced Installation Options
+### Installation Configuration
 
-The installer supports both interactive and automated installation modes:
+The installer defaults to minimal packages only (no recommended packages) and BTRFS filesystem. Common configurations:
 
 #### Interactive Mode (Default)
 ```bash
+sudo ./regicide-installer
+# or for manual build:
 sudo ./target/release/installer
 ```
-The installer will guide you through the setup process with prompts for each configuration option.
+The installer will guide you through:
+- Disk selection and partitioning
+- Username and password setup
+- Minimal package installation (no recommended packages)
+- BTRFS subvolume configuration
 
 #### Automated Installation
 ```bash
-# Create a configuration file
+# Create minimal configuration
 cat > regicide-config.toml << EOF
 drive = "/dev/sda"
 repository = "https://repo.xenialinux.com/releases/"
-flavour = "cosmic-desktop"
+flavour = "minimal"  # Uses minimal packages only
 release_branch = "main"
 filesystem = "btrfs"
 username = "your-username"
-applications = "recommended"
+applications = "minimal"  # IMPORTANT: No recommended packages
 EOF
 
-# Run with configuration
-sudo ./target/release/installer -c regicide-config.toml
+# Run automated installation
+sudo ./regicide-installer -c regicide-config.toml
 ```
 
 #### Live Environment Requirements
-- **Live OS**: Fedora Live (recommended) or any Linux live environment
-- **Toolchain**: Rust compiler and Cargo
-- **Hardware**: 64-bit x86 processor, 12GB target disk space minimum (20GB recommended)
-- **Firmware**: UEFI or Legacy BIOS support
-- **Network**: Internet connection for downloading system image
+- **Live OS**: Any modern Linux live environment (Fedora recommended)
+- **Storage**: Target drive will be completely erased and reformatted
+- **Network**: Required for downloading system image from Xenia repository
+- **Time**: 15-30 minutes depending on internet speed
 
-> **Note**: If using a different live environment, ensure the Rust toolchain is available:
-> ```bash
-> # On Debian/Ubuntu-based live systems
-> sudo apt update && sudo apt install rustc cargo
-> 
-> # On Arch-based live systems
-> sudo pacman -S rust
-> ```
+### Post-Installation
+
+After installation completes:
+
+1. **Reboot** into your new RegicideOS system
+2. **Login** with your created username and password
+3. **Verify Installation**:
+   ```bash
+   # Check system status
+   systemctl status
+   cat /etc/os-release
+
+   # Verify BTRFS setup
+   sudo btrfs filesystem df /
+   sudo btrfs subvolume list /
+
+   # Check BtrMind service (if AI tools installed)
+   systemctl status btrmind
+   ```
+
+### Troubleshooting
+
+#### Rust Toolchain Issues
+If the pre-built installer fails, ensure Rust is properly installed:
+```bash
+# Verify Rust installation
+rustc --version
+cargo --version
+
+# If not installed:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+```
+
+#### BTRFS Creation Issues
+The installer includes comprehensive BTRFS validation:
+- Subvolume structure verification
+- Proper mount point configuration
+- Compression and optimization settings
+- Read-only root with writable overlays
+
+#### Network Issues
+If downloading from Xenia repository fails:
+```bash
+# Test connectivity
+ping repo.xenialinux.com
+
+# Use alternative mirror if needed
+# In config file, set: repository = "https://mirror.xenialinux.com/releases/"
+```
 
 ---
 
