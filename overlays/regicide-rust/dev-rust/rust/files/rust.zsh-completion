@@ -1,0 +1,158 @@
+#compdef rustc
+#compdef cargo
+#compdef regicide-cross-compile
+
+# Rust zsh completion for RegicideOS enhanced toolchain
+
+_regicide_cross_compile() {
+    local -a targets
+    targets=(
+        'x86_64-unknown-linux-gnu:x86_64 Linux (host)'
+        'aarch64-unknown-linux-gnu:ARM64 Linux'
+        'arm-unknown-linux-gnueabihf:ARMv7 Linux'
+        'riscv64gc-unknown-linux-gnu:RISC-V Linux'
+        'thumbv6m-none-eabi:ARM Cortex-M0/M0+'
+        'thumbv7m-none-eabi:ARM Cortex-M3'
+        'thumbv7em-none-eabi:ARM Cortex-M4/M7 (single precision)'
+        'thumbv7em-none-eabihf:ARM Cortex-M4/M7 (hardware float)'
+        'thumbv8m.base-none-eabi:ARM Cortex-M23'
+        'thumbv8m.main-none-eabi:ARM Cortex-M33/M55'
+        'riscv32i-unknown-none-elf:RISC-V RV32I'
+        'riscv32imc-unknown-none-elf:RISC-V RV32IMC'
+        'riscv64gc-unknown-none-elf:RISC-V RV64GC'
+        'wasm32-unknown-unknown:WebAssembly (browser)'
+        'wasm32-wasi:WebAssembly System Interface'
+        'x86_64-pc-windows-gnu:Windows cross-compilation'
+    )
+
+    local -a args
+    args=(
+        '(--target)--target[Target triple]:target:_values "target" "${targets[@]}"'
+        '(--release)--release[Build in release mode]'
+        '(--debug)--debug[Build in debug mode]'
+        '(--install-tools)--install-tools[Install cross-compilation tools]:target:_values "target" "${targets[@]}"'
+        '(--remove-tools)--remove-tools[Remove cross-compilation tools]:target:_values "target" "${targets[@]}"'
+        '(--list-targets)--list-targets[List all available targets]'
+        '(--list-tools)--list-tools[List available tools]'
+        '(--validate)--validate[Validate toolchain installation]'
+        '(--help)--help[Show help message]'
+        '(--version)--version[Show version information]'
+    )
+
+    _arguments "${args[@]}"
+}
+
+_cargo() {
+    local -a targets
+    targets=(
+        'x86_64-unknown-linux-gnu:x86_64 Linux (host)'
+        'aarch64-unknown-linux-gnu:ARM64 Linux'
+        'arm-unknown-linux-gnueabihf:ARMv7 Linux'
+        'riscv64gc-unknown-linux-gnu:RISC-V Linux'
+        'thumbv6m-none-eabi:ARM Cortex-M0/M0+'
+        'thumbv7m-none-eabi:ARM Cortex-M3'
+        'thumbv7em-none-eabi:ARM Cortex-M4/M7 (single precision)'
+        'thumbv7em-none-eabihf:ARM Cortex-M4/M7 (hardware float)'
+        'thumbv8m.base-none-eabi:ARM Cortex-M23'
+        'thumbv8m.main-none-eabi:ARM Cortex-M33/M55'
+        'riscv32i-unknown-none-elf:RISC-V RV32I'
+        'riscv32imc-unknown-none-elf:RISC-V RV32IMC'
+        'riscv64gc-unknown-none-elf:RISC-V RV64GC'
+        'wasm32-unknown-unknown:WebAssembly (browser)'
+        'wasm32-wasi:WebAssembly System Interface'
+        'x86_64-pc-windows-gnu:Windows cross-compilation'
+    )
+
+    local -a commands
+    commands=(
+        'build:Compile the current package'
+        'check:Check the current package'
+        'clean:Remove artifacts'
+        'doc:Build documentation'
+        'new:Create a new package'
+        'init:Initialize a new package'
+        'run:Run the current package'
+        'test:Run tests'
+        'bench:Run benchmarks'
+        'install:Install the current package'
+        'publish:Publish the current package'
+        'update:Update dependencies'
+        'search:Search packages'
+    )
+
+    local -a args
+    args=(
+        '1:command:_values "command" "${commands[@]}"'
+        '(--target)--target[Target triple]:target:_values "target" "${targets[@]}"'
+        '(--release)--release[Build in release mode]'
+        '(--debug)--debug[Build in debug mode]'
+        '(--features)--features[Space-separated list of features]:features:'
+        '(--all-features)--all-features[Activate all features]'
+        '(--no-default-features)--no-default-features[Do not activate default features]'
+        '(--profile)--profile[Build profile]:profile:(dev release custom)'
+        '(--offline)--offline[Run without accessing the network]'
+        '(--locked)--locked[Require Cargo.lock is up to date]'
+        '(--frozen)--frozen[Require Cargo.lock and cache are up to date]'
+        '(--verbose)--verbose[Use verbose output]'
+        '(--quiet)--quiet[No output printed to stdout]'
+        '(--color)--color[Coloring]:color:(auto always never)'
+        '(--message-format)--message-format[Output format]:format:(human json short-rendered)'
+        '(-): :_files'
+    )
+
+    _arguments "${args[@]}"
+}
+
+_rustc() {
+    local -a targets
+    targets=(
+        'x86_64-unknown-linux-gnu:x86_64 Linux (host)'
+        'aarch64-unknown-linux-gnu:ARM64 Linux'
+        'arm-unknown-linux-gnueabihf:ARMv7 Linux'
+        'riscv64gc-unknown-linux-gnu:RISC-V Linux'
+        'thumbv6m-none-eabi:ARM Cortex-M0/M0+'
+        'thumbv7m-none-eabi:ARM Cortex-M3'
+        'thumbv7em-none-eabi:ARM Cortex-M4/M7 (single precision)'
+        'thumbv7em-none-eabihf:ARM Cortex-M4/M7 (hardware float)'
+        'thumbv8m.base-none-eabi:ARM Cortex-M23'
+        'thumbv8m.main-none-eabi:ARM Cortex-M33/M55'
+        'riscv32i-unknown-none-elf:RISC-V RV32I'
+        'riscv32imc-unknown-none-elf:RISC-V RV32IMC'
+        'riscv64gc-unknown-none-elf:RISC-V RV64GC'
+        'wasm32-unknown-unknown:WebAssembly (browser)'
+        'wasm32-wasi:WebAssembly System Interface'
+        'x86_64-pc-windows-gnu:Windows cross-compilation'
+    )
+
+    local -a args
+    args=(
+        '(--target)--target[Target triple]:target:_values "target" "${targets[@]}"'
+        '(--emit)--emit[Comma separated list of output types]:emit:(asm llvm-bc llvm-ir obj metadata link dep-info mir)'
+        '(--print)--print[Compiler information to print]:print:(crate-name file-names cfg target-specs native-static-libs)'
+        '(--crate-type)--crate-type[Type of crate to produce]:crate-type:(bin lib dylib staticlib cdylib rlib)'
+        '(--crate-name)--crate-name[Name of the crate]:crate-name:'
+        '(--edition)--edition[Edition to use]:edition:(2015 2018 2021 2024)'
+        '(--extern)--extern[External crate]:extern:->externs'
+        '(--verbose)--verbose[Use verbose output]'
+        '(--quiet)--quiet[No output printed to stdout]'
+        '(--color)--color[Coloring]:color:(auto always never)'
+        '(--cfg)--cfg[Configure compilation]:cfg:'
+        '(--check-cfg)--check-cfg[Check configuration]:check-cfg:'
+        '(--explain)--explain[Provide detailed error explanation]:explain:'
+        '(--help)--help[Show help message]'
+        '(--version)--version[Show version information]'
+        '(-): :_files'
+    )
+
+    _arguments "${args[@]"
+}
+
+_externs() {
+    local expl
+    _description externs expl "external crate"
+    _files "$expl[@]"
+}
+
+compdef _regicide_cross_compile regicide-cross-compile
+compdef _cargo cargo
+compdef _rustc rustc
