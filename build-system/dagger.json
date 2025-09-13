@@ -1,0 +1,76 @@
+{
+  "name": "regicideos-build",
+  "version": "2025.1.0",
+  "sdk": "python",
+  "engineVersion": "v0.12.0",
+  "include": [
+    "overlays/regicide-rust/**",
+    "ai-agents/**",
+    "installer/**",
+    "build-system/**"
+  ],
+  "exclude": [
+    "**/.git/**",
+    "**/target/**",
+    "**/build/**",
+    "**/node_modules/**"
+  ],
+  "build": {
+    "pythonRequirements": "requirements.txt",
+    "pythonVersion": "3.12"
+  },
+  "pipeline": {
+    "stages": [
+      {
+        "name": "prepare",
+        "description": "Prepare build environment",
+        "commands": [
+          "python dagger.py prepare"
+        ]
+      },
+      {
+        "name": "build",
+        "description": "Build RegicideOS variants",
+        "commands": [
+          "python dagger.py build"
+        ],
+        "parallel": true
+      },
+      {
+        "name": "test",
+        "description": "Run comprehensive tests",
+        "commands": [
+          "python dagger.py test"
+        ],
+        "depends_on": ["build"]
+      },
+      {
+        "name": "package",
+        "description": "Package system images",
+        "commands": [
+          "python dagger.py package"
+        ],
+        "depends_on": ["test"]
+      },
+      {
+        "name": "deploy",
+        "description": "Deploy to storage",
+        "commands": [
+          "python dagger.py deploy"
+        ],
+        "depends_on": ["package"]
+      }
+    ]
+  },
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/riscv64"
+  ],
+  "cache": {
+    "backend": "s3",
+    "endpoint": "s3.regicideos.com",
+    "bucket": "regicideos-cache",
+    "region": "auto"
+  }
+}

@@ -1,0 +1,194 @@
+name: Build and Test RegicideOS Rust Overlay
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    container: ghcr.io/gentoo/gentoo:latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        emerge --sync
+        emerge app-portage/layman app-portage/repoman dev-vcs/git
+
+    - name: Validate ebuilds
+      run: |
+        # Basic overlay validation
+        repoman scan --include-masked=y
+
+    - name: Check ebuild syntax
+      run: |
+        find . -name "*.ebuild" -exec ebuild {} manifest \;
+
+  build-rust:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/${{ matrix.target }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  test-rust-tools:
+    needs: build-rust
+    runs-on: ubuntu-latest
+    container: ghcr.io/${{ github.repository }}/latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Test Rust installation
+      run: |
+        rustc --version
+        cargo --version
+
+    - name: Test cross-compilation
+      run: |
+        rustup target add thumbv7em-none-eabihf
+        rustc --print target-list | grep thumbv7em
+
+    - name: Test overlay integration
+      run: |
+        # Test overlay detection
+        equery which dev-lang/rust | grep regicide-rust
+
+  test-ai-tools:
+    needs: build-rust
+    runs-on: ubuntu-latest
+    container: ghcr.io/${{ github.repository }}/latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Test BtrMind installation
+      run: |
+        emerge app-misc/regicide-ai-tools
+        btrmind --help
+
+    - name: Test BtrMind configuration
+      run: |
+        btrmind config
+
+    - name: Test storage analysis
+      run: |
+        # Create test BTRFS filesystem
+        truncate -s 1G /test.img
+        losetup /dev/loop0 /test.img
+        mkfs.btrfs /dev/loop0
+        mkdir -p /mnt/test
+        mount /dev/loop0 /mnt/test
+
+        # Test BtrMind (dry run)
+        btrmind --dry-run analyze --target /mnt/test
+
+        # Cleanup
+        umount /mnt/test
+        losetup -d /dev/loop0
+        rm /test.img
+
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ghcr.io/${{ github.repository }}/latest
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  publish:
+    needs: [test-rust-tools, test-ai-tools, security-scan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate overlay manifest
+      run: |
+        # Generate manifest for layman
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+        echo '<repositories version="1.0">'
+        echo '  <repo quality="experimental" status="unofficial">'
+        echo '    <name>regicide-rust</name>'
+        echo '    <description>RegicideOS Rust Overlay</description>'
+        echo '    <homepage>https://github.com/regicideos/regicide-rust-overlay</homepage>'
+        echo '    <owner type="person">'
+        echo '      <email>admin@regicideos.com</email>'
+        echo '      <name>RegicideOS Team</name>'
+        echo '    </owner>'
+        echo '    <source type="git">'
+        echo '      <origin>https://github.com/regicideos/regicide-rust-overlay.git</origin>'
+        echo '    </source>'
+        echo '  </repo>'
+        echo '</repositories>' > overlay.xml
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./
+        destination_dir: overlay
+        keep_files: true

@@ -1,0 +1,145 @@
+# RegicideOS BtrMind Configuration
+# AI-powered BTRFS storage optimization
+
+[monitoring]
+# Target filesystem to monitor
+target_path = "/"
+
+# Monitoring interval in seconds (60 = 1 minute)
+poll_interval = 60
+
+# Enable detailed logging
+verbose_logging = true
+
+# Metrics collection settings
+collect_fragmentation = true
+collect_metadata = true
+collect_compression_stats = true
+
+[thresholds]
+# Warning level (yellow alert)
+warning_level = 75.0
+
+# Critical level (orange alert)
+critical_level = 85.0
+
+# Emergency level (red alert - immediate action)
+emergency_level = 95.0
+
+[learning]
+# Reinforcement learning configuration
+exploration_rate = 0.1
+learning_rate = 0.01
+discount_factor = 0.95
+
+# Experience buffer size
+buffer_size = 10000
+
+# Model update frequency (in monitoring cycles)
+model_update_frequency = 100
+
+# Enable continual learning
+continual_learning = true
+
+[actions]
+# Available cleanup actions and their configurations
+enable_temp_cleanup = true
+enable_log_cleanup = true
+enable_snapshot_cleanup = true
+enable_balance_operations = true
+enable_compression = true
+
+# Action timeouts (in seconds)
+action_timeout = 300
+
+# Retry configuration
+max_retries = 3
+retry_delay = 5
+
+[storage]
+# AI model storage location
+model_path = "/var/lib/btrmind/model.json"
+
+# Learning data storage
+data_path = "/var/lib/btrmind/data/"
+
+# Log file location
+log_file = "/var/log/btrmind/btrmind.log"
+
+# Maximum log size (in MB)
+max_log_size = 100
+
+# Log rotation settings
+log_rotation = true
+max_log_files = 5
+
+[network]
+# Enable remote monitoring (future feature)
+remote_monitoring = false
+
+# Metrics endpoint (for monitoring dashboard)
+metrics_endpoint = "http://localhost:8080/metrics"
+
+# Health check endpoint
+health_endpoint = "http://localhost:8080/health"
+
+[ai_optimization]
+# Enable AI-driven optimization
+enabled = true
+
+# Optimization strategies
+strategies = ["aggressive_cleanup", "smart_compression", "predictive_analysis"]
+
+# Performance targets
+target_response_time_ms = 100
+target_cleanup_efficiency = 0.8
+
+# Adaptive learning
+adapt_to_usage_patterns = true
+learn_from_user_behavior = true
+
+[systemd]
+# Systemd service configuration
+user = "root"
+group = "root"
+
+# Resource limits
+memory_limit_mb = 512
+cpu_limit_percent = 50
+
+# Restart policy
+restart_on_failure = true
+max_restart_attempts = 3
+
+[security]
+# Enable secure operation
+secure_mode = true
+
+# Validate file operations
+validate_operations = true
+
+# Permission requirements
+required_permissions = ["btrfs_admin", "system_logs"]
+
+# Audit logging
+audit_operations = true
+
+[experimental]
+# Experimental features (use with caution)
+enable_quantum_optimization = false
+enable_neural_network_tuning = false
+enable_predictive_defrag = false
+
+# Feature flags
+feature_flags = {
+    "advanced_ml" = false,
+    "quantum_computing" = false,
+    "neural_architecture_search" = false
+}
+
+# Performance profiling
+enable_profiling = false
+profile_output_path = "/var/lib/btrmind/profiles/"
+
+# Debug mode (development only)
+debug_mode = false

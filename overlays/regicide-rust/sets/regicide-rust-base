@@ -1,0 +1,17 @@
+# RegicideOS Rust Base Set
+# Core Rust packages for RegicideOS installations
+
+# Rust toolchain
+dev-lang/rust
+
+# Rust utilities
+sys-apps/rust-utils
+
+# AI tools
+app-misc/regicide-ai-tools
+
+# Development tools
+dev-util/rust-analyzer
+dev-util/cargo
+dev-util/cargo-audit
+dev-util/cargo-watch

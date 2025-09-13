@@ -1,0 +1,105 @@
+# RegicideOS Rust Toolchain Configuration
+# Optimized for embedded development and AI workloads
+
+[build]
+# Enable extended build with additional tools
+extended = true
+tools = ["cargo", "clippy", "rustfmt", "rust-analyzer"]
+
+# Python for build scripts
+python = "python3"
+
+[rust]
+# Optimize for performance
+debuginfo = 2
+debug-assertions = false
+overflow-checks = false
+lto = "thin"
+
+# Enable useful features
+codegen-units = 1
+incremental = true
+
+[target.x86_64-unknown-linux-gnu]
+# Native optimizations
+llvm-config = "/usr/bin/llvm-config-17"
+cflags = "-O2 -march=native -mtune=native"
+cxxflags = "-O2 -march=native -mtune=native"
+ldflags = "-Wl,--as-needed"
+
+[target.aarch64-unknown-linux-gnu]
+# ARM64 Linux cross-compilation
+cc = "aarch64-linux-gnu-gcc"
+cxx = "aarch64-linux-gnu-g++"
+ar = "aarch64-linux-gnu-ar"
+
+[target.arm-unknown-linux-gnueabihf]
+# ARMv7 Linux cross-compilation
+cc = "arm-linux-gnueabihf-gcc"
+cxx = "arm-linux-gnueabihf-g++"
+ar = "arm-linux-gnueabihf-ar"
+
+[target.riscv64gc-unknown-linux-gnu]
+# RISC-V Linux cross-compilation
+cc = "riscv64-linux-gnu-gcc"
+cxx = "riscv64-linux-gnu-g++"
+ar = "riscv64-linux-gnu-ar"
+
+# Embedded targets
+[target.thumbv6m-none-eabi]
+cc = "arm-none-eabi-gcc"
+cxx = "arm-none-eabi-g++"
+ar = "arm-none-eabi-ar"
+
+[target.thumbv7m-none-eabi]
+cc = "arm-none-eabi-gcc"
+cxx = "arm-none-eabi-g++"
+ar = "arm-none-eabi-ar"
+
+[target.thumbv7em-none-eabi]
+cc = "arm-none-eabi-gcc"
+cxx = "arm-none-eabi-g++"
+ar = "arm-none-eabi-ar"
+
+[target.thumbv7em-none-eabihf]
+cc = "arm-none-eabi-gcc"
+cxx = "arm-none-eabi-g++"
+ar = "arm-none-eabi-ar"
+
+[target.thumbv8m.base-none-eabi]
+cc = "arm-none-eabi-gcc"
+cxx = "arm-none-eabi-g++"
+ar = "arm-none-eabi-ar"
+
+[target.thumbv8m.main-none-eabi]
+cc = "arm-none-eabi-gcc"
+cxx = "arm-none-eabi-g++"
+ar = "arm-none-eabi-ar"
+
+[target.riscv32i-unknown-none-elf]
+cc = "riscv32-unknown-elf-gcc"
+cxx = "riscv32-unknown-elf-g++"
+ar = "riscv32-unknown-elf-ar"
+
+[target.riscv32imc-unknown-none-elf]
+cc = "riscv32-unknown-elf-gcc"
+cxx = "riscv32-unknown-elf-g++"
+ar = "riscv32-unknown-elf-ar"
+
+[target.riscv64gc-unknown-none-elf]
+cc = "riscv64-unknown-elf-gcc"
+cxx = "riscv64-unknown-elf-g++"
+ar = "riscv64-unknown-elf-ar"
+
+# WebAssembly targets
+[target.wasm32-unknown-unknown]
+# No additional toolchain needed
+
+[target.wasm32-wasi]
+# WASI target configuration
+
+# Windows cross-compilation
+[target.x86_64-pc-windows-gnu]
+cc = "x86_64-w64-mingw32-gcc"
+cxx = "x86_64-w64-mingw32-g++"
+ar = "x86_64-w64-mingw32-ar"

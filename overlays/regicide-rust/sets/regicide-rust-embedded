@@ -1,0 +1,24 @@
+# RegicideOS Rust Embedded Development Set
+# Tools for embedded Rust development
+
+# Cross-compilation toolchains
+cross-arm-none-eabi/gcc
+cross-riscv32-unknown-elf/gcc
+cross-riscv64-unknown-elf/gcc
+
+# Embedded Rust packages
+embedded-rust/rust-embedded
+embedded-rust/rust-baremetal
+
+# Additional embedded tools
+sys-devel/binutils
+sys-devel/gdb
+sys-devel/crossdev
+
+# Flashing and debugging tools
+dev-embedded/openocd
+dev-embedded/jlink
+
+# Serial communication
+dev-embedded/screen
+dev-embedded/minicom
