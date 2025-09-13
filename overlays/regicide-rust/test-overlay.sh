@@ -69,32 +69,47 @@ echo "" | tee -a "$TEST_LOG"
 info "Testing overlay structure..."
 
 test_file_exists "$OVERLAY_DIR/metadata/layout.conf"
-test_file_exists "$OVERLAY_DIR/metadata/about.xml"
 test_file_exists "$OVERLAY_DIR/profiles/repo_name"
-test_file_exists "$OVERLAY_DIR/profiles/categories"
-test_directory_exists "$OVERLAY_DIR/regicide-tools"
+test_directory_exists "$OVERLAY_DIR/dev-rust"
+test_directory_exists "$OVERLAY_DIR/sci-libs"
+test_directory_exists "$OVERLAY_DIR/sys-apps"
+test_directory_exists "$OVERLAY_DIR/app-misc"
+test_directory_exists "$OVERLAY_DIR/sets"
 
-# Test 2: Package Structure  
+# Test 2: Package Structure
 info "Testing package structure..."
 
-test_directory_exists "$OVERLAY_DIR/regicide-tools/btrmind"
-test_file_exists "$OVERLAY_DIR/regicide-tools/btrmind/btrmind-9999.ebuild"
-test_directory_exists "$OVERLAY_DIR/regicide-tools/regicide-installer"
-test_file_exists "$OVERLAY_DIR/regicide-tools/regicide-installer/regicide-installer-9999.ebuild"
+test_directory_exists "$OVERLAY_DIR/dev-rust/rust"
+test_file_exists "$OVERLAY_DIR/dev-rust/rust/rust-1.80.0.ebuild"
+test_file_exists "$OVERLAY_DIR/dev-rust/rust/files/toolchain.toml"
+test_file_exists "$OVERLAY_DIR/dev-rust/rust/files/regicide-cross-compile"
+test_directory_exists "$OVERLAY_DIR/sci-libs/candle-rs"
+test_file_exists "$OVERLAY_DIR/sci-libs/candle-rs/candle-rs-0.6.0.ebuild"
 
 # Test 3: Configuration Files
 info "Testing configuration validity..."
 
-if grep -q "regicide-overlay" "$OVERLAY_DIR/metadata/layout.conf"; then
+if grep -q "regicide-rust" "$OVERLAY_DIR/metadata/layout.conf"; then
     success "Repository name is correct in layout.conf"
 else
     error "Repository name incorrect in layout.conf"
 fi
 
-if grep -q "regicide-tools" "$OVERLAY_DIR/profiles/categories"; then
-    success "regicide-tools category is defined"
+if [[ $(cat "$OVERLAY_DIR/profiles/repo_name") == "regicide-rust" ]]; then
+    success "Repository name matches in profiles"
 else
-    error "regicide-tools category missing from profiles/categories"
+    error "Repository name mismatch in profiles"
+fi
+
+# Test toolchain configuration
+if command -v python3 >/dev/null 2>&1; then
+    if python3 -c "import toml; toml.load('$OVERLAY_DIR/dev-rust/rust/files/toolchain.toml')" 2>/dev/null; then
+        success "Toolchain configuration is valid TOML"
+    else
+        error "Toolchain configuration has invalid TOML"
+    fi
+else
+    warning "Python3 not available, skipping TOML validation"
 fi
 
 # Test 4: Ebuild Syntax (basic)
@@ -118,26 +133,26 @@ test_file_exists "$OVERLAY_DIR/INSTALL.md"
 # Test 6: BtrMind Integration
 info "Testing BtrMind integration..."
 
-if [[ -f "$OVERLAY_DIR/../ai-agents/btrmind/Cargo.toml" ]]; then
+if [[ -f "$OVERLAY_DIR/../../ai-agents/btrmind/Cargo.toml" ]]; then
     success "BtrMind source code is available"
-    
+
     # Test if BtrMind compiles
-    cd "$OVERLAY_DIR/../ai-agents/btrmind"
+    cd "$OVERLAY_DIR/../../ai-agents/btrmind"
     if cargo check >/dev/null 2>&1; then
         success "BtrMind compiles successfully"
     else
         error "BtrMind compilation failed"
     fi
-    
+
     if cargo test >/dev/null 2>&1; then
         success "BtrMind tests pass"
     else
         warning "BtrMind tests failed or not runnable in this environment"
     fi
-    
+
     cd "$OVERLAY_DIR"
 else
-    error "BtrMind source code not found"
+    warning "BtrMind source code not found (expected in separate repository)"
 fi
 
 # Test 7: Gentoo Compatibility (if available)
