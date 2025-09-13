@@ -1,0 +1,88 @@
+[Unit]
+Description=RegicideOS BtrMind AI Storage Agent
+Documentation=man:btrmind(1) https://docs.regicideos.com/btrmind
+After=network.target local-fs.target time-sync.target
+Wants=network-online.target
+ConditionPathExists=/sys/fs/btrfs
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Main executable
+ExecStart=/usr/bin/btrmind run
+
+# Configuration file
+Environment="BTRMIND_CONFIG=/etc/btrmind/config.toml"
+
+# Working directory
+WorkingDirectory=/var/lib/btrmind
+
+# Restart configuration
+Restart=on-failure
+RestartSec=10s
+RestartPreventExitStatus=255
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+CPUQuota=50%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/btrmind /var/log/btrmind /tmp
+ReadWritePaths=/sys/fs/btrfs
+
+# Capability bounding set
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH CAP_SYS_RESOURCE
+
+# System call filtering
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Process isolation
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+
+# Filesystem protection
+ProtectProc=invisible
+ProcSubset=pid
+
+# Network restrictions
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# Logging and monitoring
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=btrmind
+
+# OOM killer adjustment
+OOMScoreAdjust=-500
+
+# Environment variables
+Environment="RUST_LOG=info"
+Environment="RUST_BACKTRACE=1"
+
+# Pre-start checks
+ExecStartPre=/usr/bin/btrmind validate-config
+ExecStartPre=/usr/bin/mkdir -p /var/lib/btrmind /var/log/btrmind
+ExecStartPre=/usr/bin/chown -R root:root /var/lib/btrmind /var/log/btrmind
+
+# Post-stop cleanup
+ExecStopPost=/usr/bin/btrmind cleanup-temp-files
+
+[Install]
+WantedBy=multi-user.target
+Also=btrmind.socket

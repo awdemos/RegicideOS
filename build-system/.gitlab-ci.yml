@@ -1,0 +1,336 @@
+# RegicideOS CI/CD Pipeline (2025 Edition)
+# Modern GitLab CI with Dagger and AI optimization
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  CACHE_VERSION: "2025.1"
+  RUST_VERSION: "1.80.0"
+
+stages:
+  - prepare
+  - build
+  - test
+  - package
+  - security
+  - deploy
+
+default:
+  image: ghcr.io/regicideos/ci-base:2025.1
+  before_script:
+    - echo "🚀 Initializing RegicideOS CI environment..."
+    - rustc --version
+    - cargo --version
+    - python --version
+    - dagger version
+
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}-${CACHE_VERSION}"
+    paths:
+      - .cargo/
+      - target/
+      - .cache/
+
+# Prepare Stage
+prepare:environment:
+  stage: prepare
+  script:
+    - echo "🔧 Preparing build environment..."
+    - python build-system/dagger.py prepare
+    - cargo fetch
+    - rustup component add clippy rustfmt
+  artifacts:
+    paths:
+      - .cargo/
+      - target/
+    expire_in: 1 hour
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+# Build Stage
+build:rust:
+  stage: build
+  parallel:
+    matrix:
+      - TARGET: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, riscv64gc-unknown-linux-gnu]
+        VARIANT: [minimal, standard, developer]
+  script:
+    - echo "🏗️  Building Rust components for $TARGET - $VARIANT"
+    - python build-system/dagger.py build --target $TARGET --variant $VARIANT
+  artifacts:
+    paths:
+      - build/output/
+    expire_in: 1 day
+  needs: [prepare:environment]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+build:ai-agents:
+  stage: build
+  script:
+    - echo "🤖 Building AI agents with optimization..."
+    - python build-system/dagger.py build-ai-agents
+    - cargo build --release --features "ai-optimization-2025"
+  artifacts:
+    paths:
+      - target/release/btrmind
+      - target/release/portcl
+    expire_in: 1 day
+  needs: [prepare:environment]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+build:system-image:
+  stage: build
+  parallel:
+    matrix:
+      - TARGET: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+        VARIANT: [standard, developer]
+  script:
+    - echo "🖼️  Building system image for $TARGET - $VARIANT"
+    - python build-system/regicide-image-builder.py build --target $TARGET --variant $VARIANT
+  artifacts:
+    paths:
+      - regicideos-*.img
+      - regicideos-*.img.sha256
+    expire_in: 1 week
+  needs: [build:rust, build:ai-agents]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_IID
+
+# Test Stage
+test:unit:
+  stage: test
+  script:
+    - echo "🧪 Running unit tests..."
+    - cargo test --lib --all-features
+    - cargo test --bin regicide-image-builder
+  coverage: '/(\d+\.\d+)% coverage/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+  needs: [build:rust]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+test:integration:
+  stage: test
+  script:
+    - echo "🔗 Running integration tests..."
+    - cargo test --test integration --all-features
+    - python -m pytest build-system/tests/integration/
+  artifacts:
+    reports:
+      junit: build-system/test-results/integration.xml
+  needs: [build:system-image]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+test:security:
+  stage: test
+  script:
+    - echo "🔒 Running security tests..."
+    - cargo audit --deny warnings
+    - cargo fmt --check
+    - cargo clippy -- -D warnings
+    - bandit -r .
+    - safety check
+  needs: [build:rust]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+test:performance:
+  stage: test
+  script:
+    - echo "⚡ Running performance tests..."
+    - python build-system/tests/performance/run_benchmarks.py
+    - cargo bench --all-features
+  artifacts:
+    reports:
+      performance: build-system/test-results/performance.json
+  needs: [build:system-image]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - if: $CI_MERGE_REQUEST_ID
+      when: manual
+
+# Package Stage
+package:docker:
+  stage: package
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  script:
+    - echo "📦 Building Docker images..."
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $CI_REGISTRY_IMAGE:latest .
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - docker push $CI_REGISTRY_IMAGE:latest
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+  needs: [test:unit, test:integration, test:security]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+package:iso:
+  stage: package
+  script:
+    - echo "💿 Creating ISO images..."
+    - python build-system/create_iso.py --all-variants
+    - ls -la *.iso
+  artifacts:
+    paths:
+      - regicideos-*.iso
+      - regicideos-*.iso.sha256
+    expire_in: 1 month
+  needs: [test:unit, test:integration]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_TAG
+
+# Security Stage
+security:sast:
+  stage: security
+  script:
+    - echo "🔍 Running SAST analysis..."
+    - semgrep --config auto .
+    - codeql database create
+    - codeql database analyze
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+security:dependency:
+  stage: security
+  script:
+    - echo "📦 Checking dependencies..."
+    - cargo audit --deny warnings
+    - npm audit 2>/dev/null || true
+    - pip-audit 2>/dev/null || true
+  artifacts:
+    reports:
+      dependency_scanning: gl-dependency-scanning-report.json
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+security:container:
+  stage: security
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  script:
+    - echo "🐳 Scanning container images..."
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+        aquasec/trivy:latest image $CI_REGISTRY_IMAGE:latest
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+        aquasec/trivy:latest image --severity CRITICAL,HIGH $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+# Deploy Stage
+deploy:staging:
+  stage: deploy
+  script:
+    - echo "🚀 Deploying to staging..."
+    - python build-system/deploy.py --environment staging
+  environment:
+    name: staging
+    url: https://staging.regicideos.com
+  needs: [package:docker, package:iso, security:sast, security:dependency]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+deploy:production:
+  stage: deploy
+  script:
+    - echo "🎯 Deploying to production..."
+    - python build-system/deploy.py --environment production
+  environment:
+    name: production
+    url: https://regicideos.com
+  when: manual
+  needs: [deploy:staging]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+deploy:docs:
+  stage: deploy
+  script:
+    - echo "📚 Deploying documentation..."
+    - mkdocs build
+    - aws s3 sync site/ s3://docs.regicideos.com/ --delete
+  environment:
+    name: documentation
+    url: https://docs.regicideos.com
+  needs: [security:dependency]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Quality Gate
+quality:gate:
+  stage: test
+  script:
+    - echo "🎯 Checking quality gates..."
+    - python build-system/quality_gate.py
+  needs: [test:unit, test:integration, test:security]
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+
+# Cleanup Job
+cleanup:cache:
+  stage: deploy
+  script:
+    - echo "🧹 Cleaning up old cache entries..."
+    - python build-system/cleanup_cache.py
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Monitoring and Observability
+monitoring:metrics:
+  stage: test
+  script:
+    - echo "📊 Collecting build metrics..."
+    - python build-system/collect_metrics.py
+  artifacts:
+    reports:
+      metrics: build-system/metrics.json
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# AI Model Training (Weekly)
+ai:train:
+  stage: deploy
+  script:
+    - echo "🤖 Training AI models..."
+    - python ai-agents/train_models.py --all-models
+    - python build-system/update_ai_config.py
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Performance Baseline Update
+performance:baseline:
+  stage: deploy
+  script:
+    - echo "⚡ Updating performance baselines..."
+    - python build-system/update_baselines.py
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "schedule"
