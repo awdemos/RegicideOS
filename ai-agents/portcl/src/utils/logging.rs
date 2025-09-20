@@ -1,5 +1,5 @@
 use tracing::{info, warn, error, debug};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 use std::path::Path;
 
 pub fn setup_logging(log_level: &str, log_file: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {

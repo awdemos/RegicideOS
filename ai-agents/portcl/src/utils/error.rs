@@ -25,7 +25,7 @@ pub fn handle_error(error: &PortCLError) -> Result<()> {
         }
         PortCLError::Network(msg) => {
             warn!("Network error: {}", msg);
-            Err(PortCLError::Network(*msg))
+            Err(PortCLError::Network(msg.clone()))
         }
         PortCLError::Timeout(msg) => {
             warn!("Timeout error: {}", msg);
@@ -37,15 +37,19 @@ pub fn handle_error(error: &PortCLError) -> Result<()> {
         }
         PortCLError::Io(err) => {
             warn!("IO error: {}", err);
-            Err(PortCLError::Io(*err))
+            Err(PortCLError::Io(err.clone()))
         }
         PortCLError::Json(err) => {
             warn!("JSON error: {}", err);
-            Err(PortCLError::Json(*err))
+            Err(PortCLError::Json(err.clone()))
         }
-        PortCLError::Toml(err) => {
-            warn!("TOML error: {}", err);
-            Err(PortCLError::Toml(*err))
+        PortCLError::TomlDeserialize(err) => {
+            warn!("TOML deserialization error: {}", err);
+            Err(PortCLError::TomlDeserialize(err.clone()))
+        }
+        PortCLError::TomlSerialize(err) => {
+            warn!("TOML serialization error: {}", err);
+            Err(PortCLError::TomlSerialize(err.clone()))
         }
     }
 }
@@ -92,7 +96,8 @@ pub fn error_severity(error: &PortCLError) -> ErrorSeverity {
         PortCLError::Validation(_) => ErrorSeverity::Medium,
         PortCLError::Io(_) => ErrorSeverity::Medium,
         PortCLError::Json(_) => ErrorSeverity::Low,
-        PortCLError::Toml(_) => ErrorSeverity::Low,
+        PortCLError::TomlDeserialize(_) => ErrorSeverity::Low,
+        PortCLError::TomlSerialize(_) => ErrorSeverity::Low,
     }
 }
 
