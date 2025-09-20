@@ -1017,9 +1017,137 @@ sudo btrfs subvolume list /
 sudo regicide-rollback --snapshot /snapshots/manual-20240101
 ```
 
-### 9.3 Service Management
+### 9.3 OS Personality Swapping
 
-#### 9.3.1 System Services
+The phrase "swap OS personality" refers to the ability to replace the read-only SquashFS system image while keeping your local changes and home directory intact. This is one of the most powerful features of RegicideOS's architecture.
+
+#### 9.3.1 Understanding OS Personalities
+
+An "OS personality" is essentially the complete system environment contained in a SquashFS image file. This includes:
+- **Base system**: `/usr`, `/bin`, `/lib`, `/sbin`, and other core directories
+- **Desktop environment**: COSMIC Desktop, GNOME, or other environments
+- **System configuration**: Default settings and skel files
+- **Package set**: Pre-installed applications and libraries
+
+Your personal data remains in separate locations:
+- **Overlay**: Local modifications to `/etc`, `/var`, and `/usr`
+- **Home directory**: User files in `/home`
+- **Persistent configuration**: Custom settings and installed packages
+
+#### 9.3.2 The Personality Swap Mechanism
+
+Because RegicideOS's boot loader (GRUB) always picks the **newest** `root-*.img` by modification time, swapping personalities is as simple as copying a new image file to the ROOTS partition.
+
+#### 9.3.3 Step-by-Step Personality Swap
+
+**While running RegicideOS or from a live USB:**
+
+1. **Mount the ROOTS partition**
+   ```bash
+   sudo mount /dev/disk/by-label/ROOTS /mnt
+   ```
+
+2. **Drop the new image in place**
+   ```bash
+   sudo cp root-cosmic.img /mnt/
+   sudo touch /mnt/root-cosmic.img   # ensure it has newest timestamp
+   sync
+   ```
+
+3. **Reboot**
+
+   GRUB's `10_linux` helper automatically does:
+   ```bash
+   newest=$(ls -t /mnt/root-*.img | head -n1)
+   ```
+   and builds the menu entry pointing at that file. On the next boot:
+   - The initrd loopsquash-mounts `root-cosmic.img`
+   - The system overlays your writable BTRFS subvolumes
+   - You are instantly running the new personality
+
+#### 9.3.4 Rolling Back Personalities
+
+Keep the old file for easy rollback:
+
+```bash
+# Backup current personality
+sudo mv /mnt/root-gnome.img /mnt/root-gnome.img.bak
+```
+
+If you want to switch back to GNOME:
+```bash
+sudo touch /mnt/root-gnome.img.bak   # make it newest again
+reboot
+```
+
+#### 9.3.5 Managing Multiple Personalities
+
+You can keep multiple personalities available:
+
+```bash
+# List available personalities
+ls -la /mnt/root-*.img
+
+# Switch to a specific personality
+sudo touch /mnt/root-desired-personality.img
+reboot
+```
+
+#### 9.3.6 Deleting Obsolete Images
+
+Clean up old personalities to save space:
+
+```bash
+# Remove old personality
+sudo rm /mnt/root-old.img
+
+# Free space immediately (BTRFS-specific)
+sudo btrfs filesystem sync /mnt
+```
+
+#### 9.3.7 Creating Custom Personalities
+
+You can create your own personalities:
+
+```bash
+# Create a custom personality from current system
+sudo mksquashfs /tmp/rootfs /mnt/root-custom.img -comp zstd -Xcompression-level 19
+
+# Ensure it's the newest for next boot
+sudo touch /mnt/root-custom.img
+```
+
+#### 9.3.8 Best Practices
+
+1. **Always backup before swapping**: Keep your current personality until you're sure the new one works
+2. **Test in a VM first**: Try new personalities in a virtual machine before deploying on hardware
+3. **Keep known-good personalities**: Maintain at least one stable personality for quick recovery
+4. **Monitor disk space**: Remove unused personalities to free up ROOTS partition space
+5. **Verify image integrity**: Always check that downloaded images are complete and uncorrupted
+
+#### 9.3.9 Troubleshooting
+
+**If boot fails after personality swap:**
+1. Reboot and select an older personality from the GRUB menu
+2. Use `overlay=disabled` kernel parameter to boot clean
+3. Verify the new image file isn't corrupted
+4. Check available disk space in ROOTS partition
+
+**If GRUB doesn't detect new personality:**
+1. Ensure the image file has the correct extension (`root-*.img`)
+2. Verify the file is executable and readable
+3. Manually run `sudo update-grub` from a live environment
+
+This system makes it trivial to:
+- Try different desktop environments
+- Test major system updates safely
+- Switch between development and production environments
+- Maintain multiple configurations for different use cases
+- Roll back broken updates instantly
+
+### 9.4 Service Management
+
+#### 9.4.1 System Services
 
 ```bash
 # Manage core services
@@ -1030,7 +1158,7 @@ sudo systemctl restart bluetooth
 sudo journalctl -u systemd-networkd
 ```
 
-#### 9.3.2 AI Agent Management
+#### 9.4.2 AI Agent Management
 
 ```bash
 # Control AI agents
