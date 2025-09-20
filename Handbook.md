@@ -127,16 +127,16 @@ cd RegicideOS/installer
 
 ### 3.2 Installation Methods
 
-#### 3.2.1 Interactive Installation
+#### 3.2.1 Using Pre-built Installer (Recommended)
 
-The standard installation method with guided prompts:
+The easiest installation method is to use the pre-built installer binary:
 
 ```bash
-# Build the installer
-cargo build --release
+# Download and run the pre-built installer
+sudo ./binaries/regicide-installer
 
-# Run interactive installation
-sudo ./target/release/installer
+# Or run with configuration file
+sudo ./binaries/regicide-installer -c regicide-config.toml
 ```
 
 The installer will guide you through:
@@ -145,7 +145,22 @@ The installer will guide you through:
 3. **User Setup**: Create administrative user account
 4. **Application Sets**: Choose minimal or recommended packages
 
-#### 3.2.2 Automated Installation
+#### 3.2.2 Building from Source
+
+If you prefer to build the installer from source or need to customize it:
+
+```bash
+# Build the installer from source
+cargo build --release
+
+# Run interactive installation
+sudo ./target/release/installer
+
+# Or run with configuration file
+sudo ./target/release/installer -c regicide-config.toml
+```
+
+#### 3.2.3 Automated Installation
 
 For scripted deployments, create a configuration file:
 
@@ -161,7 +176,10 @@ username = "admin"
 applications = "recommended"
 EOF
 
-# Run automated installation
+# Run with pre-built installer (recommended)
+sudo ./binaries/regicide-installer -c regicide-config.toml
+
+# Or run with source-built installer
 sudo ./target/release/installer -c regicide-config.toml
 ```
 
