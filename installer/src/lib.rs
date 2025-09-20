@@ -72,7 +72,7 @@ pub fn get_flatpak_packages(applications_set: &str) -> String {
     let package_sets: HashMap<&str, Vec<&str>> = [
         ("recommended", vec![
             "io.gitlab.librewolf-community",
-            "org.mozilla.Thunderbird", 
+            "org.mozilla.Thunderbird",
             "org.gnome.TextEditor",
             "org.gnome.Rhythmbox3",
             "org.gnome.Calculator",
@@ -80,7 +80,9 @@ pub fn get_flatpak_packages(applications_set: &str) -> String {
             "org.gnome.Loupe",
             "org.libreoffice.LibreOffice"
         ]),
-        ("minimal", vec![])
+        ("minimal", vec![
+            "dev.zed.Zed"
+        ])
     ].into_iter().collect();
     
     package_sets.get(applications_set)
@@ -152,10 +154,11 @@ mod tests {
         assert!(!recommended_packages.is_empty());
         assert!(recommended_packages.contains("io.gitlab.librewolf-community"));
         assert!(recommended_packages.contains("org.libreoffice.LibreOffice"));
-        
+
         let minimal_packages = get_flatpak_packages("minimal");
-        assert!(minimal_packages.is_empty());
-        
+        assert!(!minimal_packages.is_empty());
+        assert!(minimal_packages.contains("dev.zed.Zed"));
+
         let unknown_packages = get_flatpak_packages("unknown");
         assert!(unknown_packages.is_empty());
     }

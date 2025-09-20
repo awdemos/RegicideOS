@@ -20,7 +20,15 @@
 4. [System Architecture](#4-system-architecture)
 5. [Core Components](#5-core-components)
 6. [AI-Powered System Management](#6-ai-powered-system-management)
+    - 6.1 [PortCL - Package Management Optimization](#61-portcl---package-management-optimization)
+    - 6.2 [BtrMind - Storage Management AI](#62-btrmind---storage-management-ai)
+    - 6.3 [Merlin - LLM Router](#63-merlin---llm-router)
 7. [Package Management](#7-package-management)
+    - 7.1 [Overlay System](#71-overlay-system)
+    - 7.2 [Foxmerge Package Management](#72-foxmerge-package-management)
+    - 7.3 [User Configuration and Dotfiles](#73-user-configuration-and-dotfiles)
+    - 7.4 [Rust Development Environment](#74-rust-development-environment)
+    - 7.5 [Container-Based Applications](#75-container-based-applications)
 8. [Development Environment](#8-development-environment)
 9. [System Administration](#9-system-administration)
 10. [Troubleshooting](#10-troubleshooting)
@@ -696,6 +704,96 @@ portcl metrics --learning-progress
 btrmind stats --model-performance
 ```
 
+### 6.3 Merlin - LLM Router
+
+**Merlin** is an intelligent multi-provider LLM router designed for RegicideOS that provides smart routing and load balancing across different language model providers.
+
+#### Key Features:
+- **Multi-Provider Support**: OpenAI, Anthropic, Gemini, and local GGUF models
+- **Smart Routing**: Epsilon-greedy and Thompson sampling algorithms for optimal model selection
+- **Real-Time Metrics**: Performance monitoring and quality judging
+- **Observability**: Comprehensive telemetry and health checking
+- **High Availability**: Automatic failover and load balancing
+
+#### Configuration:
+```toml
+# /etc/merlin/config.toml
+[server]
+port = 7777
+host = "127.0.0.1"
+
+[routing]
+policy = "epsilon_greedy"  # or "thompson_sampling"
+exploration_rate = 0.1
+
+[providers.openai]
+api_key = "your-openai-key"
+base_url = "https://api.openai.com/v1"
+models = ["gpt-4", "gpt-3.5-turbo"]
+
+[providers.anthropic]
+api_key = "your-anthropic-key"
+base_url = "https://api.anthropic.com"
+models = ["claude-3-opus", "claude-3-sonnet"]
+
+[providers.gemini]
+api_key = "your-gemini-key"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+models = ["gemini-pro"]
+
+[providers.gguf]
+model_path = "/var/lib/merlin/models/"
+enabled = true
+
+[telemetry]
+enable_metrics = true
+metrics_port = 9090
+log_level = "info"
+```
+
+#### Usage:
+```bash
+# Start Merlin service
+sudo systemctl enable --now merlin.service
+
+# Manual start with custom config
+merlin serve --port 7777 --config /etc/merlin/config.toml
+
+# Check service health
+curl http://localhost:7777/health
+
+# View metrics
+curl http://localhost:7777/metrics
+
+# Send chat request
+curl -X POST http://localhost:7777/chat \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Hello, Merlin!", "provider": "auto"}'
+```
+
+#### API Endpoints:
+- `GET /health` - Service health status
+- `GET /metrics` - Performance metrics and statistics
+- `POST /chat` - Send chat requests (returns optimal provider response)
+- `GET /providers` - List available providers and models
+- `POST /feedback` - Provide quality feedback for routing improvement
+
+#### Integration with RegicideOS:
+Merlin integrates seamlessly with other RegicideOS AI components:
+
+```bash
+# Configure PortCL to use Merlin for optimization suggestions
+sudo nano /etc/portcl/config.toml
+[ai]
+llm_router = "http://localhost:7777/chat"
+model_preference = "auto"
+
+# Configure BtrMind to use Merlin for storage analysis
+sudo nano /etc/btrmind/config.toml
+[ai]
+llm_endpoint = "http://localhost:7777/chat"
+```
+
 ---
 
 ## 7. Package Management
@@ -708,11 +806,201 @@ RegicideOS uses a hybrid package management approach combining:
 2. **GURU Overlay**: Community-maintained packages
 3. **Regicide Overlay**: Custom modifications and AI-enhanced packages
 
-### 7.2 User Configuration and Dotfiles
+### 7.2 Foxmerge Package Management
+
+Foxmerge is Xenia Linux's primary package management tool, inherited by RegicideOS for managing overlay packages and system updates. It provides a simplified interface for Gentoo's Portage system while maintaining compatibility with the underlying Gentoo ecosystem.
+
+#### 7.2.1 Basic Foxmerge Operations
+
+**System Updates:**
+```bash
+# Update all overlay packages
+sudo foxmerge update
+
+# Update specific package
+sudo foxmerge update package-name
+
+# Check for available updates
+sudo foxmerge check-updates
+
+# Clean up old packages
+sudo foxmerge clean
+```
+
+**Package Installation:**
+```bash
+# Install a package
+sudo foxmerge install package-name
+
+# Install multiple packages
+sudo foxmerge install package1 package2 package3
+
+# Install with specific USE flags
+sudo foxmerge install package-name --use "flag1 flag2"
+
+# Install from specific overlay
+sudo foxmerge install package-name --overlay overlay-name
+```
+
+**Package Management:**
+```bash
+# Remove a package
+sudo foxmerge remove package-name
+
+# Search for packages
+sudo foxmerge search search-term
+
+# Get package information
+sudo foxmerge info package-name
+
+# List installed packages
+sudo foxmerge list
+
+# List available packages
+sudo foxmerge list --available
+```
+
+#### 7.2.2 Advanced Foxmerge Usage
+
+**Overlay Management:**
+```bash
+# List available overlays
+sudo foxmerge overlay list
+
+# Enable an overlay
+sudo foxmerge overlay enable overlay-name
+
+# Disable an overlay
+sudo foxmerge overlay disable overlay-name
+
+# Sync overlay repositories
+sudo foxmerge overlay sync
+
+# Add custom overlay
+sudo foxmerge overlay add https://github.com/user/overlay.git
+```
+
+**Configuration Management:**
+```bash
+# View current configuration
+sudo foxmerge config show
+
+# Edit configuration
+sudo foxmerge config edit
+
+# Set configuration option
+sudo foxmerge config set option value
+
+# Reset configuration to defaults
+sudo foxmerge config reset
+```
+
+**Dependency Resolution:**
+```bash
+# Resolve dependencies for a package
+sudo foxmerge deps package-name
+
+# Show reverse dependencies
+sudo foxmerge deps --reverse package-name
+
+# Check for conflicts
+sudo foxmerge check-conflicts package-name
+
+# Fix broken dependencies
+sudo foxmerge fix-deps
+```
+
+#### 7.2.3 System Maintenance with Foxmerge
+
+**Regular Maintenance:**
+```bash
+# Full system update and cleanup
+sudo foxmerge update && sudo foxmerge clean
+
+# Update overlays and sync repositories
+sudo foxmerge overlay sync && sudo foxmerge update
+
+# Check system health
+sudo foxmerge health-check
+
+# Optimize package database
+sudo foxmerge optimize
+```
+
+**Troubleshooting:**
+```bash
+# Check for broken packages
+sudo foxmerge check-broken
+
+# Repair broken packages
+sudo foxmerge repair
+
+# Clear package cache
+sudo foxmerge cache-clear
+
+# Rebuild package database
+sudo foxmerge rebuild-db
+```
+
+#### 7.2.4 Foxmerge Configuration
+
+**Main Configuration File (`/etc/foxmerge.conf`):**
+```bash
+# Overlay repositories
+overlays = ["guru", "regicide", "science"]
+
+# Update settings
+auto_sync = true
+auto_clean = true
+parallel_jobs = 4
+
+# Build options
+makeopts = "-j4"
+use_flags = ["X", "alsa", "pulseaudio"]
+
+# Logging
+log_level = "info"
+log_file = "/var/log/foxmerge.log"
+```
+
+**User Configuration (`~/.config/foxmerge/config`):**
+```bash
+# User-specific settings
+[settings]
+  default_overlay = "regicide"
+  color_output = true
+  verbose_output = false
+
+[aliases]
+  up = "update"
+  in = "install"
+  rm = "remove"
+  se = "search"
+```
+
+#### 7.2.5 Integration with System Updates
+
+Foxmerge works seamlessly with Xenia Linux's update system:
+
+```bash
+# Automated system update process
+sudo xenia-update  # Updates base system image
+sudo foxmerge update  # Updates overlay packages
+
+# Combined update script
+sudo system-update-full
+```
+
+This two-tier approach ensures:
+- **Base System**: Updated atomically via SquashFS images
+- **Overlay Packages**: Updated incrementally via foxmerge
+- **AI Optimization**: PortCL optimizes package selection and updates
+
+### 7.3 User Configuration and Dotfiles
 
 RegicideOS provides official dotfiles for a consistent, modern development experience:
 
-#### 7.2.1 Installing RegicideOS Dotfiles
+#### 7.3.1 Installing RegicideOS Dotfiles
 
 The official dotfiles package provides a Rust-focused shell configuration with RegicideOS theming:
 
@@ -740,7 +1028,7 @@ sudo install-regicide-dotfiles --user username
 - BTRFS optimization tools
 - Portage helper functions
 
-#### 7.2.2 Dotfiles Customization
+#### 7.3.2 Dotfiles Customization
 
 After installation, you can customize your environment:
 
@@ -767,7 +1055,7 @@ uninstall-regicide-dotfiles
 uninstall-regicide-dotfiles --restore-backup
 ```
 
-#### 7.2.3 System-wide Configuration
+#### 7.3.3 System-wide Configuration
 
 For system administrators deploying dotfiles to multiple users:
 
@@ -788,9 +1076,9 @@ sudo cp /usr/share/regicide-dotfiles/contrib/make.conf.template /etc/portage/mak
 sudo nano /etc/portage/make.conf
 ```
 
-### 7.3 Rust Development Environment
+### 7.4 Rust Development Environment
 
-#### 7.3.1 Rust Toolchain Management
+#### 7.4.1 Rust Toolchain Management
 
 RegicideOS provides comprehensive Rust development support:
 
@@ -807,7 +1095,7 @@ rustup target add riscv32imc-unknown-none-elf  # RISC-V
 rustup target add wasm32-unknown-unknown  # WebAssembly
 ```
 
-#### 7.3.2 Embedded Development
+#### 7.4.2 Embedded Development
 
 RegicideOS includes special support for embedded development:
 
@@ -822,9 +1110,9 @@ cargo generate --git https://github.com/rust-embedded/cortex-m-quickstart
 cargo embed --target thumbv6m-none-eabi
 ```
 
-### 7.3 Container-Based Applications
+### 7.5 Container-Based Applications
 
-#### 7.4.1 Distrobox Integration
+#### 7.5.1 Distrobox Integration
 
 Most user applications run in containers for isolation:
 
@@ -834,18 +1122,18 @@ distrobox create --name dev --image fedora:39
 distrobox enter dev
 
 # Install applications in container
-sudo dnf install code firefox thunderbird
+sudo dnf install code brave-browser thunderbird
 
 # Applications appear in desktop menu automatically
 ```
 
-#### 7.4.2 Flatpak Integration
+#### 7.5.2 Flatpak Integration
 
 System-wide applications use Flatpak:
 
 ```bash
 # Install applications
-flatpak install flathub org.mozilla.Firefox
+flatpak install flathub com.brave.Browser
 flatpak install flathub com.visualstudio.code
 
 # Manage applications
@@ -863,15 +1151,15 @@ RegicideOS is optimized for modern development with comprehensive tooling. After
 
 #### 8.1.1 IDE Setup
 
-**VS Code with Rust Extensions:**
+**Zed Editor:**
 ```bash
-# Install VS Code via Flatpak
-flatpak install flathub com.visualstudio.code
+# Install Zed via Flatpak
+flatpak install flathub dev.zed.Zed
 
 # Recommended extensions
-code --install-extension rust-lang.rust-analyzer
-code --install-extension vadimcn.vscode-lldb
-code --install-extension serayuzgur.crates
+zed --install-extension rust-analyzer
+zed --install-extension lldb
+zed --install-extension crates
 ```
 
 #### 8.1.2 Development Tools
@@ -894,7 +1182,7 @@ rustup target add x86_64-unknown-linux-musl
 
 #### 8.2.1 Machine Learning Frameworks
 
-RegicideOS includes Rust-native ML frameworks:
+Some recommended Rust-native ML frameworks:
 
 ```bash
 # PyTorch bindings for Rust
@@ -963,28 +1251,42 @@ cargo add tch serde tokio anyhow
 
 #### 9.1.1 Base System Updates
 
-RegicideOS uses atomic updates for the base system:
+RegicideOS inherits Xenia Linux's atomic update system using SquashFS images:
 
 ```bash
-# Check for updates
-regicide-update check
+# First-time setup (one-time)
+sudo emerge --sync xenia
 
-# Download and prepare update
-regicide-update download
+# Check for available updates
+curl -s https://repo.xenialinux.com/releases/Manifest.toml
 
-# Apply update (requires reboot)
-sudo regicide-update apply
+# Automated update process
+sudo xenia-update
+
+# Manual update process
+sudo mount -L ROOTS /mnt/roots
+cd /mnt/roots
+sudo wget https://repo.xenialinux.com/releases/amd64/main/root.img
+sudo umount /mnt/roots
+sudo reboot
 ```
+
+The system automatically boots from the newest root image. For rollback, you can select previous images in GRUB.
 
 #### 9.1.2 Overlay Updates
 
-Package overlays are updated separately:
+Package overlays are updated separately using Xenia Linux's package management:
 
 ```bash
-# Sync overlay repositories
-sudo emerge --sync
+# Add Xenia overlay (first-time setup)
+sudo emerge --sync xenia
 
-# Update overlay packages
+# Update overlay packages using foxmerge
+# See Section 7.2 for comprehensive foxmerge usage
+sudo foxmerge update
+
+# Traditional Portage updates
+sudo emerge --sync
 sudo emerge --update --deep @world
 ```
 
@@ -1495,19 +1797,19 @@ exploration_rate = 0.1
 #### B.1 System Commands
 ```bash
 # System information
-regicide-info --version
-regicide-info --components
-regicide-info --ai-status
+uname -a                    # Kernel and system info
+lsb_release -a              # Distribution info
+systemctl status portcl btrmind  # AI agent status
 
 # Update system
-regicide-update check
-regicide-update download
-regicide-update apply
+sudo xenia-update                    # Automated system update
+curl -s https://repo.xenialinux.com/releases/Manifest.toml  # Check available updates
+sudo foxmerge update                  # Update overlay packages (see Section 7.2)
 
-# Snapshots
-regicide-snapshot create
-regicide-snapshot list
-regicide-rollback --snapshot <id>
+# BTRFS snapshots
+sudo btrfs subvolume snapshot / /snapshots/manual-$(date +%Y%m%d)  # Create snapshot
+sudo btrfs subvolume list /  # List snapshots
+sudo btrfs subvolume set-default <snapshot-id> /  # Set default snapshot (rollback)
 ```
 
 #### B.2 AI Agent Commands
