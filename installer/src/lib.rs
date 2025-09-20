@@ -216,7 +216,7 @@ mod integration_tests {
             username: "user".to_string(),
             applications: "recommended".to_string(),
         };
-        
+
         // This would be the ideal config for RegicideOS
         assert_eq!(valid_config.repository, "https://repo.xenialinux.com/releases/");
         assert_eq!(valid_config.flavour, "cosmic-desktop");
