@@ -46,7 +46,7 @@ crossbeam = "0.8"
 dashmap = "5.5"
 
 # Machine Learning / RL
-tch = "0.14"
+tch = { version = "0.14", optional = true }
 rand = "0.8"
 ndarray = "0.15"
 
@@ -81,7 +81,13 @@ criterion = "0.5"
 tempfile = "3.8"
 assert_cmd = "2.0"
 predicates = "3.0"
+pretty_assertions = "1.4"
+test-log = "0.2"
+env_logger = "0.10"
+serial_test = "2.0"
+proptest = "1.4"
 
 [features]
 default = []
 test-utils = []
+ml = ["tch"]
