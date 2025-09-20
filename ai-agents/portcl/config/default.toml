@@ -1,0 +1,47 @@
+# PortCL Configuration File
+# This file contains the default configuration for the Portage Continual Learning Agent
+
+[monitoring]
+poll_interval = 30
+portage_path = "/usr/bin/portage"
+log_path = "/var/log/portcl.log"
+metrics_retention_days = 30
+enable_event_tracking = true
+
+[rl]
+learning_rate = 0.001
+discount_factor = 0.95
+exploration_rate = 0.1
+exploration_decay = 0.995
+memory_size = 10000
+batch_size = 32
+target_update_freq = 100
+model_path = "/var/lib/portcl/model.pt"
+enable_continual_learning = true
+ewc_importance = 1000.0
+
+[actions]
+enable_dry_run = true
+max_concurrent_actions = 3
+action_timeout = 300
+rollback_enabled = true
+safe_actions_only = true
+
+[safety]
+max_cpu_usage = 90.0
+max_memory_usage = 80.0
+min_disk_space_gb = 5.0
+critical_packages = [
+    "sys-kernel/gentoo-kernel",
+    "sys-apps/systemd",
+    "sys-apps/portage"
+]
+enable_system_checks = true
+backup_before_actions = true
+
+[general]
+log_level = "info"
+data_directory = "/var/lib/portcl"
+user = "portcl"
+group = "portcl"
+enable_metrics_collection = true
