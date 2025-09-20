@@ -23,7 +23,10 @@ pub enum PortCLError {
     Json(#[from] serde_json::Error),
 
     #[error("TOML parsing error: {0}")]
-    Toml(#[from] toml::de::Error),
+    TomlDeserialize(#[from] toml::de::Error),
+
+    #[error("TOML serialization error: {0}")]
+    TomlSerialize(#[from] toml::ser::Error),
 
     #[error("System error: {0}")]
     System(String),

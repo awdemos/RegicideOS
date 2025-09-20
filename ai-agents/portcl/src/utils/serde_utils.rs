@@ -23,10 +23,10 @@ pub fn from_json_bytes<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
 
 pub fn to_toml_string<T: Serialize>(value: &T) -> Result<String> {
     toml::to_string_pretty(value)
-        .map_err(|e| PortCLError::Toml(e))
+        .map_err(|e| PortCLError::TomlSerialize(e))
 }
 
 pub fn from_toml_string<T: DeserializeOwned>(toml: &str) -> Result<T> {
     toml::from_str(toml)
-        .map_err(|e| PortCLError::Toml(e))
+        .map_err(|e| PortCLError::TomlDeserialize(e))
 }
