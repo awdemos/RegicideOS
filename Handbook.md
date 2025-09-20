@@ -440,9 +440,89 @@ RegicideOS uses a hybrid package management approach combining:
 2. **GURU Overlay**: Community-maintained packages
 3. **Regicide Overlay**: Custom modifications and AI-enhanced packages
 
-### 7.2 Rust Development Environment
+### 7.2 User Configuration and Dotfiles
 
-#### 7.2.1 Rust Toolchain Management
+RegicideOS provides official dotfiles for a consistent, modern development experience:
+
+#### 7.2.1 Installing RegicideOS Dotfiles
+
+The official dotfiles package provides a Rust-focused shell configuration with RegicideOS theming:
+
+```bash
+# Add the dotfiles overlay
+sudo eselect repository enable regicide-dotfiles
+sudo emaint sync -r regicide-dotfiles
+
+# Install the dotfiles package
+sudo emerge -av app-misc/regicide-dotfiles
+
+# Install dotfiles for your user
+install-regicide-dotfiles
+
+# For specific users (system administrators)
+sudo install-regicide-dotfiles --user username
+```
+
+**Features included:**
+- Modern Rust CLI tools (eza, bat, fd, ripgrep, zoxide)
+- Enhanced bash with intelligent aliases and functions
+- RegicideOS-themed tmux configuration
+- Starship prompt with castle theming
+- OpenRC/systemd service management
+- BTRFS optimization tools
+- Portage helper functions
+
+#### 7.2.2 Dotfiles Customization
+
+After installation, you can customize your environment:
+
+```bash
+# Edit shell configuration
+nano ~/.bashrc
+
+# Customize tmux
+nano ~/.tmux.conf
+
+# Configure prompt
+nano ~/.config/starship.toml
+
+# Set up Git configuration
+nano ~/.gitconfig
+```
+
+**Backup and Restore:**
+```bash
+# Uninstall dotfiles (creates backup)
+uninstall-regicide-dotfiles
+
+# Restore from backup
+uninstall-regicide-dotfiles --restore-backup
+```
+
+#### 7.2.3 System-wide Configuration
+
+For system administrators deploying dotfiles to multiple users:
+
+```bash
+# Install to skeleton directory for new users
+sudo install-regicide-dotfiles --system-only
+
+# New users will automatically get dotfiles
+sudo useradd -m newuser
+```
+
+**Portage Configuration Template:**
+```bash
+# Copy system optimization template
+sudo cp /usr/share/regicide-dotfiles/contrib/make.conf.template /etc/portage/make.conf
+
+# Edit for your hardware
+sudo nano /etc/portage/make.conf
+```
+
+### 7.3 Rust Development Environment
+
+#### 7.3.1 Rust Toolchain Management
 
 RegicideOS provides comprehensive Rust development support:
 
@@ -459,7 +539,7 @@ rustup target add riscv32imc-unknown-none-elf  # RISC-V
 rustup target add wasm32-unknown-unknown  # WebAssembly
 ```
 
-#### 7.2.2 Embedded Development
+#### 7.3.2 Embedded Development
 
 RegicideOS includes special support for embedded development:
 
@@ -476,7 +556,7 @@ cargo embed --target thumbv6m-none-eabi
 
 ### 7.3 Container-Based Applications
 
-#### 7.3.1 Distrobox Integration
+#### 7.4.1 Distrobox Integration
 
 Most user applications run in containers for isolation:
 
@@ -491,7 +571,7 @@ sudo dnf install code firefox thunderbird
 # Applications appear in desktop menu automatically
 ```
 
-#### 7.3.2 Flatpak Integration
+#### 7.4.2 Flatpak Integration
 
 System-wide applications use Flatpak:
 
@@ -509,9 +589,9 @@ flatpak update
 
 ## 8. Development Environment
 
-### 8.1 Rust Development
+### 8.1 Development Environment Setup
 
-RegicideOS is optimized for Rust development with comprehensive tooling:
+RegicideOS is optimized for modern development with comprehensive tooling. After installing the official dotfiles (see Section 7.2), you have a complete development environment:
 
 #### 8.1.1 IDE Setup
 
