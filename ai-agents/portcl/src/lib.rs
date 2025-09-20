@@ -3,6 +3,7 @@ pub mod rl_engine;
 pub mod actions;
 pub mod config;
 pub mod utils;
+pub mod service;
 
 pub use monitor::PortageMonitor;
 pub use rl_engine::PortageAgent;

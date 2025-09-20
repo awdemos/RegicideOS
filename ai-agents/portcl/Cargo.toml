@@ -57,6 +57,18 @@ sysinfo = "0.30"
 # Configuration
 config = "0.13"
 
+[[bin]]
+name = "portcl-agent"
+path = "src/bin/portcl-agent.rs"
+
+[[bin]]
+name = "portcl-monitor"
+path = "src/bin/portcl-monitor.rs"
+
+[[bin]]
+name = "portcl-service-installer"
+path = "src/bin/portcl-service-installer.rs"
+
 [dev-dependencies]
 # Mocking for tests
 mockall = "0.11"

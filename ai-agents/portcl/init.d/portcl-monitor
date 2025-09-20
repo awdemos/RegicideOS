@@ -1,0 +1,33 @@
+#!/sbin/openrc-run
+
+name="portcl-monitor"
+description="PortCL System Metrics Monitor"
+command="/usr/local/bin/portcl-monitor"
+command_args="--config /etc/portcl/config.toml"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+
+depend() {
+    need net
+    use logger
+}
+
+start_pre() {
+    checkpath --directory --owner root:root --mode 0755 /var/log/portcl
+    checkpath --directory --owner root:root --mode 0755 /var/lib/portcl
+}
+
+start() {
+    ebegin "Starting ${name}"
+    start-stop-daemon --start --exec "${command}" \
+        --pidfile "${pidfile}" \
+        --background --make-pidfile \
+        -- ${command_args}
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping ${name}"
+    start-stop-daemon --stop --pidfile "${pidfile}"
+    eend $?
+}
