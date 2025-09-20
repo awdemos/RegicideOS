@@ -183,151 +183,152 @@ The RegicideOS installer performs these steps:
    - Configure continual learning frameworks
    - Set up default optimization policies
 
-### 3.4 Manual Installation with OverlayFS
+### 3.4 Manual Installation with OverlayFS ⚠️ **DEPRECATED**
 
-For advanced users who want to understand the complete disk partitioning and overlay setup process, here's a detailed walkthrough of creating a RegicideOS system from scratch:
+> **⚠️ DEPRECATION NOTICE**: This 4-partition overlayfs layout is deprecated. RegicideOS now recommends the BTRFS-native architecture described in Section 4.1 for better performance, snapshots, and simpler management. This section is provided for reference only and should not be used for new installations.
 
-#### 3.4.1 Disk Partitioning Scheme
+Below is the legacy walk-through showing how the old 4-partition overlayfs system works. This should only be used for understanding existing systems or migration purposes.
 
-RegicideOS uses a 4-partition layout designed for immutable system operation:
+Run the commands on a live ISO (or read them only for the concept—either way you will see the whole picture).
 
-| Partition | Size | Label | Format | Purpose |
-|----------|------|-------|---------|---------|
-| 1 | 512 MiB | `EFI` | FAT32 | EFI System Partition (ESP) |
-| 2 | 5 GiB | `ROOTS` | ext4 | Read-only SquashFS image storage |
-| 3 | 2 GiB | `OVERLAY` | ext4 | Writable overlay layer |
-| 4 | Remaining | `HOME` | ext4 | User home directory |
+------------------------------------------------
+**0. Start with empty disk (assume `/dev/sda`)**
+------------------------------------------------
 
-#### 3.4.2 Creating Partitions
-
-Start with an empty disk (assume `/dev/sda`):
-
-```bash
-# Create GPT partition table and partitions
+```
 gdisk /dev/sda
 ```
 
-Create four partitions with the specified labels. You can also use:
-```bash
-# Alternative using fdisk
-fdisk -t gpt /dev/sda
+Create four partitions and give them the **GPT partition-labels** that the Xenia initrd looks for:
 
-# Or using parted
-parted /dev/sda mklabel gpt
-parted /dev/sda mkpart primary fat32 1MiB 513MiB
-parted /dev/sda set 1 esp on
-parted /dev/sda name 1 EFI
-# ... continue for other partitions
+| number | size       | label   | code | purpose |
+|--------|------------|---------|------|---------|
+| 1      | 512 MiB    | EFI     | EF00 | ESP (FAT32) |
+| 2      | 5 GiB      | ROOTS   | 8300 | ext4, will hold SquashFS |
+| 3      | 2 GiB      | OVERLAY | 8300 | ext4, writable layer |
+| 4      | rest       | HOME    | 8300 | ext4, /home |
+
+(You can use `fdisk -t gpt` or `parted`—only the **label string** matters.)
+
+------------------------------------------------
+**1. Make the filesystems**
+------------------------------------------------
+
 ```
-
-**Important**: The partition labels (`EFI`, `ROOTS`, `OVERLAY`, `HOME`) are critical as the Xenia initrd uses them to identify partitions at boot time.
-
-#### 3.4.3 Filesystem Creation
-
-```bash
-# Create filesystems with labels
 mkfs.vfat -n EFI     /dev/sda1
 mkfs.ext4 -L ROOTS   /dev/sda2
 mkfs.ext4 -L OVERLAY /dev/sda3
 mkfs.ext4 -L HOME    /dev/sda4
 ```
 
-#### 3.4.4 System Image Preparation
+------------------------------------------------
+**2. Build (or download) the read-only master image**
+------------------------------------------------
 
-You need a complete Gentoo root filesystem tree:
+You need *one* directory tree that contains a complete Gentoo/rootfs.
+You can:
 
-```bash
-# Option 1: Build from existing Gentoo
-emerge --root=/tmp/rootfs -N @world
+- `emerge --root=/tmp/rootfs -N @world` on another Gentoo box, or
+- extract the official Xenia root tarball into `/tmp/rootfs`.
 
-# Option 2: Extract Xenia root tarball
-tar -xzf xenia-rootfs.tar.gz -C /tmp/rootfs
+------------------------------------------------
+**3. Turn that tree into a SquashFS file**
+------------------------------------------------
+
+```
+mksquashfs /tmp/rootfs  /tmp/root.img  -comp zstd -Xcompression-level 19
 ```
 
-Create the SquashFS image:
-```bash
-# Create compressed system image
-mksquashfs /tmp/rootfs /tmp/root.img -comp zstd -Xcompression-level 19
+`root.img` is now the immutable "golden master".
+
+------------------------------------------------
+**4. Populate the partitions**
+------------------------------------------------
+
+Mount them anywhere convenient:
+
 ```
-
-#### 3.4.5 Populating Partitions
-
-```bash
-# Mount all partitions
 mkdir -p /mnt/{efi,roots,overlay,home}
 mount /dev/sda1 /mnt/efi
 mount /dev/sda2 /mnt/roots
 mount /dev/sda3 /mnt/overlay
 mount /dev/sda4 /mnt/home
-
-# Copy system image to ROOTS partition
-cp /tmp/root.img /mnt/roots/
-
-# Create overlay directories (initrd will use these)
-mkdir -p /mnt/overlay/upper /mnt/overlay/work
-
-# Home partition will be initialized on first boot
 ```
 
-#### 3.4.6 Bootloader Installation
+Copy the image:
 
-Extract kernel and initrd from the SquashFS:
-```bash
-# Mount the SquashFS temporarily
+```
+cp /tmp/root.img /mnt/roots/
+```
+
+Create empty overlay directories (the initrd will use them):
+
+```
+mkdir -p /mnt/overlay/upper /mnt/overlay/work
+```
+
+(You can leave `/mnt/home` empty; the first boot will create lost+found and any dot-files.)
+
+------------------------------------------------
+**5. Install GRUB so UEFI can start it**
+------------------------------------------------
+
+We still need a kernel + initrd **inside** the SquashFS so GRUB can load them.
+The easiest way is to bind-mount the SquashFS once, chroot into it, build a kernel/initrd, then copy those two files back to the ESP.
+
+```
 mkdir /tmp/sq
 mount -t squashfs /mnt/roots/root.img /tmp/sq
-
-# Copy boot files to ROOTS partition (GRUB can access them there)
 cp -a /tmp/sq/boot/{vmlinuz-*,initramfs-*} /mnt/roots/
 umount /tmp/sq
 ```
 
-Install GRUB:
-```bash
-# Install GRUB for UEFI
+Now install GRUB (still from the live environment):
+
+```
 grub-install --target=x86_64-efi --efi-directory=/mnt/efi --boot-directory=/mnt/roots/boot --removable
 ```
 
-Create minimal `/mnt/efi/EFI/BOOT/grub.cfg`:
-```grub
+`--removable` makes the firmware find `\EFI\BOOT\BOOTX64.EFI` (no NVRAM entry needed).
+
+Create a minimal `grub.cfg` (on the ESP, or in `/mnt/roots/boot/grub/grub.cfg`):
+
+```
 set root=(hd0,gpt2)        # ROOTS partition
-linux  /boot/vmlinuz-<version> root=LABEL=ROOTS overlay=LABEL=OVERLAY home=LABEL=HOME quiet
-initrd /boot/initramfs-<version>.img
+linux  /boot/vmlinuz-<ver> root=LABEL=ROOTS overlay=LABEL=OVERLAY home=LABEL=HOME quiet
+initrd /boot/initramfs-<ver>.img
 ```
 
-#### 3.4.7 Boot Process and OverlayFS
+------------------------------------------------
+**6. First boot – what the initrd does**
+------------------------------------------------
 
-At boot time, the initrd performs these steps:
+- Opens LUKS if you encrypted anything.
+- Mounts **ROOTS** read-only → finds `root.img`.
+- Mounts **OVERLAY** read-write.
+- Creates the OverlayFS merge:
+  ```
+  mount -t overlay overlay -o lowerdir=/rootfs,upperdir=/overlay/upper,workdir=/overlay/work /newroot
+  ```
+- Binds **HOME** onto `/newroot/home`.
+- `switch_root` → systemd starts.
 
-1. **Partition Discovery**: Finds partitions by GPT labels (`EFI`, `ROOTS`, `OVERLAY`, `HOME`)
-2. **LUKS Decryption**: Opens encrypted partitions if configured
-3. **Root Mount**: Mounts `ROOTS` partition read-only and locates `root.img`
-4. **Overlay Setup**: Creates OverlayFS mount with:
-   ```bash
-   mount -t overlay overlay -o lowerdir=/rootfs,upperdir=/overlay/upper,workdir=/overlay/work /newroot
-   ```
-5. **Home Mount**: Binds `HOME` partition to `/newroot/home`
-6. **Switch Root**: Transitions to the new root and starts systemd
+You now have a **writable** system whose *base* is still the pristine SquashFS.
 
-#### 3.4.8 System Operation and Updates
+------------------------------------------------
+**7. Daily life & upgrades**
+------------------------------------------------
 
-**Daily Usage:**
-- All system modifications (package installs, config changes) write to the `OVERLAY` partition
-- The base system remains pristine in the SquashFS image
-- User data is stored separately in the `HOME` partition
+- Install packages, edit configs, add users – everything lands in **OVERLAY**.
+- When a new OS release appears, just drop the new `root-new.img` into the ROOTS partition and reboot; GRUB picks the newest file by mtime.
+- If you ever break the overlay, boot with `overlay=disabled` (GRUB menu entry) – you are instantly back to the clean SquashFS.
 
-**System Updates:**
-- Download new system image: `root-new.img`
-- Place it in the `ROOTS` partition alongside the old image
-- GRUB automatically selects the newest image by modification time
-- Reboot to use the new system
+------------------------------------------------
 
-**Recovery Mode:**
-- Boot with `overlay=disabled` kernel parameter
-- System boots directly from the pristine SquashFS image
-- Allows recovery from overlay corruption or configuration errors
+That is literally all the "magic": four labelled partitions, one SquashFS, one overlay mount.
+Once you see the commands above, the phrase "single system image" just means "every machine can share the same SquashFS and only keep its *local* differences in a thin writable layer."
 
-#### 3.4.9 Benefits of This Architecture
+#### 3.4.1 Architecture Benefits
 
 1. **System Integrity**: Base system cannot be accidentally modified
 2. **Easy Updates**: Just drop in a new SquashFS image
@@ -349,47 +350,161 @@ After successful installation:
 
 ## 4. System Architecture
 
-### 4.1 Immutable Filesystem Design
+### 4.1 BTRFS-Native Architecture
 
-RegicideOS uses a sophisticated overlay filesystem architecture:
+RegicideOS uses BTRFS-native snapshots and sub-volumes to provide the same illusion of "one immutable image + a thin writable layer", while also giving you **copy-on-write snapshots for free**.
 
-```
-/
-├── boot/efi/          # EFI System Partition (FAT32)
-├── root/              # Read-only system image (SquashFS)
-│   ├── usr/           # System binaries and libraries
-│   ├── etc/           # Default configuration (read-only)
-│   └── var/           # System variable data (read-only)
-├── home/              # User data (BTRFS subvolume)
-└── overlay/           # Writable overlays
-    ├── etc/           # Configuration modifications
-    ├── var/           # Variable data changes  
-    └── usr/           # User-installed software
-```
-
-### 4.2 Overlay System Details
-
-The overlay system provides a clean separation between:
-
-- **Base System**: Immutable, cryptographically verified system image
-- **Configuration**: User and system configuration changes in `/overlay/etc`
-- **Variable Data**: Logs, caches, and runtime data in `/overlay/var`
-- **User Software**: Additional applications in `/overlay/usr`
-
-### 4.3 BTRFS Subvolume Layout
+#### 4.1.1 Disk Layout
 
 ```
-ROOTS (BTRFS Volume)
-├── @root              # System image mount point
-├── @home              # User data subvolume
-├── @overlay           # Overlay root
-│   ├── @overlay_etc   # Configuration overlay
-│   ├── @overlay_var   # Variable data overlay
-│   └── @overlay_usr   # User software overlay
-└── @snapshots         # System snapshots
+/dev/sda1   512 MB  FAT32   label "EFI"
+/dev/sda2   rest    BTRFS   label "ROOTS"   ← single big BTRFS partition
 ```
 
-### 4.4 Security Model
+Inside that second partition we create **five fixed sub-volumes**:
+
+```
+ROOTS (top-level BTRFS)
+├─ @                ← empty, reserved for root-image *files*
+├─ @overlay         ← top-level for overlays
+│  ├─ @etc           ← writable layer for /etc
+│  ├─ @var           ← writable layer for /var
+│  └─ @usr           ← writable layer for /usr
+└─ @home             ← /home tree
+```
+
+*(The installer calls them `overlay`, `etc`, `var`, `usr`, `home` without the "@" the @ is just a BTRFS convention.)*
+
+#### 4.1.2 Boot Sequence with BTRFS
+
+1. **UEFI → GRUB → kernel + initrd** (loaded from a **SquashFS** that lives in the *root* of ROOTS).
+2. **Early user-space** (foxmount helper) does **not** use overlayfs at all; it does:
+   ```
+   mount -t btrfs -o subvol=@etc  /dev/sda2  /sysroot/etc
+   mount -t btrfs -o subvol=@var  /dev/sda2  /sysroot/var
+   mount -t btrfs -o subvol=@usr  /dev/sda2  /sysroot/usr
+   mount -t btrfs -o subvol=@home /dev/sda2  /sysroot/home
+   ```
+   The **SquashFS** is loop-mounted **once** on `/sysroot`; the individual **BTRFS sub-volumes are bind-mounted on top** of the directories that must stay writable.
+3. **Switch-root** into `/sysroot` → systemd starts.
+
+#### 4.1.3 Why BTRFS is Better for RegicideOS
+
+| classic overlayfs | BTRFS snapshots |
+|---|---|
+| upperdir + workdir must live on **same fs** as each other, but **can be different** from lowerdir → you still need two partitions (ROOTS + OVERLAY). | Everything is **one partition**; no extra partition for "OVERLAY". |
+| No built-in snapshot of the **writable layer**. | Every sub-volume can be snapshotted instantly: `btrfs sub snap -r @etc @etc-2025-09-21` |
+| Deleting the old lower SquashFS frees **zero** space until you delete the overlay too. | Deleting an old `root.img` **immediately** frees space (BTRFS reflinks are per-file, not per-dir). |
+| Roll-back of **system** means rebooting into old SquashFS; roll-back of **user changes** means wiping the whole upperdir. | You can roll **either** direction independently: `snapper rollback @etc` to yesterday while keeping today's `/usr` layer. |
+| Overlayfs white-outs sometimes confuse backup tools. | Plain directories and files—nothing exotic. |
+
+#### 4.1.4 Snapshot Workflow
+
+```
+# take a consistent checkpoint before big changes
+btrfs subvolume snapshot -r @etc @etc-before-emerge
+btrfs subvolume snapshot -r @usr @usr-before-emerge
+
+# do potentially dangerous stuff
+emerge -avuDN @world
+
+# if it breaks, roll back in seconds
+btrfs subvolume delete @etc
+btrfs subvolume snapshot @etc-before-emerge @etc
+reboot   # now you're on yesterday's /etc with today's kernel
+```
+
+#### 4.1.5 Key Benefits
+
+- **Still boots from a read-only SquashFS** (the "golden image").
+- **Writable parts are not an overlayfs layer** any more; they are **individual BTRFS sub-volumes** that get **bind-mounted on top** of the squashfs directories.
+- This gives the same "immutable base + disposable changes" behaviour, **plus** instant snapshots, roll-backs, and single-partition simplicity—reason enough for the docs to say *"Use BTRFS only; the old layouts are deprecated."*
+
+### 4.2 BTRFS Command Reference
+
+Here are the essential BTRFS commands for managing your RegicideOS system:
+
+#### 4.2.1 Subvolume Management
+
+```bash
+# List all subvolumes
+btrfs subvolume list /mnt/roots
+
+# Create a new subvolume
+btrfs subvolume create /mnt/roots/@new-subvol
+
+# Delete a subvolume
+btrfs subvolume delete /mnt/roots/@old-subvol
+
+# Create a snapshot (read-only)
+btrfs subvolume snapshot -r /mnt/roots/@etc /mnt/roots/@etc-2025-09-20
+
+# Create a snapshot (writable)
+btrfs subvolume snapshot /mnt/roots/@etc /mnt/roots/@etc-working
+
+# Show subvolume information
+btrfs subvolume show /mnt/roots/@etc
+```
+
+#### 4.2.2 System Maintenance
+
+```bash
+# Check filesystem status
+btrfs filesystem df /mnt/roots
+btrfs filesystem usage /mnt/roots
+
+# Balance the filesystem (optimizes data distribution)
+btrfs balance start /mnt/roots
+
+# Scrub the filesystem (checks for data errors)
+btrfs scrub start /mnt/roots
+btrfs scrub status /mnt/roots
+
+# Defragment files
+btrfs filesystem defrag -r /mnt/roots/@usr
+
+# Enable compression on new files
+btrfs property set /mnt/roots/@var compression zstd
+```
+
+#### 4.2.3 Snapshot Management
+
+```bash
+# Create consistent system snapshot before major changes
+btrfs subvolume snapshot -r /mnt/roots/@etc /mnt/roots/@etc-before-emerge
+btrfs subvolume snapshot -r /mnt/roots/@usr /mnt/roots/@usr-before-emerge
+btrfs subvolume snapshot -r /mnt/roots/@var /mnt/roots/@var-before-emerge
+
+# Roll back after failed operation
+btrfs subvolume delete /mnt/roots/@etc
+btrfs subvolume snapshot /mnt/roots/@etc-before-emerge /mnt/roots/@etc
+
+# Send/receive snapshots (for backup/transfer)
+btrfs send /mnt/roots/@etc-2025-09-20 | btrfs receive /backup/snapshots/
+
+# List snapshots
+btrfs subvolume list -s /mnt/roots
+```
+
+#### 4.2.4 Migration from OverlayFS
+
+```bash
+# If migrating from old overlayfs layout, create subvolumes:
+btrfs subvolume create /mnt/roots/@etc
+btrfs subvolume create /mnt/roots/@usr
+btrfs subvolume create /mnt/roots/@var
+btrfs subvolume create /mnt/roots/@home
+
+# Copy existing overlay data to new subvolumes
+cp -a /mnt/overlay/etc/* /mnt/roots/@etc/
+cp -a /mnt/overlay/usr/* /mnt/roots/@usr/
+cp -a /mnt/overlay/var/* /mnt/roots/@var/
+
+# Set default subvolume if needed
+btrfs subvolume set-default /mnt/roots/@
+```
+
+### 4.3 Security Model
 
 - **Read-Only Root**: Base system cannot be modified during runtime
 - **Verified Boot**: System image integrity verified at boot
