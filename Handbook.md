@@ -183,7 +183,160 @@ The RegicideOS installer performs these steps:
    - Configure continual learning frameworks
    - Set up default optimization policies
 
-### 3.4 Post-Installation
+### 3.4 Manual Installation with OverlayFS
+
+For advanced users who want to understand the complete disk partitioning and overlay setup process, here's a detailed walkthrough of creating a RegicideOS system from scratch:
+
+#### 3.4.1 Disk Partitioning Scheme
+
+RegicideOS uses a 4-partition layout designed for immutable system operation:
+
+| Partition | Size | Label | Format | Purpose |
+|----------|------|-------|---------|---------|
+| 1 | 512 MiB | `EFI` | FAT32 | EFI System Partition (ESP) |
+| 2 | 5 GiB | `ROOTS` | ext4 | Read-only SquashFS image storage |
+| 3 | 2 GiB | `OVERLAY` | ext4 | Writable overlay layer |
+| 4 | Remaining | `HOME` | ext4 | User home directory |
+
+#### 3.4.2 Creating Partitions
+
+Start with an empty disk (assume `/dev/sda`):
+
+```bash
+# Create GPT partition table and partitions
+gdisk /dev/sda
+```
+
+Create four partitions with the specified labels. You can also use:
+```bash
+# Alternative using fdisk
+fdisk -t gpt /dev/sda
+
+# Or using parted
+parted /dev/sda mklabel gpt
+parted /dev/sda mkpart primary fat32 1MiB 513MiB
+parted /dev/sda set 1 esp on
+parted /dev/sda name 1 EFI
+# ... continue for other partitions
+```
+
+**Important**: The partition labels (`EFI`, `ROOTS`, `OVERLAY`, `HOME`) are critical as the Xenia initrd uses them to identify partitions at boot time.
+
+#### 3.4.3 Filesystem Creation
+
+```bash
+# Create filesystems with labels
+mkfs.vfat -n EFI     /dev/sda1
+mkfs.ext4 -L ROOTS   /dev/sda2
+mkfs.ext4 -L OVERLAY /dev/sda3
+mkfs.ext4 -L HOME    /dev/sda4
+```
+
+#### 3.4.4 System Image Preparation
+
+You need a complete Gentoo root filesystem tree:
+
+```bash
+# Option 1: Build from existing Gentoo
+emerge --root=/tmp/rootfs -N @world
+
+# Option 2: Extract Xenia root tarball
+tar -xzf xenia-rootfs.tar.gz -C /tmp/rootfs
+```
+
+Create the SquashFS image:
+```bash
+# Create compressed system image
+mksquashfs /tmp/rootfs /tmp/root.img -comp zstd -Xcompression-level 19
+```
+
+#### 3.4.5 Populating Partitions
+
+```bash
+# Mount all partitions
+mkdir -p /mnt/{efi,roots,overlay,home}
+mount /dev/sda1 /mnt/efi
+mount /dev/sda2 /mnt/roots
+mount /dev/sda3 /mnt/overlay
+mount /dev/sda4 /mnt/home
+
+# Copy system image to ROOTS partition
+cp /tmp/root.img /mnt/roots/
+
+# Create overlay directories (initrd will use these)
+mkdir -p /mnt/overlay/upper /mnt/overlay/work
+
+# Home partition will be initialized on first boot
+```
+
+#### 3.4.6 Bootloader Installation
+
+Extract kernel and initrd from the SquashFS:
+```bash
+# Mount the SquashFS temporarily
+mkdir /tmp/sq
+mount -t squashfs /mnt/roots/root.img /tmp/sq
+
+# Copy boot files to ROOTS partition (GRUB can access them there)
+cp -a /tmp/sq/boot/{vmlinuz-*,initramfs-*} /mnt/roots/
+umount /tmp/sq
+```
+
+Install GRUB:
+```bash
+# Install GRUB for UEFI
+grub-install --target=x86_64-efi --efi-directory=/mnt/efi --boot-directory=/mnt/roots/boot --removable
+```
+
+Create minimal `/mnt/efi/EFI/BOOT/grub.cfg`:
+```grub
+set root=(hd0,gpt2)        # ROOTS partition
+linux  /boot/vmlinuz-<version> root=LABEL=ROOTS overlay=LABEL=OVERLAY home=LABEL=HOME quiet
+initrd /boot/initramfs-<version>.img
+```
+
+#### 3.4.7 Boot Process and OverlayFS
+
+At boot time, the initrd performs these steps:
+
+1. **Partition Discovery**: Finds partitions by GPT labels (`EFI`, `ROOTS`, `OVERLAY`, `HOME`)
+2. **LUKS Decryption**: Opens encrypted partitions if configured
+3. **Root Mount**: Mounts `ROOTS` partition read-only and locates `root.img`
+4. **Overlay Setup**: Creates OverlayFS mount with:
+   ```bash
+   mount -t overlay overlay -o lowerdir=/rootfs,upperdir=/overlay/upper,workdir=/overlay/work /newroot
+   ```
+5. **Home Mount**: Binds `HOME` partition to `/newroot/home`
+6. **Switch Root**: Transitions to the new root and starts systemd
+
+#### 3.4.8 System Operation and Updates
+
+**Daily Usage:**
+- All system modifications (package installs, config changes) write to the `OVERLAY` partition
+- The base system remains pristine in the SquashFS image
+- User data is stored separately in the `HOME` partition
+
+**System Updates:**
+- Download new system image: `root-new.img`
+- Place it in the `ROOTS` partition alongside the old image
+- GRUB automatically selects the newest image by modification time
+- Reboot to use the new system
+
+**Recovery Mode:**
+- Boot with `overlay=disabled` kernel parameter
+- System boots directly from the pristine SquashFS image
+- Allows recovery from overlay corruption or configuration errors
+
+#### 3.4.9 Benefits of This Architecture
+
+1. **System Integrity**: Base system cannot be accidentally modified
+2. **Easy Updates**: Just drop in a new SquashFS image
+3. **Fast Rollback**: Boot without overlay to return to clean state
+4. **Storage Efficiency**: Single system image shared across multiple machines
+5. **Snapshot Support**: Overlay state can be snapshotted and restored
+6. **Security**: Immutable root reduces attack surface
+
+### 3.5 Post-Installation
 
 After successful installation:
 
