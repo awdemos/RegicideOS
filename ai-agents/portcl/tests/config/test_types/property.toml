@@ -1,0 +1,51 @@
+# Property-Based Test Configuration
+# Optimized for property-based and generative testing
+
+[test_type]
+name = "property"
+description = "Property-based tests with generative inputs"
+
+[execution]
+timeout_seconds = 180
+max_parallel_tests = 8
+retry_count = 0
+fail_fast = false
+randomize_order = true
+
+[isolation]
+enabled = true
+temp_directory = "/tmp/portcl-property-tests"
+cleanup_after_suite = true
+
+[logging]
+level = "debug"
+format = "detailed"
+show_skipped = false
+show_output = false
+
+[coverage]
+enabled = true
+report_formats = ["json"]
+exclude_paths = ["tests/*", "target/*"]
+threshold_percentage = 85.0
+
+[property_testing]
+test_cases = 1000
+max_shrink_steps = 1000
+size_range = [0, 100]
+max_discard_ratio = 0.2
+
+[generation]
+strategies_enabled = true
+custom_generators = true
+arbitrary_impls = true
+
+[shrinking]
+enabled = true
+minimal_counterexamples = true
+report_shrink_path = true
+
+[output]
+include_failures = true
+include_statistics = true
+include_generators = true

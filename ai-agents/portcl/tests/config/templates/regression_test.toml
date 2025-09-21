@@ -1,0 +1,42 @@
+# Regression Test Template
+# For detecting regressions and ensuring stability
+
+[test_template]
+name = "regression_test"
+description = "Regression test template for stability verification"
+
+[execution]
+timeout_seconds = 600
+max_parallel_tests = 6
+retry_count = 1
+fail_fast = true
+randomize_order = false
+
+[filtering]
+include_patterns = ["test_*"]
+exclude_patterns = ["*experimental*", "*wip*"]
+test_tags = ["critical", "regression"]
+
+[logging]
+level = "error"
+format = "json"
+show_skipped = false
+show_output = false
+
+[coverage]
+enabled = true
+report_formats = ["json", "lcov"]
+exclude_paths = ["tests/*", "target/*"]
+threshold_percentage = 85.0
+
+[baseline]
+enabled = true
+baseline_file = "target/test-baseline.json"
+compare_threshold_percentage = 5.0
+require_baseline = true
+
+[output]
+directory = "target/regression-test-results"
+formats = ["json", "junit"]
+preserve_artifacts = true
+generate_diff_report = true

@@ -1,5 +1,5 @@
 use super::{ServiceManager, ServiceStatus};
-use crate::config::PortCLConfig;
+use crate::config::PortageConfig;
 use crate::error::{PortCLError, Result};
 use std::path::Path;
 use std::process::Command;
@@ -64,7 +64,7 @@ impl SystemdServiceManager {
         }
     }
 
-    fn install_service_file(&self, service_name: &str, config: &PortCLConfig) -> Result<()> {
+    fn install_service_file(&self, service_name: &str, config: &PortageConfig) -> Result<()> {
         let source_path = format!("systemd/{}", service_name);
         let target_path = format!("/etc/systemd/system/{}", service_name);
 
@@ -73,9 +73,7 @@ impl SystemdServiceManager {
             .map_err(|e| PortCLError::Io(e))?;
 
         // Replace placeholders if needed
-        let final_content = service_content
-            .replace("/usr/local/bin/", &config.general.binary_path)
-            .replace("/etc/portcl/config.toml", &config.config_path);
+        let final_content = service_content;
 
         // Write to systemd directory
         fs::write(&target_path, final_content)
@@ -85,8 +83,8 @@ impl SystemdServiceManager {
         Ok(())
     }
 
-    fn create_config_directory(&self, config: &PortCLConfig) -> Result<()> {
-        let config_dir = Path::new(&config.config_path).parent().unwrap();
+    fn create_config_directory(&self, config: &PortageConfig) -> Result<()> {
+        let config_dir = Path::new("/etc/portcl");
         fs::create_dir_all(config_dir)
             .map_err(|e| PortCLError::Io(e))?;
 
@@ -103,7 +101,7 @@ impl SystemdServiceManager {
 }
 
 impl ServiceManager for SystemdServiceManager {
-    fn install_service(&self, config: &PortCLConfig) -> Result<()> {
+    fn install_service(&self, config: &PortageConfig) -> Result<()> {
         println!("Installing PortCL systemd services...");
 
         // Create necessary directories

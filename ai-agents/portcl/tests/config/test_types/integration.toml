@@ -1,0 +1,50 @@
+# Integration Test Configuration
+# Optimized for component interaction testing
+
+[test_type]
+name = "integration"
+description = "Integration tests for component interactions"
+
+[execution]
+timeout_seconds = 300
+max_parallel_tests = 4
+retry_count = 1
+fail_fast = true
+randomize_order = false
+
+[isolation]
+enabled = true
+temp_directory = "/tmp/portcl-integration-tests"
+cleanup_after_suite = true
+
+[logging]
+level = "info"
+format = "pretty"
+show_skipped = false
+show_output = true
+
+[coverage]
+enabled = true
+report_formats = ["json", "html"]
+exclude_paths = ["tests/*", "target/*"]
+threshold_percentage = 75.0
+
+[database]
+setup_required = true
+migrations_enabled = true
+seed_data_enabled = true
+cleanup_after_tests = true
+
+[network]
+mock_external_services = false
+timeout_ms = 5000
+retry_count = 3
+
+[performance]
+enabled = false
+sample_size = 0
+
+[fixtures]
+realistic = true
+auto_cleanup = true
+setup_time_ms = 10000

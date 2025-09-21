@@ -280,7 +280,7 @@ impl PortageAgent {
     fn estimate_q_value(&self, state: &Array1<f64>, action: &Action) -> Result<f64> {
         // Simplified Q-value estimation
         // In full implementation, this would use the neural network
-        let mut model = self.model.blocking_write();
+        let mut model = self.model.write().await;
         let q_values = model.predict(state)?;
 
         let action_idx = self.action_to_index(action)?;
@@ -288,7 +288,7 @@ impl PortageAgent {
     }
 
     fn estimate_max_q_value(&self, state: &Array1<f64>) -> Result<f64> {
-        let mut model = self.model.blocking_write();
+        let mut model = self.model.write().await;
         let q_values = model.predict(state)?;
         Ok(q_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)))
     }

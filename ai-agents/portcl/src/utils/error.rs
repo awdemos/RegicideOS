@@ -37,19 +37,19 @@ pub fn handle_error(error: &PortCLError) -> Result<()> {
         }
         PortCLError::Io(err) => {
             warn!("IO error: {}", err);
-            Err(PortCLError::Io(err.clone()))
+            Err(PortCLError::Io(std::io::Error::new(err.kind(), err.to_string())))
         }
         PortCLError::Json(err) => {
             warn!("JSON error: {}", err);
-            Err(PortCLError::Json(err.clone()))
+            Err(PortCLError::Json(serde_json::Error::custom(err.to_string())))
         }
         PortCLError::TomlDeserialize(err) => {
             warn!("TOML deserialization error: {}", err);
-            Err(PortCLError::TomlDeserialize(err.clone()))
+            Err(PortCLError::TomlDeserialize(toml::de::Error::custom(err.to_string())))
         }
         PortCLError::TomlSerialize(err) => {
             warn!("TOML serialization error: {}", err);
-            Err(PortCLError::TomlSerialize(err.clone()))
+            Err(PortCLError::TomlSerialize(toml::ser::Error::custom(err.to_string())))
         }
     }
 }
@@ -98,6 +98,8 @@ pub fn error_severity(error: &PortCLError) -> ErrorSeverity {
         PortCLError::Json(_) => ErrorSeverity::Low,
         PortCLError::TomlDeserialize(_) => ErrorSeverity::Low,
         PortCLError::TomlSerialize(_) => ErrorSeverity::Low,
+        PortCLError::NotFound(_) => ErrorSeverity::Medium,
+        PortCLError::Service(_) => ErrorSeverity::High,
     }
 }
 

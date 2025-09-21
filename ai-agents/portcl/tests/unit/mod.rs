@@ -3,6 +3,11 @@
 pub mod error_tests;
 pub mod serde_tests;
 pub mod utils_tests;
+pub mod test_monitor;
+pub mod test_actions;
+pub mod test_rl_engine;
+pub mod test_config;
+pub mod test_error;
 
 #[cfg(test)]
 mod tests {

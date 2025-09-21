@@ -1,5 +1,5 @@
 use tracing::{info, warn, error, debug};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use std::path::Path;
 
 pub fn setup_logging(log_level: &str, log_file: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
@@ -28,7 +28,6 @@ pub fn setup_logging(log_level: &str, log_file: Option<&Path>) -> Result<(), Box
             .open(log_path)?;
 
         let file_layer = fmt::layer()
-            .json()
             .with_writer(file)
             .with_ansi(false);
 

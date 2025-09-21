@@ -3,7 +3,7 @@ pub mod portage_actions;
 pub mod safety;
 
 pub use executor::{ActionExecutor, ExecutorConfig, ActionResult};
-pub use portage_actions::{PortageAction, ActionType, ActionParams};
+pub use portage_actions::{PortageAction, ActionParams};
 pub use safety::{SafetyChecker, SafetyCheck, RollbackManager};
 
 use crate::config::ActionConfig;
@@ -21,14 +21,14 @@ pub enum Action {
 }
 
 impl Action {
-    pub fn action_type(&self) -> ActionType {
+    pub fn action_type(&self) -> String {
         match self {
-            Action::NoOp => ActionType::NoOp,
-            Action::AdjustParallelism { .. } => ActionType::AdjustParallelism,
-            Action::OptimizeBuildOrder { .. } => ActionType::OptimizeBuildOrder,
-            Action::ScheduleOperation { .. } => ActionType::ScheduleOperation,
-            Action::PreFetchDependencies { .. } => ActionType::PreFetchDependencies,
-            Action::CleanObsoletePackages { .. } => ActionType::CleanObsoletePackages,
+            Action::NoOp => "NoOp".to_string(),
+            Action::AdjustParallelism { .. } => "AdjustParallelism".to_string(),
+            Action::OptimizeBuildOrder { .. } => "OptimizeBuildOrder".to_string(),
+            Action::ScheduleOperation { .. } => "ScheduleOperation".to_string(),
+            Action::PreFetchDependencies { .. } => "PreFetchDependencies".to_string(),
+            Action::CleanObsoletePackages { .. } => "CleanObsoletePackages".to_string(),
         }
     }
 

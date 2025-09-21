@@ -1,0 +1,62 @@
+# Staging Test Configuration
+# Used for CI/CD and pre-production testing
+
+[test_environment]
+name = "staging"
+description = "Staging environment for PortCL testing"
+
+[execution]
+timeout_seconds = 600
+max_parallel_tests = 8
+retry_count = 2
+fail_fast = true
+randomize_order = false
+
+[logging]
+level = "info"
+format = "json"
+target = "file"
+show_skipped = false
+show_output = false
+file_path = "target/test.log"
+
+[coverage]
+enabled = true
+report_formats = ["json", "xml", "lcov"]
+exclude_paths = ["tests/*", "target/*", "vendor/*"]
+threshold_percentage = 85.0
+
+[performance]
+enabled = true
+sample_size = 50
+warmup_runs = 5
+max_execution_time_ms = 30000
+memory_limit_mb = 1024
+
+[output]
+directory = "target/test-results"
+formats = ["json", "junit", "html"]
+preserve_artifacts = true
+cleanup_on_success = false
+
+[fixtures]
+auto_generate = false
+cleanup_after_tests = true
+data_directory = "tests/fixtures"
+
+[database]
+url = "postgresql://postgres:password@localhost:5432/portcl_test"
+migrations_enabled = true
+pool_size = 4
+
+[monitoring]
+enabled = true
+metrics_enabled = true
+tracing_enabled = true
+profiling_enabled = true
+
+[security]
+api_key_required = true
+rate_limiting_enabled = true
+requests_per_minute = 60
+timeout_tolerance_ms = 3000

@@ -1,0 +1,62 @@
+# Production Test Configuration
+# Used for production deployment testing
+
+[test_environment]
+name = "production"
+description = "Production environment for PortCL testing"
+
+[execution]
+timeout_seconds = 900
+max_parallel_tests = 16
+retry_count = 3
+fail_fast = true
+randomize_order = false
+
+[logging]
+level = "warn"
+format = "json"
+target = "syslog"
+show_skipped = false
+show_output = false
+
+[coverage]
+enabled = false
+report_formats = []
+exclude_paths = []
+threshold_percentage = 0.0
+
+[performance]
+enabled = true
+sample_size = 100
+warmup_runs = 10
+max_execution_time_ms = 60000
+memory_limit_mb = 2048
+
+[output]
+directory = "/var/log/portcl/test-results"
+formats = ["json", "syslog"]
+preserve_artifacts = false
+cleanup_on_success = true
+
+[fixtures]
+auto_generate = false
+cleanup_after_tests = true
+data_directory = "/var/lib/portcl/test-fixtures"
+
+[database]
+url = "postgresql://postgres:${DB_PASSWORD}@${DB_HOST}:5432/portcl_test"
+migrations_enabled = true
+pool_size = 8
+
+[monitoring]
+enabled = true
+metrics_enabled = true
+tracing_enabled = true
+profiling_enabled = false
+
+[security]
+api_key_required = true
+rate_limiting_enabled = true
+requests_per_minute = 30
+timeout_tolerance_ms = 1000
+ssl_verification_enabled = true

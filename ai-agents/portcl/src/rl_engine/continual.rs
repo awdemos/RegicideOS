@@ -1,6 +1,6 @@
 use crate::error::{PortCLError, Result};
 use crate::rl_engine::model::{DQNModel, ModelConfig};
-use crate::rl_engine::experience::Experience;
+use crate::rl_engine::model::Experience;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
@@ -152,7 +152,7 @@ pub enum ConsolidationEventType {
 impl ContinualLearning {
     pub fn new(config: ContinualLearningConfig) -> Result<Self> {
         Ok(Self {
-            config,
+            config: config.clone(),
             policies: HashMap::new(),
             knowledge_graph: KnowledgeGraph {
                 nodes: Vec::new(),

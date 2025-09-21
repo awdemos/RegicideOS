@@ -1,12 +1,12 @@
 pub mod systemd;
 pub mod openrc;
 
-use crate::config::PortCLConfig;
+use crate::config::PortageConfig;
 use crate::error::{PortCLError, Result};
 use std::path::Path;
 
 pub trait ServiceManager {
-    fn install_service(&self, config: &PortCLConfig) -> Result<()>;
+    fn install_service(&self, config: &PortageConfig) -> Result<()>;
     fn uninstall_service(&self) -> Result<()>;
     fn start_service(&self) -> Result<()>;
     fn stop_service(&self) -> Result<()>;

@@ -3,15 +3,16 @@ pub mod model;
 pub mod experience;
 pub mod continual;
 
-pub use agent::{PortageAgent, AgentConfig, Experience};
+pub use agent::{PortageAgent, AgentConfig};
 pub use model::{DQNModel, ModelConfig};
 pub use experience::{ExperienceBuffer, ReplayBuffer};
-pub use continual::{ContinualLearning, KnowledgeConsolidation};
+pub use continual::{ContinualLearning, ContinualLearningConfig};
 
 use crate::config::RLConfig;
 use crate::error::{PortCLError, Result};
 use crate::monitor::PortageMetrics;
 use crate::actions::Action;
+use crate::rl_engine::model::Experience;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -25,7 +26,17 @@ pub struct RLManager {
 impl RLManager {
     pub fn new(config: RLConfig) -> Result<Self> {
         let agent = PortageAgent::new(config.clone())?;
-        let continual_learning = ContinualLearning::new(config.clone())?;
+            let cl_config = ContinualLearningConfig {
+            enable_ewc: config.enable_continual_learning,
+            ewc_importance: 0.5,
+            enable_progressive_networks: true,
+            enable_policy_reuse: true,
+            consolidation_threshold: 0.8,
+            memory_retention_rate: 0.9,
+            max_policies: 10,
+            consolidation_interval: 100,
+        };
+        let continual_learning = ContinualLearning::new(cl_config)?;
 
         Ok(Self {
             config,

@@ -1,0 +1,32 @@
+# Quick Test Template
+# For fast local development testing
+
+[test_template]
+name = "quick_test"
+description = "Quick test template for rapid development iteration"
+
+[execution]
+timeout_seconds = 60
+max_parallel_tests = 4
+retry_count = 0
+fail_fast = false
+randomize_order = true
+
+[filtering]
+include_patterns = ["test_*"]
+exclude_patterns = ["*_slow", "*_integration", "*_performance"]
+test_tags = ["fast", "unit"]
+
+[logging]
+level = "warn"
+format = "compact"
+show_skipped = false
+show_output = false
+
+[coverage]
+enabled = false
+
+[output]
+directory = "target/quick-test-results"
+formats = ["console"]
+preserve_artifacts = false

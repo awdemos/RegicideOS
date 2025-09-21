@@ -1,6 +1,7 @@
 use crate::error::{PortCLError, Result};
 use crate::config::PortageConfig;
 use std::path::Path;
+use std::process::Command;
 
 pub fn validate_config(config: &PortageConfig) -> Result<()> {
     // Validate monitoring configuration
@@ -131,13 +132,19 @@ pub fn validate_system_requirements() -> Result<()> {
     }
 
     // Check if we have necessary permissions
-    if !nix::unistd::Uid::effective().is_root() {
-        // Check if we're in the portcl group
-        // This is a simplified check - in practice, you'd want more sophisticated permission handling
-        return Err(PortCLError::Validation(
-            "PortCL requires root privileges or portcl group membership".to_string()
-        ));
-    }
+    let output = Command::new("id").arg("-u").output();
+    if let Ok(output) = output {
+        if let Ok(uid_str) = String::from_utf8(output.stdout) {
+            let uid = uid_str.trim();
+                    if uid != "0" {
+                    // Check if we're in the portcl group
+                    // This is a simplified check - in practice, you'd want more sophisticated permission handling
+                    return Err(PortCLError::Validation(
+                        "PortCL requires root privileges or portcl group membership".to_string()
+                    ));
+                }
+            }
+        }
 
     Ok(())
 }
