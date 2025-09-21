@@ -1,14 +1,11 @@
-use crate::config::RLConfig;
 use crate::error::{PortCLError, Result};
 use crate::monitor::PortageMetrics;
 use crate::actions::Action;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use ndarray::{Array1, Array2, Array3};
+use ndarray::Array1;
 use rand::Rng;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
@@ -211,7 +208,7 @@ impl DQNModel {
         if self.should_explore() {
             let mut rng = rand::thread_rng();
             for i in 0..q_values.len() {
-                q_values[i] += rng.gen_range(-0.1..0.1);
+                q_values[i] += rng.gen_range(-0.1..=0.1);
             }
         }
 
@@ -282,7 +279,7 @@ impl DQNModel {
         // Epsilon-greedy action selection
         if self.should_explore() {
             let mut rng = rand::thread_rng();
-            let action_idx = rng.gen_range(0..q_values.len());
+            let action_idx = rng.gen_range(0..=q_values.len()-1);
             let action = Self::index_to_action(action_idx)?;
             return Ok((action, q_values[action_idx]));
         }
@@ -323,7 +320,7 @@ impl DQNModel {
 
         // Simulate training loss
         let mut rng = rand::thread_rng();
-        let loss = rng.gen_range(0.01..0.1);
+        let loss = rng.gen_range(0.01..=0.1);
 
         self.loss_history.push(loss);
         self.training_step += 1;

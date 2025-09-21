@@ -1,55 +1,71 @@
 use crate::error::{PortCLError, Result};
-use tracing::{error, warn, info, debug};
+use tracing::{error, warn, info};
 
-pub fn handle_error(error: &PortCLError) -> Result<()> {
+pub fn handle_error(error: PortCLError) -> Result<()> {
     match error {
         PortCLError::Portage(msg) => {
             error!("Portage error: {}", msg);
-            Err(PortCLError::Portage(msg.clone()))
+            Err(PortCLError::Portage(msg))
         }
         PortCLError::RLEngine(msg) => {
             error!("RL engine error: {}", msg);
-            Err(PortCLError::RLEngine(msg.clone()))
+            Err(PortCLError::RLEngine(msg))
         }
         PortCLError::ActionExecution(msg) => {
             error!("Action execution error: {}", msg);
-            Err(PortCLError::ActionExecution(msg.clone()))
+            Err(PortCLError::ActionExecution(msg))
         }
         PortCLError::Configuration(msg) => {
             warn!("Configuration error: {}", msg);
-            Err(PortCLError::Configuration(msg.clone()))
+            Err(PortCLError::Configuration(msg))
         }
         PortCLError::System(msg) => {
             warn!("System error: {}", msg);
-            Err(PortCLError::System(msg.clone()))
+            Err(PortCLError::System(msg))
         }
         PortCLError::Network(msg) => {
             warn!("Network error: {}", msg);
-            Err(PortCLError::Network(msg.clone()))
+            Err(PortCLError::Network(msg))
         }
         PortCLError::Timeout(msg) => {
             warn!("Timeout error: {}", msg);
-            Err(PortCLError::Timeout(msg.clone()))
+            Err(PortCLError::Timeout(msg))
         }
         PortCLError::Validation(msg) => {
             warn!("Validation error: {}", msg);
-            Err(PortCLError::Validation(msg.clone()))
+            Err(PortCLError::Validation(msg))
         }
         PortCLError::Io(err) => {
             warn!("IO error: {}", err);
-            Err(PortCLError::Io(std::io::Error::new(err.kind(), err.to_string())))
+            Err(PortCLError::Io(err))
         }
         PortCLError::Json(err) => {
             warn!("JSON error: {}", err);
-            Err(PortCLError::Json(serde_json::Error::custom(err.to_string())))
+            Err(PortCLError::Json(err))
         }
         PortCLError::TomlDeserialize(err) => {
             warn!("TOML deserialization error: {}", err);
-            Err(PortCLError::TomlDeserialize(toml::de::Error::custom(err.to_string())))
+            Err(PortCLError::TomlDeserialize(err))
         }
         PortCLError::TomlSerialize(err) => {
             warn!("TOML serialization error: {}", err);
-            Err(PortCLError::TomlSerialize(toml::ser::Error::custom(err.to_string())))
+            Err(PortCLError::TomlSerialize(err))
+        }
+        PortCLError::NotFound(msg) => {
+            warn!("Not found error: {}", msg);
+            Err(PortCLError::NotFound(msg))
+        }
+        PortCLError::Service(msg) => {
+            warn!("Service error: {}", msg);
+            Err(PortCLError::Service(msg))
+        }
+        PortCLError::Resource(msg) => {
+            warn!("Resource error: {}", msg);
+            Err(PortCLError::Resource(msg))
+        }
+        PortCLError::Safety(msg) => {
+            warn!("Safety error: {}", msg);
+            Err(PortCLError::Safety(msg))
         }
     }
 }
@@ -67,7 +83,7 @@ pub fn log_result<T>(result: Result<T>, operation: &str) -> Result<T> {
     }
 }
 
-pub fn is_retryable_error(error: &PortCLError) -> bool {
+pub fn is_retryable_error(error: PortCLError) -> bool {
     match error {
         PortCLError::Network(_) => true,
         PortCLError::Timeout(_) => true,
@@ -80,11 +96,15 @@ pub fn is_retryable_error(error: &PortCLError) -> bool {
             // Some system errors might be retryable (e.g., temporary resource issues)
             msg.contains("temporarily") || msg.contains("resource") || msg.contains("busy")
         }
+        PortCLError::Resource(msg) => {
+            // Resource errors might be retryable if temporary
+            msg.contains("temporarily") || msg.contains("busy") || msg.contains("unavailable")
+        }
         _ => false,
     }
 }
 
-pub fn error_severity(error: &PortCLError) -> ErrorSeverity {
+pub fn error_severity(error: PortCLError) -> ErrorSeverity {
     match error {
         PortCLError::Portage(_) => ErrorSeverity::High,
         PortCLError::RLEngine(_) => ErrorSeverity::Medium,
@@ -100,6 +120,8 @@ pub fn error_severity(error: &PortCLError) -> ErrorSeverity {
         PortCLError::TomlSerialize(_) => ErrorSeverity::Low,
         PortCLError::NotFound(_) => ErrorSeverity::Medium,
         PortCLError::Service(_) => ErrorSeverity::High,
+        PortCLError::Resource(_) => ErrorSeverity::High,
+        PortCLError::Safety(_) => ErrorSeverity::Critical,
     }
 }
 

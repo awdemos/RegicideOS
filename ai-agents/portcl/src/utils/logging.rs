@@ -1,4 +1,4 @@
-use tracing::{info, warn, error, debug};
+use tracing::info;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use std::path::Path;
 

@@ -45,4 +45,10 @@ pub enum PortCLError {
 
     #[error("Service error: {0}")]
     Service(String),
+
+    #[error("Resource error: {0}")]
+    Resource(String),
+
+    #[error("Safety error: {0}")]
+    Safety(String),
 }

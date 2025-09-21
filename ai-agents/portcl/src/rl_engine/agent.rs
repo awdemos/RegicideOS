@@ -8,10 +8,11 @@ use crate::rl_engine::{
     continual::{ContinualLearning, ContinualLearningConfig, TaskContext},
 };
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use ndarray::Array1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +97,7 @@ impl PortageAgent {
             memory_retention_rate: 0.95,
             max_policies: 10,
             consolidation_interval: 100,
-        });
+        })?;
 
         let state = AgentState {
             training_step: 0,
@@ -136,11 +137,11 @@ impl PortageAgent {
         Ok(action)
     }
 
-    pub async fn update_experience(&self, experience: Experience) -> Result<()> {
+    pub async fn update_experience(&mut self, experience: Experience) -> Result<()> {
         debug!("Updating agent experience");
 
         // Add experience to replay buffer
-        let priority = self.calculate_priority(&experience);
+        let priority = self.calculate_priority(&experience).await;
         self.replay_buffer.add_experience(experience.clone(), Some(priority))?;
 
         // Update agent state
@@ -152,18 +153,18 @@ impl PortageAgent {
         self.task_tracker.update(experience.clone()).await?;
 
         // Perform training if conditions are met
-        if state.training_step % self.config.training_freq == 0 &&
+        if state.training_step % self.config.training_freq as u64 == 0 &&
            self.replay_buffer.len() >= self.config.batch_size {
             self.train_step().await?;
         }
 
         // Update target network if needed
-        if state.training_step % self.config.target_update_freq == 0 {
+        if state.training_step % self.config.target_update_freq as u64 == 0 {
             self.update_target_network().await?;
         }
 
         // Save model if needed
-        if state.training_step % self.config.save_freq == 0 {
+        if state.training_step % self.config.save_freq as u64 == 0 {
             self.save_model().await?;
         }
 
@@ -173,10 +174,9 @@ impl PortageAgent {
         }
 
         // Update exploration rate
-        if let Ok(mut model) = self.model.write().await {
-            model.update_epsilon();
-            state.epsilon = model.epsilon;
-        }
+        let mut model = self.model.write().await;
+        model.update_epsilon();
+        state.epsilon = model.epsilon;
 
         state.training_step += 1;
 
@@ -191,9 +191,11 @@ impl PortageAgent {
         let loss = self.train_on_batch(&batch, &importance_weights).await?;
 
         // Update priorities for prioritized experience replay
-        let td_errors: Vec<f64> = batch.iter().map(|exp| {
-            self.calculate_td_error(exp).unwrap_or(0.0)
-        }).collect();
+        let td_errors: Vec<f64> = futures::future::join_all(
+            batch.iter().map(|exp| async move {
+                self.calculate_td_error(exp).await.unwrap_or_else(|_| 0.0)
+            })
+        ).await;
 
         self.replay_buffer.update_priorities(&indices, &td_errors)?;
 
@@ -213,17 +215,17 @@ impl PortageAgent {
     async fn update_target_network(&self) -> Result<()> {
         debug!("Updating target network");
 
-        let model = self.model.read().await;
         let mut target_model = self.target_model.write().await;
+        let mut model = self.model.write().await;
 
-        model.update_target_network(&target_model)?;
+        target_model.update_target_network(&mut model)?;
         drop(target_model);
 
         info!("Target network updated");
         Ok(())
     }
 
-    async fn save_model(&self) -> Result<()> {
+    pub async fn save_model(&self) -> Result<()> {
         debug!("Saving model");
 
         let model = self.model.read().await;
@@ -260,16 +262,16 @@ impl PortageAgent {
         model.state_to_tensor(metrics)
     }
 
-    fn calculate_priority(&self, experience: &Experience) -> f64 {
+    async fn calculate_priority(&self, experience: &Experience) -> f64 {
         // Calculate TD error as priority
-        self.calculate_td_error(experience).unwrap_or(1.0).abs()
+        self.calculate_td_error(experience).await.unwrap_or(1.0).abs()
     }
 
-    fn calculate_td_error(&self, experience: &Experience) -> Result<f64> {
+    async fn calculate_td_error(&self, experience: &Experience) -> Result<f64> {
         // Simplified TD error calculation
         // In full implementation, this would use the neural network
-        let current_q = self.estimate_q_value(&experience.state, &experience.action)?;
-        let max_next_q = self.estimate_max_q_value(&experience.next_state)?;
+        let current_q = self.estimate_q_value(&experience.state, &experience.action).await?;
+        let max_next_q = self.estimate_max_q_value(&experience.next_state).await?;
 
         let target = experience.reward + if experience.done { 0.0 } else { 0.95 * max_next_q };
         let td_error = target - current_q;
@@ -277,18 +279,18 @@ impl PortageAgent {
         Ok(td_error)
     }
 
-    fn estimate_q_value(&self, state: &Array1<f64>, action: &Action) -> Result<f64> {
+    async fn estimate_q_value(&self, state: &Array1<f64>, action: &Action) -> Result<f64> {
         // Simplified Q-value estimation
         // In full implementation, this would use the neural network
-        let mut model = self.model.write().await;
+        let model = self.model.write().await;
         let q_values = model.predict(state)?;
 
         let action_idx = self.action_to_index(action)?;
         Ok(q_values[action_idx])
     }
 
-    fn estimate_max_q_value(&self, state: &Array1<f64>) -> Result<f64> {
-        let mut model = self.model.write().await;
+    async fn estimate_max_q_value(&self, state: &Array1<f64>) -> Result<f64> {
+        let model = self.model.write().await;
         let q_values = model.predict(state)?;
         Ok(q_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)))
     }

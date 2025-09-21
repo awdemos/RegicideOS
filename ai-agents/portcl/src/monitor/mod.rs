@@ -7,22 +7,21 @@ pub use metrics::{PortageMetrics, SystemMetrics, MetricsCollector};
 pub use events::{PortageEvent, EventTracker, EventType};
 
 use crate::config::MonitoringConfig;
-use crate::error::{PortCLError, Result};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{info, debug, error, warn};
+use crate::error::Result;
+use std::sync::{Arc, Mutex};
+use tracing::{info, debug, error};
 
 pub struct MonitorManager {
     config: MonitoringConfig,
     portage_monitor: PortageMonitor,
-    metrics_collector: MetricsCollector,
+    metrics_collector: Arc<Mutex<MetricsCollector>>,
     event_tracker: EventTracker,
 }
 
 impl MonitorManager {
     pub fn new(config: MonitoringConfig) -> Result<Self> {
         let portage_monitor = PortageMonitor::new(config.clone())?;
-        let metrics_collector = MetricsCollector::new(config.clone())?;
+        let metrics_collector = Arc::new(Mutex::new(MetricsCollector::new(config.clone())?));
         let event_tracker = EventTracker::new(config.clone())?;
 
         Ok(Self {
@@ -37,13 +36,15 @@ impl MonitorManager {
         debug!("Starting metrics collection");
 
         let portage_info = self.portage_monitor.get_portage_info().await?;
-        let system_metrics = self.metrics_collector.collect_system_metrics().await?;
+        let mut metrics_collector = self.metrics_collector.lock().unwrap();
+        let system_metrics = metrics_collector.collect_system_metrics().await?;
+        drop(metrics_collector);
 
         let metrics = PortageMetrics {
             timestamp: chrono::Utc::now(),
             portage_info,
             system_metrics,
-            recent_events: self.event_tracker.get_recent_events().await,
+            recent_events: self.event_tracker.get_recent_events(Some(100)).await,
         };
 
         debug!("Metrics collection completed");
@@ -80,6 +81,6 @@ impl MonitorManager {
     }
 
     pub async fn track_event(&self, event_type: EventType, details: String) -> Result<()> {
-        self.event_tracker.track_event(event_type, details).await
+        self.event_tracker.track_event(event_type, details).await.map(|_| ())
     }
 }

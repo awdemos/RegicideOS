@@ -91,7 +91,7 @@ impl ExperienceBuffer {
 
         // Normalize importance weights
         if let Some(max_weight) = importance_weights.iter().fold(None, |acc, &w| {
-            Some(acc.map_or(w, |a| a.max(w)))
+            Some(acc.map_or(w, |a: f64| a.max(w)))
         }) {
             if max_weight > 0.0 {
                 // Note: normalization would happen here, but we return raw weights for now
@@ -183,6 +183,19 @@ pub struct ExperienceBufferStats {
     pub max_priority: f64,
     pub alpha: f64,
     pub beta: f64,
+}
+
+impl Default for ExperienceBufferStats {
+    fn default() -> Self {
+        Self {
+            size: 0,
+            capacity: 0,
+            avg_priority: 0.0,
+            max_priority: 0.0,
+            alpha: 0.6,
+            beta: 0.4,
+        }
+    }
 }
 
 pub struct ReplayBuffer {

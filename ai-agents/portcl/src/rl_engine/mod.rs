@@ -9,18 +9,16 @@ pub use experience::{ExperienceBuffer, ReplayBuffer};
 pub use continual::{ContinualLearning, ContinualLearningConfig};
 
 use crate::config::RLConfig;
-use crate::error::{PortCLError, Result};
+use crate::error::Result;
 use crate::monitor::PortageMetrics;
 use crate::actions::Action;
 use crate::rl_engine::model::Experience;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, Mutex};
 
 pub struct RLManager {
     config: RLConfig,
     agent: PortageAgent,
-    continual_learning: ContinualLearning,
+    continual_learning: Arc<Mutex<ContinualLearning>>,
 }
 
 impl RLManager {
@@ -36,7 +34,7 @@ impl RLManager {
             max_policies: 10,
             consolidation_interval: 100,
         };
-        let continual_learning = ContinualLearning::new(cl_config)?;
+        let continual_learning = Arc::new(Mutex::new(ContinualLearning::new(cl_config)?));
 
         Ok(Self {
             config,
@@ -49,20 +47,22 @@ impl RLManager {
         self.agent.select_action(metrics).await
     }
 
-    pub async fn update_experience(&self, experience: Experience) -> Result<()> {
+    pub async fn update_experience(&mut self, experience: Experience) -> Result<()> {
         self.agent.update_experience(experience).await?;
-        self.continual_learning.consolidate_knowledge().await
+        let mut cl = self.continual_learning.lock().unwrap();
+        cl.consolidate_knowledge().await
     }
 
     pub async fn train_model(&self) -> Result<()> {
-        self.agent.train_model().await
+        self.agent.train_step().await?;
+        Ok(())
     }
 
-    pub async fn save_model(&self, path: &str) -> Result<()> {
-        self.agent.save_model(path).await
+    pub async fn save_model(&self) -> Result<()> {
+        self.agent.save_model().await
     }
 
-    pub async fn load_model(&self, path: &str) -> Result<()> {
-        self.agent.load_model(path).await
+    pub async fn load_model(&self) -> Result<()> {
+        self.agent.load_model().await
     }
 }
