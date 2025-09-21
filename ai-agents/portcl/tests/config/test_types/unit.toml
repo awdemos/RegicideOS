@@ -1,0 +1,48 @@
+# Unit Test Configuration
+# Optimized for fast, isolated unit testing
+
+[test_type]
+name = "unit"
+description = "Unit tests for individual components"
+
+[execution]
+timeout_seconds = 30
+max_parallel_tests = 32
+retry_count = 0
+fail_fast = false
+randomize_order = true
+
+[isolation]
+enabled = true
+temp_directory = "/tmp/portcl-unit-tests"
+cleanup_after_each_test = true
+
+[logging]
+level = "error"
+format = "compact"
+show_skipped = true
+show_output = false
+
+[coverage]
+enabled = true
+report_formats = ["json"]
+exclude_paths = ["tests/*", "target/*"]
+threshold_percentage = 90.0
+
+[mocks]
+auto_generate = true
+strict_mocking = true
+mock_verification = true
+
+[assertions]
+detailed_failures = true
+custom_assertions_enabled = true
+diff_on_failure = true
+
+[performance]
+enabled = false
+sample_size = 0
+
+[fixtures]
+minimal = true
+auto_cleanup = true

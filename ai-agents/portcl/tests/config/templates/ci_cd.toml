@@ -1,0 +1,54 @@
+# CI/CD Test Template
+# For automated testing in CI/CD pipelines
+
+[test_template]
+name = "ci_cd"
+description = "CI/CD pipeline test template"
+
+[execution]
+timeout_seconds = 1200
+max_parallel_tests = 12
+retry_count = 1
+fail_fast = true
+randomize_order = false
+
+[filtering]
+include_patterns = ["test_*"]
+exclude_patterns = ["*manual*", "*local*"]
+test_tags = ["automated"]
+
+[logging]
+level = "info"
+format = "json"
+show_skipped = false
+show_output = false
+file_path = "target/ci-test.log"
+
+[coverage]
+enabled = true
+report_formats = ["json", "xml", "lcov"]
+exclude_paths = ["tests/*", "target/*"]
+threshold_percentage = 75.0
+
+[performance]
+enabled = true
+sample_size = 10
+warmup_runs = 2
+
+[security]
+api_key_required = true
+api_key_env_var = "TEST_API_KEY"
+timeout_tolerance_ms = 3000
+
+[output]
+directory = "target/ci-test-results"
+formats = ["json", "junit", "github"]
+preserve_artifacts = true
+upload_results = true
+artifacts_path = "test-results"
+
+[notifications]
+enabled = true
+on_failure = true
+on_success = false
+webhook_url_env_var = "TEST_WEBHOOK_URL"

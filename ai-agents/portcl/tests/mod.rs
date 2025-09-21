@@ -1,29 +1,28 @@
-//! Integration tests for PortCL
+//! Test suite entry point for PortCL
+//!
+//! This module serves as the main entry point for all PortCL tests.
+//! Individual test categories are organized in subdirectories.
 
-mod fixtures;
+pub mod contract;
+pub mod fixtures;
+pub mod integration;
+pub mod performance;
+pub mod property;
+pub mod unit;
 
 #[cfg(test)]
-mod integration {
+mod common {
     use super::*;
-    use portcl::error::PortCLError;
-    use portcl::utils::setup_logging;
 
-    #[test]
-    fn test_integration_basic_functionality() {
-        // Test that basic functionality works together
-        assert!(true); // Placeholder for integration test
+    /// Common test setup that runs before all tests
+    pub fn setup() {
+        // Initialize test environment
+        // This will be expanded as needed
     }
 
-    #[tokio::test]
-    async fn test_integration_async_operations() {
-        // Test async operations work together
-        assert!(true); // Placeholder for async integration test
-    }
-
-    #[test]
-    fn test_error_handling_integration() {
-        // Test error handling across modules
-        let result: Result<(), PortCLError> = Ok(());
-        assert!(result.is_ok());
+    /// Common test cleanup that runs after all tests
+    pub fn teardown() {
+        // Clean up test environment
+        // This will be expanded as needed
     }
 }

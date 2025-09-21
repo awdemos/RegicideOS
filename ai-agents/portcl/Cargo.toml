@@ -53,6 +53,7 @@ ndarray = "0.15"
 # System integration
 nix = "0.27"
 sysinfo = "0.30"
+num_cpus = "1.0"
 
 # Configuration
 config = "0.13"

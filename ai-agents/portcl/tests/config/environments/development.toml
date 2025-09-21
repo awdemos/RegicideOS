@@ -1,0 +1,60 @@
+# Development Test Configuration
+# Used for local development and testing
+
+[test_environment]
+name = "development"
+description = "Local development environment for PortCL testing"
+
+[execution]
+timeout_seconds = 300
+max_parallel_tests = 4
+retry_count = 1
+fail_fast = false
+randomize_order = true
+
+[logging]
+level = "debug"
+format = "pretty"
+target = "console"
+show_skipped = true
+show_output = true
+
+[coverage]
+enabled = true
+report_formats = ["json", "html"]
+exclude_paths = ["tests/*", "target/*"]
+threshold_percentage = 80.0
+
+[performance]
+enabled = true
+sample_size = 10
+warmup_runs = 3
+max_execution_time_ms = 10000
+memory_limit_mb = 512
+
+[output]
+directory = "target/test-results"
+formats = ["json", "junit"]
+preserve_artifacts = true
+cleanup_on_success = false
+
+[fixtures]
+auto_generate = true
+cleanup_after_tests = true
+data_directory = "tests/fixtures"
+
+[database]
+url = "sqlite::memory:"
+migrations_enabled = false
+pool_size = 1
+
+[monitoring]
+enabled = true
+metrics_enabled = true
+tracing_enabled = true
+profiling_enabled = true
+
+[security]
+api_key_required = false
+rate_limiting_enabled = false
+timeout_tolerance_ms = 5000

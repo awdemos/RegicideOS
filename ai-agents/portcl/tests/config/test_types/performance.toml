@@ -1,0 +1,56 @@
+# Performance Test Configuration
+# Optimized for performance and load testing
+
+[test_type]
+name = "performance"
+description = "Performance benchmarks and load tests"
+
+[execution]
+timeout_seconds = 600
+max_parallel_tests = 1
+retry_count = 0
+fail_fast = false
+randomize_order = false
+
+[isolation]
+enabled = true
+temp_directory = "/tmp/portcl-performance-tests"
+cleanup_after_suite = true
+
+[logging]
+level = "info"
+format = "json"
+show_skipped = false
+show_output = false
+
+[coverage]
+enabled = false
+report_formats = []
+threshold_percentage = 0.0
+
+[performance]
+enabled = true
+sample_size = 100
+warmup_runs = 10
+cool_down_runs = 5
+max_execution_time_ms = 120000
+memory_limit_mb = 4096
+
+[benchmarks]
+iterations = 1000
+measure_memory = true
+measure_cpu = true
+measure_disk_io = true
+measure_network = true
+
+[monitoring]
+enabled = true
+metrics_collection_rate_ms = 100
+profiling_enabled = true
+tracing_enabled = true
+
+[output]
+include_raw_data = true
+statistical_analysis = true
+comparison_baseline = true
+historical_tracking = true

@@ -39,4 +39,10 @@ pub enum PortCLError {
 
     #[error("Validation error: {0}")]
     Validation(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    #[error("Service error: {0}")]
+    Service(String),
 }

@@ -2,7 +2,8 @@ use crate::config::MonitoringConfig;
 use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -19,7 +20,7 @@ pub struct PortageEvent {
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EventType {
     PackageInstall,
     PackageRemove,
@@ -40,7 +41,7 @@ pub enum EventType {
     Info,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EventSeverity {
     Critical,
     High,
@@ -49,7 +50,7 @@ pub enum EventSeverity {
     Info,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EventSource {
     Portage,
     System,

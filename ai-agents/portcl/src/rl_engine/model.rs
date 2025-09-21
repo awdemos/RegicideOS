@@ -354,7 +354,7 @@ impl DQNModel {
         Ok(model)
     }
 
-    pub fn update_target_network(&mut self, target_model: &DQNModel) -> Result<()> {
+    pub fn update_target_network(&mut self, target_model: &mut DQNModel) -> Result<()> {
         // In real implementation, this would copy neural network weights
         debug!("Updating target network");
 

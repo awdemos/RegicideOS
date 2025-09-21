@@ -1,0 +1,57 @@
+# Test Runner Configuration
+# Main configuration file for the PortCL test runner
+
+[runner]
+name = "portcl-test-runner"
+version = "0.1.0"
+description = "Comprehensive test runner for PortCL"
+
+[runner.defaults]
+environment = "development"
+test_type = "unit"
+template = "quick_test"
+config_dir = "tests/config"
+output_dir = "target/test-results"
+
+[runner.features]
+parallel_execution = true
+coverage_collection = true
+performance_monitoring = true
+test_discovery = true
+result_aggregation = true
+report_generation = true
+artifact_management = true
+configuration_validation = true
+
+[runner.integrations]
+github_actions = true
+jenkins = true
+travis_ci = true
+circle_ci = true
+docker = true
+kubernetes = false
+
+[runner.notifications]
+email_enabled = false
+slack_enabled = false
+webhook_enabled = true
+console_enabled = true
+
+[runner.cache]
+enabled = true
+directory = "target/test-cache"
+max_size_mb = 1024
+ttl_hours = 24
+
+[runner.profiling]
+enabled = true
+output_format = "json"
+include_memory = true
+include_cpu = true
+include_network = true
+
+[runner.security]
+api_validation = true
+input_sanitization = true
+path_traversal_protection = true
+command_injection_protection = true

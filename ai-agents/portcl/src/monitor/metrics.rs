@@ -2,7 +2,7 @@ use crate::config::MonitoringConfig;
 use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use sysinfo::{System, SystemExt, ProcessExt, CpuExt};
+use sysinfo::System;
 use std::path::Path;
 use std::fs;
 use tracing::{debug, warn};
@@ -272,7 +272,7 @@ impl MetricsCollector {
             .output()
             .map_err(|e| PortCLError::System(format!("Failed to check emerge processes: {}", e)))?;
 
-        Ok(output.stdout.lines().count() as u32)
+            Ok(String::from_utf8_lossy(&output.stdout).lines().count() as u32)
     }
 
     async fn get_total_compile_time(&self) -> Result<u64> {

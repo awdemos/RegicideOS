@@ -213,7 +213,7 @@ impl Default for ReplayBufferConfig {
 
 impl ReplayBuffer {
     pub fn new(config: ReplayBufferConfig) -> Self {
-        let buffer = ExperienceBuffer::new(config.capacity);
+        let mut buffer = ExperienceBuffer::new(config.capacity);
         buffer.alpha = config.alpha;
         buffer.beta = config.beta_start;
         buffer.beta_increment = config.beta_increment;
