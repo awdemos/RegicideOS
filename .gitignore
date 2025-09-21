@@ -42,6 +42,7 @@ output/
 *.pt
 *.model
 *.safetensors
+.claude/*
 
 # Environment
 .env
