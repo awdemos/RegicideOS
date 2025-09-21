@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use portcl::config::PortageConfig;
-use portcl::monitor::PortageMonitor;
+use portcl::monitor::MonitorManager;
 use portcl::rl_engine::PortageAgent;
 use portcl::actions::ActionExecutor;
 use portcl::prelude::*;
@@ -75,19 +75,19 @@ async fn main() -> Result<()> {
 }
 
 async fn run_agent(config: PortageConfig) -> Result<()> {
-    let monitor = PortageMonitor::new(config.monitoring.clone())?;
+    let monitor = MonitorManager::new(config.monitoring.clone())?;
     let agent = PortageAgent::new(config.rl.clone())?;
-    let executor = ActionExecutor::new();
+    let mut executor = ActionExecutor::new();
 
     // Main agent loop
     loop {
         match monitor.collect_metrics().await {
             Ok(metrics) => {
                 let action = agent.select_action(&metrics).await?;
-                let result = executor.execute(action).await?;
+                let _result = executor.execute(action.clone()).await?;
 
-                // Update agent with experience
-                agent.update_experience(metrics, action, result).await?;
+                // Update agent with experience (placeholder - would need proper Experience struct)
+                // agent.update_experience(experience).await?;
 
                 info!("Action executed successfully: {:?}", action);
             }
