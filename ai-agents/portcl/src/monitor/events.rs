@@ -2,12 +2,12 @@ use crate::config::MonitoringConfig;
 use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use std::collections::{VecDeque, HashMap};
+use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortageEvent {
@@ -291,7 +291,7 @@ impl EventStatistics {
             return 0.0;
         }
 
-        let error_count = self.events_by_type.get(&EventType::Error).unwrap_or(&0) as f64;
+        let error_count = *self.events_by_type.get(&EventType::Error).unwrap_or(&0) as f64;
         (error_count / total_events) * 100.0
     }
 

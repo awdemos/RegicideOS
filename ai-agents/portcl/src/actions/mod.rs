@@ -6,11 +6,9 @@ pub use executor::{ActionExecutor, ExecutorConfig, ActionResult};
 pub use portage_actions::{PortageAction, ActionParams};
 pub use safety::{SafetyChecker, SafetyCheck, RollbackManager};
 
-use crate::config::ActionConfig;
-use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Action {
     NoOp,
     AdjustParallelism { jobs: u32 },

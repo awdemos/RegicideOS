@@ -8,7 +8,6 @@ use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::fs;
 
 /// Types of safety checks
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -160,11 +159,11 @@ impl RollbackManager {
 
     /// Rollback to the most recent snapshot
     pub async fn rollback_to_latest(&mut self) -> Result<()> {
-        let latest_id = self.current_snapshot.as_ref().ok_or_else(|| {
+        let latest_id = self.current_snapshot.clone().ok_or_else(|| {
             PortCLError::Validation("No snapshot available for rollback".to_string())
         })?;
 
-        self.rollback_to_snapshot(latest_id).await
+        self.rollback_to_snapshot(&latest_id).await
     }
 
     /// Get a list of available snapshots
@@ -216,7 +215,7 @@ impl RollbackManager {
             installed: true,
             masked: false,
             use_flags: vec
-!["-X", "python", "ipc".to_string()],
+!["-X".to_string(), "python".to_string(), "ipc".to_string()],
         });
 
         packages.insert("dev-lang/rust".to_string(), PackageState {
@@ -227,7 +226,7 @@ impl RollbackManager {
             installed: true,
             masked: false,
             use_flags: vec
-!["clippy", "rustfmt".to_string()],
+!["clippy".to_string(), "rustfmt".to_string()],
         });
 
         packages
@@ -506,7 +505,7 @@ mod tests {
         let snapshot_id = manager.create_snapshot(&action).await.unwrap();
 
         assert!(!snapshot_id.is_empty());
-        assert!(manager.current_snapshot == Some(snapshot_id));
+        assert!(manager.current_snapshot == Some(snapshot_id.clone()));
         assert!(manager.get_snapshot(&snapshot_id).is_some());
     }
 

@@ -2,8 +2,7 @@ pub mod systemd;
 pub mod openrc;
 
 use crate::config::PortageConfig;
-use crate::error::{PortCLError, Result};
-use std::path::Path;
+use crate::error::Result;
 
 pub trait ServiceManager {
     fn install_service(&self, config: &PortageConfig) -> Result<()>;

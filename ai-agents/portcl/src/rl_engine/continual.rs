@@ -1,11 +1,9 @@
-use crate::error::{PortCLError, Result};
-use crate::rl_engine::model::{DQNModel, ModelConfig};
-use crate::rl_engine::model::Experience;
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
+use rand::Rng;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContinualLearning {
@@ -212,8 +210,9 @@ impl ContinualLearning {
     }
 
     pub async fn add_policy(&mut self, policy: LearnedPolicy) -> Result<()> {
-        self.policies.insert(policy.id.clone(), policy);
-        info!("Added new policy: {}", policy.id);
+        let policy_id = policy.id.clone();
+        self.policies.insert(policy_id.clone(), policy);
+        info!("Added new policy: {}", policy_id);
         Ok(())
     }
 
@@ -243,7 +242,7 @@ impl ContinualLearning {
         // For now, we'll simulate the process
         let mut rng = rand::thread_rng();
         for param_name in self.get_parameter_names() {
-            let fisher_info = rng.gen_range(0.0..1.0);
+            let fisher_info = rng.gen_range(0.0..=1.0);
             self.ewc_manager.fisher_information.insert(param_name, fisher_info);
         }
 
@@ -453,7 +452,7 @@ impl ContinualLearning {
             .map(|p| &p.task_context.task_type)
             .collect();
 
-        (task_types.len() as f64 / self.policies.len() as f64)
+        task_types.len() as f64 / self.policies.len() as f64
     }
 }
 

@@ -4,7 +4,6 @@ use crate::error::{PortCLError, Result};
 use std::path::Path;
 use std::process::Command;
 use std::fs;
-use serde::{Deserialize, Serialize};
 
 pub struct SystemdServiceManager {
     service_files: Vec<&'static str>,

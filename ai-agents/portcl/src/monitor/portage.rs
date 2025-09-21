@@ -4,7 +4,7 @@ use std::process::Command;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use tracing::{debug, error, info, warn};
+use tracing::debug;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortageInfo {
@@ -118,10 +118,8 @@ impl PortageMonitor {
         }
 
         let search_pattern = match (&query.category, &query.name) {
-            (Some(cat), Some(name)) => format!("{}/{}", cat, name),
-            (Some(cat), None) => format!("{}/", cat),
-            (None, Some(name)) => name.to_string(),
-            (None, None) => return Ok(Vec::new()),
+            (Some(cat), name) => format!("{}/{}", cat, name),
+            (None, name) => name.to_string(),
         };
 
         search_cmd.push(&search_pattern);

@@ -316,7 +316,7 @@ mod tests {
             max_concurrent_actions: 1,
             ..Default::default()
         };
-        let mut executor = ActionExecutor::with_config(config);
+        let mut executor = ActionExecutor::with_config(config.clone());
 
         // Start a long-running action
         let long_action = Action::CleanObsoletePackages { force: false };
@@ -328,7 +328,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Try to start another action
-        let mut executor2 = ActionExecutor::with_config(config);
+        let mut executor2 = ActionExecutor::with_config(config.clone());
         let result = executor2.execute(Action::NoOp).await;
 
         assert!(result.is_err());
