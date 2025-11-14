@@ -1,0 +1,890 @@
+openapi: 3.0.0
+info:
+  title: Holo Routing Test Suite API
+  description: API for managing and executing Holo routing test suite operations, including network simulation, protocol validation, and performance testing
+  version: 1.0.0
+  contact:
+    name: RegicideOS Team
+    url: https://github.com/awdemos/RegicideOS
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+  - url: https://test-api.regicideos.org
+    description: Production server
+
+paths:
+  /tests:
+    get:
+      summary: List all routing tests
+      description: Retrieve a comprehensive list of all available routing tests with their protocol, status, and metadata
+      operationId: listRoutingTests
+      tags:
+        - Test Management
+      parameters:
+        - name: protocol
+          in: query
+          description: Filter tests by routing protocol
+          schema:
+            type: string
+            enum: [bgp, ospf, isis, bfd, vrrp, all]
+        - name: test_type
+          in: query
+          description: Filter tests by type
+          schema:
+            type: string
+            enum: [unit, integration, network, performance, security]
+        - name: status
+          in: query
+          description: Filter tests by status
+          schema:
+            type: string
+            enum: [passed, failed, skipped, not_run]
+        - name: topology
+          in: query
+          description: Filter tests by network topology
+          schema:
+            type: string
+            enum: [full-mesh, hub-spoke, multi-area, datacenter]
+      responses:
+        '200':
+          description: Successful response with routing test list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tests:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoutingTestInfo'
+                  total_count:
+                    type: integer
+                  protocols:
+                    type: array
+                    items:
+                      type: string
+                  topologies:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Invalid query parameters
+        '500':
+          description: Internal server error
+
+  /tests/run:
+    post:
+      summary: Execute routing tests
+      description: Run specified routing tests with network simulation and protocol validation
+      operationId: runRoutingTests
+      tags:
+        - Test Execution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                test_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Specific test IDs to run (empty for all tests)
+                config:
+                  $ref: '#/components/schemas/RoutingTestConfig'
+                network_simulation:
+                  type: boolean
+                  default: false
+                  description: Whether to use network simulation (Containerlab)
+                parallel:
+                  type: boolean
+                  default: false
+                  description: Whether to run tests in parallel
+                topology_overrides:
+                  type: object
+                  description: Override network topology parameters
+                  properties:
+                    node_count:
+                      type: integer
+                    link_bandwidth:
+                      type: string
+                    latency_ms:
+                      type: integer
+      responses:
+        '200':
+          description: Routing test execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutingTestExecutionResponse'
+        '400':
+          description: Invalid request parameters
+        '500':
+          description: Internal server error
+
+  /tests/{test_id}:
+    get:
+      summary: Get routing test details
+      description: Retrieve detailed information about a specific routing test
+      operationId: getRoutingTest
+      tags:
+        - Test Management
+      parameters:
+        - name: test_id
+          in: path
+          required: true
+          description: Unique identifier for routing test
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Routing test details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutingTestDetail'
+        '404':
+          description: Test not found
+        '500':
+          description: Internal server error
+
+  /topologies:
+    get:
+      summary: List network topologies
+      description: Retrieve available network topologies for testing
+      operationId: listTopologies
+      tags:
+        - Network Simulation
+      parameters:
+        - name: protocol
+          in: query
+          description: Filter topologies by supported protocol
+          schema:
+            type: string
+            enum: [bgp, ospf, isis, bfd, vrrp, all]
+        - name: complexity
+          in: query
+          description: Filter by complexity level
+          schema:
+            type: string
+            enum: [simple, moderate, complex]
+      responses:
+        '200':
+          description: Network topologies retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topologies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NetworkTopology'
+                  total_count:
+                    type: integer
+        '500':
+          description: Internal server error
+
+  /topologies/{topology_id}/deploy:
+    post:
+      summary: Deploy network topology
+      description: Deploy a network topology for testing using Containerlab
+      operationId: deployTopology
+      tags:
+        - Network Simulation
+      parameters:
+        - name: topology_id
+          in: path
+          required: true
+          description: Unique identifier for topology
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                config_overrides:
+                  type: object
+                  description: Override topology configuration
+                test_scenarios:
+                  type: array
+                  items:
+                    type: string
+                  description: Test scenarios to run on deployed topology
+      responses:
+        '200':
+          description: Topology deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopologyDeploymentResponse'
+        '400':
+          description: Invalid topology configuration
+        '404':
+          description: Topology not found
+        '500':
+          description: Deployment failed
+
+  /protocols/{protocol}/validate:
+    post:
+      summary: Validate protocol implementation
+      description: Run comprehensive validation tests for a specific routing protocol
+      operationId: validateProtocol
+      tags:
+        - Protocol Validation
+      parameters:
+        - name: protocol
+          in: path
+          required: true
+          description: Routing protocol to validate
+          schema:
+            type: string
+            enum: [bgp, ospf, isis, bfd, vrrp]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                test_suite:
+                  type: string
+                  enum: [conformance, performance, security, integration]
+                  description: Type of validation to run
+                topology_id:
+                  type: string
+                  description: Network topology to use for validation
+                config:
+                  type: object
+                  description: Protocol-specific configuration
+      responses:
+        '200':
+          description: Protocol validation started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProtocolValidationResponse'
+        '400':
+          description: Invalid validation parameters
+        '404':
+          description: Protocol not supported
+        '500':
+          description: Validation failed
+
+  /benchmarks:
+    get:
+      summary: Get routing performance benchmarks
+      description: Retrieve performance benchmark results for routing protocols
+      operationId: getRoutingBenchmarks
+      tags:
+        - Performance
+      parameters:
+        - name: protocol
+          in: query
+          description: Filter by routing protocol
+          schema:
+            type: string
+            enum: [bgp, ospf, isis, bfd, vrrp]
+        - name: metric_type
+          in: query
+          description: Filter by metric type
+          schema:
+            type: string
+            enum: [convergence, throughput, memory, cpu]
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Benchmark results retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  benchmarks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoutingBenchmarkResult'
+                  summary:
+                    $ref: '#/components/schemas/RoutingBenchmarkSummary'
+        '500':
+          description: Internal server error
+
+  /security/scan:
+    post:
+      summary: Perform security scan
+      description: Run security vulnerability scan on Holo routing components
+      operationId: performSecurityScan
+      tags:
+        - Security
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scan_type:
+                  type: string
+                  enum: [container, protocol, configuration, all]
+                  description: Type of security scan to perform
+                target:
+                  type: string
+                  description: Target component or image to scan
+                severity_threshold:
+                  type: string
+                  enum: [low, medium, high, critical]
+                  default: medium
+                  description: Minimum severity level to report
+      responses:
+        '200':
+          description: Security scan completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityScanResult'
+        '400':
+          description: Invalid scan parameters
+        '500':
+          description: Scan failed
+
+  /coverage:
+    get:
+      summary: Get routing test coverage report
+      description: Retrieve comprehensive code coverage report for routing components
+      operationId: getRoutingCoverage
+      tags:
+        - Coverage Reports
+      parameters:
+        - name: protocol
+          in: query
+          description: Filter coverage by protocol
+          schema:
+            type: string
+            enum: [bgp, ospf, isis, bfd, vrrp]
+        - name: format
+          in: query
+          description: Output format
+          schema:
+            type: string
+            enum: [json, html, xml, lcov]
+            default: json
+      responses:
+        '200':
+          description: Coverage report generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutingCoverageReport'
+        '500':
+          description: Internal server error
+
+  /health:
+    get:
+      summary: Health check
+      description: Check the health status of the routing test suite service and network simulation environment
+      operationId: routingHealthCheck
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded, unhealthy]
+                  version:
+                    type: string
+                  uptime_seconds:
+                    type: number
+                  services:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum: [healthy, unhealthy]
+                  network_simulation:
+                    type: object
+                    properties:
+                      containerlab_available:
+                        type: boolean
+                      docker_available:
+                        type: boolean
+                      network_namespaces:
+                        type: boolean
+        '503':
+          description: Service is unhealthy
+
+components:
+  schemas:
+    RoutingTestInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique test identifier
+        name:
+          type: string
+          description: Human-readable test name
+        protocol:
+          type: string
+          enum: [bgp, ospf, isis, bfd, vrrp]
+          description: Routing protocol this test covers
+        test_type:
+          type: string
+          enum: [unit, integration, network, performance, security]
+          description: Type of test
+        topology:
+          type: string
+          description: Network topology required (if any)
+        status:
+          type: string
+          enum: [passed, failed, skipped, not_run]
+          description: Current test status
+        last_run:
+          type: string
+          format: date-time
+          description: When test was last run
+        duration_ms:
+          type: integer
+          description: Execution duration in milliseconds
+        coverage_percentage:
+          type: number
+          description: Coverage percentage for this test
+
+    RoutingTestDetail:
+      allOf:
+        - $ref: '#/components/schemas/RoutingTestInfo'
+        - type: object
+          properties:
+            description:
+              type: string
+              description: Detailed test description
+            protocol_features:
+              type: array
+              items:
+                type: string
+              description: Protocol features being tested
+            test_scenarios:
+              type: array
+              items:
+                type: string
+              description: Test scenarios covered
+            prerequisites:
+              type: array
+              items:
+                type: string
+              description: Test prerequisites
+            expected_results:
+              type: array
+              items:
+                type: string
+              description: Expected test results
+            network_requirements:
+              type: object
+              properties:
+                min_nodes:
+                  type: integer
+                required_interfaces:
+                  type: integer
+                bandwidth_mbps:
+                  type: integer
+                latency_ms:
+                  type: integer
+
+    RoutingTestConfig:
+      type: object
+      properties:
+        timeout_seconds:
+          type: integer
+          default: 600
+          description: Test execution timeout in seconds
+        retry_count:
+          type: integer
+          default: 0
+          description: Number of retries on failure
+        log_level:
+          type: string
+          enum: [debug, info, warn, error]
+          default: info
+          description: Logging level for test execution
+        enable_coverage:
+          type: boolean
+          default: true
+          description: Whether to collect coverage data
+        enable_profiling:
+          type: boolean
+          default: false
+          description: Whether to enable performance profiling
+        network_simulation:
+          type: object
+          properties:
+            auto_cleanup:
+              type: boolean
+              default: true
+              description: Automatically cleanup network resources
+            preserve_logs:
+              type: boolean
+              default: false
+              description: Preserve network simulation logs
+            resource_limits:
+              type: object
+              properties:
+                max_memory_mb:
+                  type: integer
+                max_cpu_percent:
+                  type: integer
+
+    RoutingTestExecutionResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+          description: Unique execution identifier
+        status:
+          type: string
+          enum: [running, completed, failed]
+          description: Execution status
+        started_at:
+          type: string
+          format: date-time
+          description: When execution started
+        estimated_duration_ms:
+          type: integer
+          description: Estimated total duration in milliseconds
+        test_count:
+          type: integer
+          description: Number of tests being executed
+        protocols_tested:
+          type: array
+          items:
+            type: string
+          description: Protocols being tested
+        network_simulation:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            topology_count:
+              type: integer
+            node_count:
+              type: integer
+
+    NetworkTopology:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique topology identifier
+        name:
+          type: string
+          description: Human-readable topology name
+        description:
+          type: string
+          description: Topology description
+        protocols:
+          type: array
+          items:
+            type: string
+          description: Supported protocols
+        complexity:
+          type: string
+          enum: [simple, moderate, complex]
+          description: Complexity level
+        node_count:
+          type: integer
+          description: Number of nodes in topology
+        link_count:
+          type: integer
+          description: Number of links in topology
+        estimated_resources:
+          type: object
+          properties:
+            memory_mb:
+              type: integer
+            cpu_cores:
+              type: integer
+            disk_mb:
+              type: integer
+        use_cases:
+          type: array
+          items:
+            type: string
+          description: Typical use cases for this topology
+
+    TopologyDeploymentResponse:
+      type: object
+      properties:
+        deployment_id:
+          type: string
+          description: Unique deployment identifier
+        status:
+          type: string
+          enum: [deploying, running, failed, completed]
+          description: Deployment status
+        started_at:
+          type: string
+          format: date-time
+          description: When deployment started
+        topology_id:
+          type: string
+          description: Deployed topology identifier
+        containerlab_info:
+          type: object
+          properties:
+            lab_name:
+              type: string
+            config_file:
+              type: string
+            working_directory:
+              type: string
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              status:
+                type: string
+              ip_addresses:
+                type: array
+                items:
+                  type: string
+
+    ProtocolValidationResponse:
+      type: object
+      properties:
+        validation_id:
+          type: string
+          description: Unique validation identifier
+        protocol:
+          type: string
+          description: Protocol being validated
+        validation_type:
+          type: string
+          description: Type of validation performed
+        status:
+          type: string
+          enum: [running, passed, failed, warning]
+          description: Validation status
+        started_at:
+          type: string
+          format: date-time
+          description: When validation started
+        topology_used:
+          type: string
+          description: Network topology used for validation
+        test_cases:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+              duration_ms:
+                type: integer
+
+    RoutingBenchmarkResult:
+      type: object
+      properties:
+        benchmark_name:
+          type: string
+          description: Name of the benchmark
+        protocol:
+          type: string
+          description: Protocol being benchmarked
+        metric_type:
+          type: string
+          enum: [convergence, throughput, memory, cpu]
+          description: Type of metric measured
+        sample_size:
+          type: integer
+          description: Number of samples
+        value:
+          type: number
+          description: Benchmark value
+        unit:
+          type: string
+          description: Unit of measurement
+        target_value:
+          type: number
+          description: Target value for comparison
+        passed:
+          type: boolean
+          description: Whether benchmark meets target
+        timestamp:
+          type: string
+          format: date-time
+          description: When benchmark was run
+
+    RoutingBenchmarkSummary:
+      type: object
+      properties:
+        total_benchmarks:
+          type: integer
+          description: Total number of benchmarks
+        passed_benchmarks:
+          type: integer
+          description: Number of benchmarks that passed
+        failed_benchmarks:
+          type: integer
+          description: Number of benchmarks that failed
+        protocols_tested:
+          type: array
+          items:
+            type: string
+          description: Protocols included in summary
+        overall_performance:
+          type: string
+          enum: [excellent, good, acceptable, poor]
+          description: Overall performance assessment
+
+    SecurityScanResult:
+      type: object
+      properties:
+        scan_id:
+          type: string
+          description: Unique scan identifier
+        scan_type:
+          type: string
+          description: Type of security scan performed
+        target:
+          type: string
+          description: Target that was scanned
+        status:
+          type: string
+          enum: [completed, failed, partial]
+          description: Scan status
+        started_at:
+          type: string
+          format: date-time
+          description: When scan started
+        completed_at:
+          type: string
+          format: date-time
+          description: When scan completed
+        vulnerabilities:
+          type: array
+          items:
+            type: object
+            properties:
+              severity:
+                type: string
+                enum: [low, medium, high, critical]
+              cve_id:
+                type: string
+              description:
+                type: string
+              package:
+                type: string
+              fixed_version:
+                type: string
+        summary:
+          type: object
+          properties:
+            total_vulnerabilities:
+              type: integer
+            critical_count:
+              type: integer
+            high_count:
+              type: integer
+            medium_count:
+              type: integer
+            low_count:
+              type: integer
+
+    RoutingCoverageReport:
+      type: object
+      properties:
+        overall_percentage:
+          type: number
+          description: Overall coverage percentage
+        protocols:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Protocol name
+              percentage:
+                type: number
+                description: Coverage percentage
+              lines_covered:
+                type: integer
+                description: Number of lines covered
+              total_lines:
+                type: integer
+                description: Total number of lines
+              functions_covered:
+                type: integer
+                description: Number of functions covered
+              total_functions:
+                type: integer
+                description: Total number of functions
+        modules:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Module name
+              percentage:
+                type: number
+                description: Coverage percentage
+              lines_covered:
+                type: integer
+                description: Number of lines covered
+              total_lines:
+                type: integer
+                description: Total number of lines
+        generated_at:
+          type: string
+          format: date-time
+          description: When report was generated
+        format:
+          type: string
+          description: Report format
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Test Management
+    description: Routing test discovery and management operations
+  - name: Test Execution
+    description: Routing test execution and control operations
+  - name: Network Simulation
+    description: Network topology deployment and management
+  - name: Protocol Validation
+    description: Routing protocol validation and conformance testing
+  - name: Performance
+    description: Routing performance benchmarking
+  - name: Security
+    description: Security vulnerability scanning and validation
+  - name: Coverage Reports
+    description: Code coverage reporting for routing components
+  - name: System
+    description: System health and monitoring
