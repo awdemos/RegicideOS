@@ -1697,7 +1697,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     validate_device_path(&config.drive)?;
 
     // RegicideOS only supports the official Xenia Linux repository
-    const REGICIDE_REPOSITORY: &str = "https://repo.regicideoslinux.com/releases/";
+    const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.com/releases/";
     if config.repository.is_empty() {
         config.repository = REGICIDE_REPOSITORY.to_string();
     } else if config.repository != REGICIDE_REPOSITORY {
