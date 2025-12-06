@@ -1442,23 +1442,23 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     };
 
     if platform.contains("efi") {
-        // Install GRUB for EFI systems targeting the mounted root
+        // Install GRUB for EFI systems - run INSIDE chroot for correct path resolution
         let grub_install_cmd = format!(
-            "{}-install --force --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\"",
+            "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --bootloader-id=RegicideOS --recheck",
             grub, platform
         );
-        println!("DEBUG: Running GRUB install: {}", grub_install_cmd);
-        match execute(&grub_install_cmd) {
+        println!("DEBUG: Running GRUB install INSIDE chroot: {}", grub_install_cmd);
+        match chroot(&grub_install_cmd) {
             Ok(_) => println!("DEBUG: GRUB install succeeded"),
             Err(e) => {
                 println!("DEBUG: GRUB install failed: {}", e);
-                // Try alternative approach
+                // Try alternative approach with --removable flag
                 let alt_cmd = format!(
-                    "{}-install --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\" --removable",
+                    "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --removable --recheck",
                     grub, platform
                 );
                 println!("DEBUG: Trying alternative GRUB install: {}", alt_cmd);
-                execute(&alt_cmd)?;
+                chroot(&alt_cmd)?;
             }
         }
         
@@ -1467,13 +1467,15 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         println!("DEBUG: Running GRUB mkconfig: {}", grub_mkconfig_cmd);
         chroot(&grub_mkconfig_cmd)?;
     } else {
+        // For BIOS, we need to install to the device directly
+        // The device path should work inside chroot since /dev is mounted
         let grub_install_cmd = format!(
-            "{}-install --force --target=\"{}\" --boot-directory=\"/boot/efi\" {}",
+            "{}-install --target=\"{}\" --boot-directory=\"/boot\" {}",
             grub, platform, device
         );
         println!("DEBUG: Running BIOS GRUB install: {}", grub_install_cmd);
         chroot(&grub_install_cmd)?;
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
         println!("DEBUG: Running BIOS GRUB mkconfig: {}", grub_mkconfig_cmd);
         chroot(&grub_mkconfig_cmd)?;
     }
