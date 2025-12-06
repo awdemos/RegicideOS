@@ -878,6 +878,26 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
+                // Check if mkfs.ext4 is available, attempt to install if missing
+                if execute("which mkfs.ext4").is_err() {
+                    warn("mkfs.ext4 not found, attempting to install e2fsprogs package...");
+                    if execute("which dnf").is_ok() {
+                        execute("dnf install -y e2fsprogs")
+                            .map_err(|e| warn(&format!("Failed to install e2fsprogs via dnf: {}", e)))
+                            .ok();
+                    } else if execute("which apt").is_ok() {
+                        execute("apt update && apt install -y e2fsprogs")
+                            .map_err(|e| warn(&format!("Failed to install e2fsprogs via apt: {}", e)))
+                            .ok();
+                    } else if execute("which pacman").is_ok() {
+                        execute("pacman -S --noconfirm e2fsprogs")
+                            .map_err(|e| warn(&format!("Failed to install e2fsprogs via pacman: {}", e)))
+                            .ok();
+                    } else {
+                        warn("Could not determine package manager to install e2fsprogs");
+                    }
+                }
+                
                 if let Some(ref label) = partition.label {
                     execute(&format!("mkfs.ext4 -L {} {}", label, current_name))?;
                 } else {
