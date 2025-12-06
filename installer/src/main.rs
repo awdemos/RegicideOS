@@ -216,6 +216,10 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
         r"blkid -L [^[:space:]]+",
         r"vgs \| awk '\{ print \$1 \}' \| grep -vw VG",
         r"cryptsetup close [^[:space:]]+ 2>/dev/null",
+        r"partprobe [^[:space:]]+",
+        r"sfdisk -R [^[:space:]]+",
+        r"hdparm -z [^[:space:]]+",
+        r"blockdev --rereadpt [^[:space:]]+",
     ];
     
     for pattern in &allowed_patterns {
