@@ -127,7 +127,7 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // Filesystem commands
-        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" => {
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" => {
             execute_safe_command(program, args)
         }
         
@@ -914,11 +914,25 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 if let Some(ref label) = partition.label {
                     let cmd = format!("mkfs.ext4 -q -F -L {} {}", label, current_name);
                     println!("DEBUG: Running ext4 format command: {}", cmd);
-                    execute(&cmd)?;
+                    if let Err(e) = execute(&cmd) {
+                        println!("DEBUG: mkfs.ext4 failed with error: {}", e);
+                        // Try wiping filesystem signature first
+                        println!("DEBUG: Attempting to wipe filesystem signature...");
+                        let _ = execute(&format!("wipefs -a {} 2>/dev/null || true", current_name));
+                        println!("DEBUG: Retrying ext4 format after wipe...");
+                        execute(&cmd)?;
+                    }
                 } else {
                     let cmd = format!("mkfs.ext4 -q -F {}", current_name);
                     println!("DEBUG: Running ext4 format command: {}", cmd);
-                    execute(&cmd)?;
+                    if let Err(e) = execute(&cmd) {
+                        println!("DEBUG: mkfs.ext4 failed with error: {}", e);
+                        // Try wiping filesystem signature first
+                        println!("DEBUG: Attempting to wipe filesystem signature...");
+                        let _ = execute(&format!("wipefs -a {} 2>/dev/null || true", current_name));
+                        println!("DEBUG: Retrying ext4 format after wipe...");
+                        execute(&cmd)?;
+                    }
                 }
                 verify_filesystem(current_name, "ext4")?;
             }
