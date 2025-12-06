@@ -888,10 +888,25 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
-                // Aggressive filesystem destruction approach
-                println!("DEBUG: Using aggressive filesystem destruction for ext4 formatting");
+                // Use sgdisk to clear partition type completely
+                println!("DEBUG: Using sgdisk to clear partition type on {}...", current_name);
                 
-                // First, try simple approach
+                // Clear partition type to remove all filesystem signatures
+                let clear_cmd = format!("sgdisk --typecode=0:0 {} 2>/dev/null || true", current_name);
+                match execute(&clear_cmd) {
+                    Ok(_) => {
+                        println!("DEBUG: Partition type cleared with sgdisk");
+                    }
+                    Err(e) => {
+                        println!("DEBUG: sgdisk failed: {}, continuing anyway...", e);
+                    }
+                }
+                
+                // Reread partition table to recognize changes
+                let _ = execute("partprobe");
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+                
+                // Now try simple formatting
                 if let Some(ref label) = partition.label {
                     let cmd = format!("mkfs.ext4 -q -L {} {}", label, current_name);
                     println!("DEBUG: Running: {}", cmd);
