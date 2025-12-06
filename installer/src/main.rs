@@ -226,6 +226,12 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
         }
     }
     
+    // Debug: Show the exact command that failed
+    eprintln!("DEBUG: Failed shell command: '{}'", shell_cmd);
+    eprintln!("DEBUG: Available patterns:");
+    for (i, pattern) in allowed_patterns.iter().enumerate() {
+        eprintln!("  {}: {}", i + 1, pattern);
+    }
     bail!("Shell command pattern not allowed: {}", shell_cmd)
 }
 
@@ -1574,7 +1580,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     if config.filesystem.is_empty() || !filesystems.contains(&config.filesystem) {
         if interactive {
             println!("Available filesystems: {:?}", filesystems);
-            config.filesystem = get_input("Enter filesystem", "btrfs");
+            config.filesystem = get_input("Enter filesystem", "btrfs_encryption_dev");
         } else {
             die("Invalid or missing filesystem in config");
         }
