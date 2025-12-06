@@ -113,8 +113,8 @@ RegicideOS requires installation from a Linux live environment. We recommend Fed
 Once booted into the live environment:
 
 ```bash
-# Install dependencies
-sudo dnf install git curl gcc
+# Install dependencies (including gdisk for EFI support)
+sudo dnf install git curl gcc gdisk
 
 # Install Rust toolchain
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -123,7 +123,13 @@ source $HOME/.cargo/env
 # Clone RegicideOS repository
 git clone https://github.com/awdemos/RegicideOS.git
 cd RegicideOS/installer
+
+# Prevent system suspend during installation (critical for LUKS setups)
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+sudo loginctl disable-lid-switch
 ```
+
+> **⚠️ IMPORTANT**: Prevent system suspend during installation to avoid state corruption, especially when using LUKS encryption. The installer now handles this automatically, but manual prevention is recommended for reliability.
 
 ### 3.2 Installation Methods
 
@@ -150,14 +156,20 @@ The installer will guide you through:
 If you prefer to build the installer from source or need to customize it:
 
 ```bash
-# Build the installer from source
+# Build the installer from source (now without warnings)
 cargo build --release
+
+# Verify build completed successfully
+./target/release/installer --version
 
 # Run interactive installation
 sudo ./target/release/installer
 
 # Or run with configuration file
 sudo ./target/release/installer -c regicide-config.toml
+
+# For development/testing with dry run
+cargo run --bin installer -- --dry-run
 ```
 
 #### 3.2.3 Automated Installation
@@ -187,27 +199,45 @@ sudo ./target/release/installer -c regicide-config.toml
 
 The RegicideOS installer performs these steps:
 
-1. **Drive Partitioning**
-   - EFI System Partition (512MB, FAT32)
-   - Root Partition (remaining space, BTRFS)
+1. **System Preparation**
+   - Prevent suspend interrupts during critical operations
+   - Validate system dependencies (gdisk, cryptsetup, etc.)
+   - Check network connectivity to Xenia repositories
 
-2. **Filesystem Setup**
+2. **Drive Partitioning**
+   - EFI System Partition (512MB, FAT32) with boot flag
+   - Root Partition (remaining space, BTRFS) or LUKS-encrypted BTRFS
+   - Automatic retry and verification of partition creation
+
+3. **Filesystem Setup**
    - Create BTRFS subvolumes for overlay system
-   - Configure read-only root filesystem
+   - Configure read-only root filesystem via SquashFS
    - Set up writable overlays for `/etc`, `/var`, `/usr`
+   - Enhanced error handling for filesystem operations
 
-3. **System Image Download**
+4. **LUKS Encryption (if selected)**
+   - Secure LUKS container creation with proper device path handling
+   - Fixed labeling system that works with encrypted containers
+   - Automatic device mapper setup and verification
+
+5. **System Image Download**
    - Download compressed system image from Xenia repositories
    - Verify integrity and decompress to target
+   - Uses `cosmic-fedora` flavor (corrected from `cosmic-desktop`)
 
-4. **Bootloader Installation**
+6. **Bootloader Installation**
    - Install GRUB for EFI or Legacy BIOS
+   - Automatic gdisk installation for EFI boot flags
    - Configure boot parameters for immutable system
 
-5. **AI Component Setup**
+7. **AI Component Setup**
    - Initialize AI system monitoring agents
    - Configure continual learning frameworks
    - Set up default optimization policies
+
+8. **Post-Installation Cleanup**
+   - Verify all mounts and services
+   - Generate installation report
 
 ### 3.4 Manual Installation with OverlayFS ⚠️ **DEPRECATED**
 
@@ -369,8 +399,30 @@ After successful installation:
 
 1. **Remove installation media** and reboot
 2. **Complete initial setup** through Cosmic Desktop
-3. **Enable AI features** (optional, see Section 6)
-4. **Install additional software** through overlay system
+3. **Verify system integrity**:
+   ```bash
+   # Check all mounts are working
+   mount | grep -E "(overlay|btrfs)"
+   
+   # Verify AI services status
+   systemctl status portcl btrmind
+   
+   # Check for installation errors
+   sudo journalctl -u installer.service --since "5 minutes ago"
+   ```
+4. **Enable AI features** (optional, see Section 6)
+5. **Install additional software** through overlay system
+6. **Security verification** (critical due to installer vulnerabilities):
+   ```bash
+   # Check for suspicious processes
+   ps aux | grep -E "(sh|bash)" | grep -v grep
+   
+   # Verify no unexpected network connections
+   ss -tulpn | grep LISTEN
+   
+   # Review installation logs for anomalies
+   sudo journalctl -u installer.service | grep -E "(ERROR|WARN|command)"
+   ```
 
 ---
 
@@ -1496,7 +1548,67 @@ btrmind monitor
 
 ### 10.1 Installation Issues
 
-#### 10.1.1 EFI Partition Problems
+#### 10.1.1 Common Installation Problems
+
+**Flavor Not Available Error:**
+```
+[ERROR] The cosmic-desktop flavour is not available in the repository
+```
+**Solution**: This is fixed in newer installer versions. The correct flavor is `cosmic-fedora`. If using older installer:
+```bash
+# Manual fix in config file
+sed -i 's/cosmic-desktop/cosmic-fedora/g' regicide-config.toml
+```
+
+**LUKS Device Not Found Error:**
+```
+[ERROR] Device /dev/disk/by-label/XENIA does not exist
+```
+**Solution**: Fixed in newer installer versions. LUKS containers don't have labels until opened. If using older installer:
+```bash
+# Manual LUKS setup workaround
+sudo cryptsetup luksFormat /dev/sdX3  # Replace with your partition
+sudo cryptsetup open /dev/sdX3 XENIA
+sudo mkfs.btrfs -L XENIA /dev/mapper/XENIA
+sudo cryptsetup close XENIA
+```
+
+**System Suspend During Partitioning:**
+```
+Installer crashes with Option::unwrap() panic at main.rs:1206
+```
+**Solution**: System went into suspend during partitioning. Fixed in newer installer, but manual prevention:
+```bash
+# Prevent suspend before installation
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+sudo loginctl disable-lid-switch
+```
+
+**Missing sgdisk Warning:**
+```
+[WARN] sgdisk not available, skipping EFI boot flag
+```
+**Solution**: Fixed in newer installer with automatic gdisk installation. Manual fix:
+```bash
+# Install gdisk package
+sudo dnf install gdisk  # Fedora
+# or
+sudo apt install gdisk  # Ubuntu
+```
+
+**BTRFS Labeling Failure:**
+```
+mkfs.btrfs -L ROOTS /dev/sdX2 failed
+```
+**Solution**: Enhanced error handling in newer installer provides better diagnostics. Manual checks:
+```bash
+# Check if partition exists
+lsblk /dev/sdX2
+# Try manual formatting with verbose output
+sudo mkfs.btrfs -L ROOTS -f /dev/sdX2
+```
+
+#### 10.1.2 EFI Partition Problems
 
 If EFI partition creation fails:
 
@@ -1514,7 +1626,7 @@ sudo mkfs.vfat -F 32 -n EFI /dev/sda1
 sudo mkfs.btrfs -L ROOTS /dev/sda2
 ```
 
-#### 10.1.2 Network Connectivity
+#### 10.1.3 Network Connectivity
 
 If installer cannot download system image:
 
@@ -1600,6 +1712,8 @@ sudo btrmind cleanup --force
 # Disable AI if needed
 sudo systemctl disable btrmind
 ```
+
+
 
 ---
 
