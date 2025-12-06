@@ -590,7 +590,14 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
                 .map(|line| format!("/dev/{}", line.trim()))
                 .collect();
             
-            if detected_partitions.len() == expected_count {
+            // Special handling for LUKS - check if we have a mapper device
+            if expected_count == 1 && detected_partitions.is_empty() {
+                // For LUKS, we expect 1 mapper device instead of physical partitions
+                if Path::new("/dev/mapper/regicideos").exists() {
+                    println!("DEBUG: LUKS detected, using mapper device");
+                    partition_names.push("/dev/mapper/regicideos".to_string());
+                }
+            } else if detected_partitions.len() == expected_count {
                 // Verify all partitions actually exist as device files
                 let mut all_exist = true;
                 for part in &detected_partitions {
