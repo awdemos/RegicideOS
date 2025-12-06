@@ -110,9 +110,11 @@ fn execute(command: &str) -> Result<String> {
         
         // Cat command (only for heredoc usage with sfdisk)
         "cat" => {
-            // Only allow cat with heredoc and sfdisk
+            // Only allow cat with heredoc and sfdisk - must use shell for pipe
             if args.len() >= 3 && args.contains(&"<<EOF") && args.iter().any(|&arg| arg.contains("sfdisk")) {
-                execute_safe_command(program, args)
+                // Reconstruct the full command and execute through shell
+                let full_command = format!("{} {}", program, args.join(" "));
+                execute_safe_shell_command(&full_command)
             } else {
                 bail!("Cat command not allowed in this context");
             }
@@ -245,10 +247,24 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
 
 // Check if a shell command is safe
 fn is_safe_shell_command(cmd: &str) -> bool {
+    // First check for specific allowed patterns that might contain "dangerous" characters
+    let allowed_special_patterns = [
+        r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+.*$",
+        r"vgs \| awk '\{ print \$1 \}' \| grep -vw VG$",
+    ];
+    
+    for pattern in &allowed_special_patterns {
+        if let Ok(regex) = regex::Regex::new(pattern) {
+            if regex.is_match(cmd) {
+                return true;
+            }
+        }
+    }
+    
     // Reject dangerous characters and patterns
     let dangerous_patterns = [
         ";", "&&", "||", "|", "&", "$(", "`", 
-        "$", "${", ">", ">>", "<", "<<",
+        "$", "${", ">", ">>", "<",
         "rm ", "dd ", "chmod ", "chown ",
         "sudo ", "su ", "eval ", "exec ",
     ];
@@ -269,7 +285,7 @@ fn is_safe_shell_command(cmd: &str) -> bool {
         r"^mount --rbind /sys /mnt/root/sys$",
         r"^mount --bind /run /mnt/root/run$", 
         r"^mount --make-slave /mnt/root/run$",
-        r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+$",
+        r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+.*$",
         r"^mount -t overlay overlay -o [^[:space:]]+ [^[:space:]]+$",
         r"^lsblk -ln -o NAME [^[:space:]]+$",
         r"^lsblk -fn -o NAME,LABEL$",
