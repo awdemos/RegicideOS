@@ -912,27 +912,9 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
                 
                 if let Some(ref label) = partition.label {
-                    let cmd = format!("mkfs.ext4 -q -F -L {} {}", label, current_name);
-                    println!("DEBUG: Running ext4 format command: {}", cmd);
-                    if let Err(e) = execute(&cmd) {
-                        println!("DEBUG: mkfs.ext4 failed with error: {}", e);
-                        // Try wiping filesystem signature first
-                        println!("DEBUG: Attempting to wipe filesystem signature...");
-                        let _ = execute(&format!("wipefs -a {} 2>/dev/null || true", current_name));
-                        println!("DEBUG: Retrying ext4 format after wipe...");
-                        execute(&cmd)?;
-                    }
+                    execute(&format!("mkfs.ext4 -L {} {}", label, current_name))?;
                 } else {
-                    let cmd = format!("mkfs.ext4 -q -F {}", current_name);
-                    println!("DEBUG: Running ext4 format command: {}", cmd);
-                    if let Err(e) = execute(&cmd) {
-                        println!("DEBUG: mkfs.ext4 failed with error: {}", e);
-                        // Try wiping filesystem signature first
-                        println!("DEBUG: Attempting to wipe filesystem signature...");
-                        let _ = execute(&format!("wipefs -a {} 2>/dev/null || true", current_name));
-                        println!("DEBUG: Retrying ext4 format after wipe...");
-                        execute(&cmd)?;
-                    }
+                    execute(&format!("mkfs.ext4 {}", current_name))?;
                 }
                 verify_filesystem(current_name, "ext4")?;
             }
