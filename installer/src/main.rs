@@ -899,9 +899,9 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 }
                 
                 if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.ext4 -L {} {}", label, current_name))?;
+                    execute(&format!("mkfs.ext4 -q -L {} {}", label, current_name))?;
                 } else {
-                    execute(&format!("mkfs.ext4 {}", current_name))?;
+                    execute(&format!("mkfs.ext4 -q {}", current_name))?;
                 }
                 verify_filesystem(current_name, "ext4")?;
             }
@@ -1077,7 +1077,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 }
 
 fn chroot(command: &str) -> Result<()> {
-    let full_command = format!("chroot /mnt/root /bin/bash -c '{}'", command);
+    let full_command = format!("chroot /mnt/root /bin/bash <<'EOT'\n{}\nEOT", command);
     execute(&full_command)?;
     Ok(())
 }
@@ -1318,6 +1318,7 @@ async fn download_root(url: &str) -> Result<()> {
 }
 
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
+    // Check for grub binary, see if its grub2-install or grub-install
     let grub = if Path::new("/mnt/root/usr/bin/grub-install").exists() {
         "grub"
     } else {
@@ -1332,10 +1333,10 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
     } else {
         chroot(&format!(
-            "{}-install --force --target=\"{}\" --boot-directory=\"/boot\" {}",
+            "{}-install --force --target=\"{}\" --boot-directory=\"/boot/efi\" {}",
             grub, platform, device
         ))?;
-        chroot(&format!("{}-mkconfig -o /boot/{}/grub.cfg", grub, grub))?;
+        chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
     }
     
     Ok(())
@@ -1517,8 +1518,8 @@ fn validate_url(url: &str) -> Result<()> {
     
     // Only allow official repositories
     let allowed_domains = [
-        "repo.xenialinux.com",
-        "xenialinux.com",
+        "repo.regicideoslinux.com",
+        "regicideoslinux.com",
     ];
     
     let domain = regex::Regex::new(r"^https://([a-zA-Z0-9.-]+)")
@@ -1683,7 +1684,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     validate_device_path(&config.drive)?;
 
     // RegicideOS only supports the official Xenia Linux repository
-    const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.com/releases/";
+    const REGICIDE_REPOSITORY: &str = "https://repo.regicideoslinux.com/releases/";
     if config.repository.is_empty() {
         config.repository = REGICIDE_REPOSITORY.to_string();
     } else if config.repository != REGICIDE_REPOSITORY {
