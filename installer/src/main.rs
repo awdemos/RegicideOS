@@ -127,7 +127,7 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // Filesystem commands
-        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" => {
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" => {
             execute_safe_command(program, args)
         }
         
@@ -919,12 +919,21 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     Err(e) => println!("DEBUG: file failed: {}", e),
                 }
                 
-                // Ensure partition is not mounted before formatting
-                println!("DEBUG: Ensuring {} is not mounted...", current_name);
-                match execute(&format!("umount -f {} 2>/dev/null || true", current_name)) {
-                    Ok(_) => println!("DEBUG: Unmount completed"),
-                    Err(e) => println!("DEBUG: Unmount failed: {}", e),
+                // Check what's using the partition
+                println!("DEBUG: Checking processes using {}...", current_name);
+                match execute(&format!("lsof {} 2>/dev/null || true", current_name)) {
+                    Ok(output) => println!("DEBUG: lsof output: {}", output),
+                    Err(e) => println!("DEBUG: lsof failed: {}", e),
                 }
+                
+                // Aggressive unmount before formatting
+                println!("DEBUG: Aggressively unmounting {}...", current_name);
+                let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name)); // lazy unmount
+                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name)); // force unmount
+                let _ = execute(&format!("sync")); // sync filesystems
+                
+                // Wait a moment for unmount to complete
+                std::thread::sleep(std::time::Duration::from_millis(500));
                 
                 if let Some(ref label) = partition.label {
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
