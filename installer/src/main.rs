@@ -738,6 +738,35 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
         let _ = execute(&format!("umount {} 2>/dev/null || true", partition));
     }
     
+    // AGGRESSIVE WIPE: Remove all traces of existing partitions (key fix)
+    info("Aggressively wiping existing partition table and signatures...");
+    
+    // 1. Close any LUKS mappings first
+    let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
+    let _ = execute("dmsetup remove_all 2>/dev/null || true");
+    
+    // 2. Wipe filesystem signatures
+    let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", drive));
+    
+    // 3. COMPLETELY DESTROY partition table (this was the key fix)
+    if execute("which sgdisk").is_ok() {
+        execute(&format!("sgdisk --zap-all {}", drive))?;
+        execute(&format!("sgdisk --clear {}", drive))?;
+    } else {
+        // Fallback: wipe first few MB if sgdisk not available
+        let _ = execute(&format!("dd if=/dev/zero of={} bs=1M count=10 2>/dev/null || true", drive));
+    }
+    
+    // 4. Force kernel to recognize changes
+    execute("sync")?;
+    if execute("which partprobe").is_ok() {
+        let _ = execute(&format!("partprobe {} 2>/dev/null || true", drive));
+    }
+    let _ = execute(&format!("blockdev --rereadpt {} 2>/dev/null || true", drive))?;
+    
+    // 5. Wait for kernel to settle
+    std::thread::sleep(std::time::Duration::from_millis(3000));
+    
     // Check if LVM is available before trying to use it
     let vgs_output = if Path::new("/sbin/vgs").exists() || Path::new("/usr/sbin/vgs").exists() {
         execute("vgs | awk '{ print $1 }' | grep -vw VG").unwrap_or_default()
