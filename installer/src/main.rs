@@ -2075,9 +2075,11 @@ async fn main() -> Result<()> {
     info("Installation completed successfully!");
     
     // Display completion message
-    println!("\n" + "=".repeat(60).as_str());
+    let separator = "=".repeat(60);
+    println!();
+    println!("{}", separator);
     println!("🎉 REGICIDE OS INSTALLATION COMPLETED SUCCESSFULLY! 🎉");
-    println!("=".repeat(60));
+    println!("{}", separator);
     println!();
     println!("✅ System has been installed on: {}", config_parsed.drive);
     println!("✅ Bootloader has been configured");
@@ -2088,7 +2090,7 @@ async fn main() -> Result<()> {
     println!("   Your new RegicideOS system should boot automatically.");
     println!();
     println!("⚠️  IMPORTANT: Make sure to save any work before rebooting.");
-    println!("=".repeat(60));
+    println!("{}", separator);
     println!();
 
     Ok(()).or_else(|e| {
