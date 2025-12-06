@@ -339,7 +339,10 @@ fn get_drive_size(drive: &str) -> Result<u64> {
             if size_str.is_empty() {
                 Ok(0)
             } else {
-                Ok(size_str.parse::<u64>().unwrap_or(0))
+                // Take only the first line (drive size, not partitions)
+                let first_line = size_str.lines().next().unwrap_or("").trim();
+                println!("DEBUG: Using first line as drive size: '{}'", first_line);
+                Ok(first_line.parse::<u64>().unwrap_or(0))
             }
         }
         Err(e) => {
