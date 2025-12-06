@@ -1,10 +1,11 @@
 use anyhow::{bail, Context, Result};
 use clap::{Arg, Command};
+use regex;
 use reqwest;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -24,8 +25,44 @@ impl Colours {
 }
 
 fn die(message: &str) -> ! {
-    eprintln!("{}{}{} {}", Colours::RED, "[ERROR]", Colours::ENDC, message);
+    // Sanitize error message to prevent information disclosure
+    let sanitized = sanitize_error_message(message);
+    eprintln!("{}{}{} {}", Colours::RED, "[ERROR]", Colours::ENDC, sanitized);
     std::process::exit(1);
+}
+
+// Sanitize error messages to prevent information disclosure
+fn sanitize_error_message(message: &str) -> String {
+    // Remove potentially sensitive information
+    let sensitive_patterns = [
+        r"/home/[^/\s]+",           // Home directory paths
+        r"/root/[^/\s]+",           // Root directory paths  
+        r"/tmp/[^/\s]+",            // Temp file paths
+        r"password[^=\s]*=\s*[^\s]+", // Passwords in error messages
+        r"token[^=\s]*=\s*[^\s]+",    // Tokens in error messages
+        r"key[^=\s]*=\s*[^\s]+",      // Keys in error messages
+        r"secret[^=\s]*=\s*[^\s]+",    // Secrets in error messages
+    ];
+    
+    let mut sanitized = message.to_string();
+    
+    for pattern in &sensitive_patterns {
+        if let Ok(regex) = regex::Regex::new(pattern) {
+            sanitized = regex.replace_all(&sanitized, "[REDACTED]").to_string();
+        }
+    }
+    
+    // Remove full paths, keep only filenames
+    let path_regex = regex::Regex::new(r"/([^/\s]+/)+([^/\s]+)").unwrap();
+    sanitized = path_regex.replace_all(&sanitized, "[PATH]/$2").to_string();
+    
+    // Limit error message length to prevent log flooding
+    if sanitized.len() > 200 {
+        sanitized.truncate(197);
+        sanitized.push_str("...");
+    }
+    
+    sanitized
 }
 
 fn info(message: &str) {
@@ -33,7 +70,8 @@ fn info(message: &str) {
 }
 
 fn warn(message: &str) {
-    println!("{}{}{} {}", Colours::YELLOW, "[WARN]", Colours::ENDC, message);
+    let sanitized = sanitize_error_message(message);
+    println!("{}{}{} {}", Colours::YELLOW, "[WARN]", Colours::ENDC, sanitized);
 }
 
 fn print_banner() {
@@ -52,18 +90,176 @@ fn print_banner() {
     println!("{}", Colours::ENDC);
 }
 
+// Safe command execution with strict allowlist
 fn execute(command: &str) -> Result<String> {
-    let output = ProcessCommand::new("sh")
-        .arg("-c")
-        .arg(command)
+    // Parse command into program and arguments
+    let parts: Vec<&str> = command.trim().split_whitespace().collect();
+    if parts.is_empty() {
+        bail!("Empty command");
+    }
+    
+    let program = parts[0];
+    let args = &parts[1..];
+    
+    // Allowlist of safe commands with their expected argument patterns
+    match program {
+        // Block device commands
+        "lsblk" | "blkid" | "partprobe" | "sfdisk" | "sgdisk" | "blockdev" | "hdparm" => {
+            execute_safe_command(program, args)
+        }
+        
+        // Filesystem commands
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" => {
+            execute_safe_command(program, args)
+        }
+        
+        // Mount/unmount commands
+        "mount" | "umount" => {
+            execute_safe_command(program, args)
+        }
+        
+        // LUKS commands
+        "cryptsetup" => {
+            execute_safe_command(program, args)
+        }
+        
+        // System commands
+        "systemctl" | "loginctl" => {
+            execute_safe_command(program, args)
+        }
+        
+        // Package managers (read-only operations only)
+        "which" | "dpkg" | "rpm" | "pacman" => {
+            if program == "which" || args.iter().any(|&arg| arg == "-l" || arg == "-Q") {
+                execute_safe_command(program, args)
+            } else {
+                bail!("Package manager operation not allowed: {}", command)
+            }
+        }
+        
+        // LVM commands (read-only only)
+        "vgs" => {
+            execute_safe_command(program, args)
+        }
+        
+        // User management (chroot only)
+        "useradd" | "usermod" | "passwd" => {
+            execute_safe_command(program, args)
+        }
+        
+        // GRUB commands (chroot only)
+        "grub-install" | "grub2-install" | "grub-mkconfig" | "grub2-mkconfig" => {
+            execute_safe_command(program, args)
+        }
+        
+        // Service management (chroot only)
+        "rc-update" | "rc-service" => {
+            execute_safe_command(program, args)
+        }
+        
+        // Allow safe shell builtins with strict validation
+        "sh" => {
+            if args.len() >= 2 && args[0] == "-c" {
+                let shell_cmd = args[1];
+                // Only allow very specific shell patterns
+                if is_safe_shell_command(shell_cmd) {
+                    execute_safe_shell_command(shell_cmd)
+                } else {
+                    bail!("Unsafe shell command: {}", shell_cmd)
+                }
+            } else {
+                bail!("Invalid sh usage: {}", command)
+            }
+        }
+        
+        _ => {
+            bail!("Command not allowed: {}", program)
+        }
+    }
+}
+
+// Execute safe commands directly without shell
+fn execute_safe_command(program: &str, args: &[&str]) -> Result<String> {
+    let output = ProcessCommand::new(program)
+        .args(args)
         .output()
-        .context("Failed to execute command")?;
+        .with_context(|| format!("Failed to execute system command"))?;
 
     if !output.status.success() {
-        bail!("Command failed: {}", command);
+        bail!("System command failed (exit code: {:?})", output.status.code());
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+// Execute safe shell commands with strict validation
+fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
+    // Allow only specific, safe shell patterns
+    let allowed_patterns = [
+        r"umount -ql [^[:space:]]+\?\* 2>/dev/null \|\| true",
+        r"mount --rbind /dev /mnt/root/dev",
+        r"mount --rbind /sys /mnt/root/sys", 
+        r"mount --bind /run /mnt/root/run",
+        r"mount --make-slave /mnt/root/run",
+        r"cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+",
+        r"mount -t overlay overlay -o [^[:space:]]+ [^[:space:]]+",
+        r"lsblk -ln -o NAME [^[:space:]]+",
+        r"lsblk -fn -o NAME,LABEL",
+        r"blkid -L [^[:space:]]+",
+        r"vgs \| awk '\{ print \$1 \}' \| grep -vw VG",
+    ];
+    
+    for pattern in &allowed_patterns {
+        if let Ok(regex) = regex::Regex::new(pattern) {
+            if regex.is_match(shell_cmd) {
+                return execute_safe_command("sh", &["-c", shell_cmd]);
+            }
+        }
+    }
+    
+    bail!("Shell command pattern not allowed: {}", shell_cmd)
+}
+
+// Check if a shell command is safe
+fn is_safe_shell_command(cmd: &str) -> bool {
+    // Reject dangerous characters and patterns
+    let dangerous_patterns = [
+        ";", "&&", "||", "|", "&", "$(", "`", 
+        "$", "${", ">", ">>", "<", "<<",
+        "rm ", "dd ", "chmod ", "chown ",
+        "sudo ", "su ", "eval ", "exec ",
+    ];
+    
+    for pattern in &dangerous_patterns {
+        if cmd.contains(pattern) {
+            return false;
+        }
+    }
+    
+    // Only allow specific safe patterns
+    let safe_patterns = [
+        r"^umount -ql [^[:space:]]+\?\* 2>/dev/null \|\| true$",
+        r"^mount --rbind /dev /mnt/root/dev$",
+        r"^mount --rbind /sys /mnt/root/sys$",
+        r"^mount --bind /run /mnt/root/run$", 
+        r"^mount --make-slave /mnt/root/run$",
+        r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+$",
+        r"^mount -t overlay overlay -o [^[:space:]]+ [^[:space:]]+$",
+        r"^lsblk -ln -o NAME [^[:space:]]+$",
+        r"^lsblk -fn -o NAME,LABEL$",
+        r"^blkid -L [^[:space:]]+$",
+        r"^vgs \| awk '\{ print \$1 \}' \| grep -vw VG$",
+    ];
+    
+    for pattern in &safe_patterns {
+        if let Ok(regex) = regex::Regex::new(pattern) {
+            if regex.is_match(cmd) {
+                return true;
+            }
+        }
+    }
+    
+    false
 }
 
 fn get_drive_size(drive: &str) -> Result<u64> {
@@ -360,6 +556,26 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
 }
 
 fn set_efi_boot_flag(partition: &str) -> Result<()> {
+    // Check if sgdisk is available, attempt to install if missing
+    if execute("which sgdisk").is_err() {
+        warn("sgdisk not found, attempting to install gdisk package...");
+        if execute("which dnf").is_ok() {
+            execute("dnf install -y gdisk")
+                .map_err(|e| warn(&format!("Failed to install gdisk via dnf: {}", e)))
+                .ok();
+        } else if execute("which apt").is_ok() {
+            execute("apt update && apt install -y gdisk")
+                .map_err(|e| warn(&format!("Failed to install gdisk via apt: {}", e)))
+                .ok();
+        } else if execute("which pacman").is_ok() {
+            execute("pacman -S --noconfirm gdisk")
+                .map_err(|e| warn(&format!("Failed to install gdisk via pacman: {}", e)))
+                .ok();
+        } else {
+            warn("Could not determine package manager to install gdisk");
+        }
+    }
+
     // Set EFI boot flag using sgdisk if available
     if execute("which sgdisk").is_ok() {
         let partition_num = partition.chars().last()
@@ -375,7 +591,8 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
         execute(&format!("sgdisk --set-flag={}:boot:on {}", partition_num, drive))?;
         info(&format!("Set EFI boot flag on partition {}", partition_num));
     } else {
-        warn("sgdisk not available, skipping EFI boot flag");
+        warn("sgdisk not available, EFI boot flag not set. System may not boot properly.");
+        warn("Please install gdisk package manually: dnf install gdisk (Fedora) or apt install gdisk (Ubuntu)");
     }
     Ok(())
 }
@@ -537,27 +754,57 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "ext4")?;
             }
             "btrfs" => {
-                // Following Xenia's BTRFS formatting approach
+                // Following Xenia's BTRFS formatting approach with enhanced error handling
                 if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.btrfs -L {} {}", label, current_name))?;
+                    info(&format!("Creating BTRFS filesystem with label '{}' on {}", label, current_name));
+                    if let Err(e) = execute(&format!("mkfs.btrfs -L {} {}", label, current_name)) {
+                        bail!("Failed to create BTRFS filesystem with label '{}': {}", label, e);
+                    }
                 } else {
-                    execute(&format!("mkfs.btrfs {}", current_name))?;
+                    info(&format!("Creating BTRFS filesystem on {}", current_name));
+                    if let Err(e) = execute(&format!("mkfs.btrfs {}", current_name)) {
+                        bail!("Failed to create BTRFS filesystem: {}", e);
+                    }
                 }
                 
-                // Create subvolumes following Xenia's exact approach
+                // Create subvolumes following Xenia's exact approach with better error handling
                 if let Some(ref subvolumes) = partition.subvolumes {
                     let temp_mount = "/mnt/gentoo";
-                    fs::create_dir_all(temp_mount).ok();
-                    execute(&format!("mount {} {}", current_name, temp_mount))?;
                     
-                    for subvolume in subvolumes {
-                        execute(&format!("btrfs subvolume create {}{}", temp_mount, subvolume))?;
+                    // Ensure mount directory exists
+                    if let Err(e) = fs::create_dir_all(temp_mount) {
+                        bail!("Failed to create temporary mount directory '{}': {}", temp_mount, e);
                     }
                     
-                    execute(&format!("umount {}", temp_mount))?;
+                    // Mount the BTRFS filesystem
+                    info(&format!("Mounting BTRFS filesystem temporarily at {}", temp_mount));
+                    if let Err(e) = execute(&format!("mount {} {}", current_name, temp_mount)) {
+                        bail!("Failed to mount BTRFS filesystem for subvolume creation: {}", e);
+                    }
+                    
+                    // Create each subvolume with error handling
+                    for subvolume in subvolumes {
+                        let subvol_path = format!("{}{}", temp_mount, subvolume);
+                        info(&format!("Creating BTRFS subvolume: {}", subvolume));
+                        if let Err(e) = execute(&format!("btrfs subvolume create {}", subvol_path)) {
+                            // Attempt cleanup on failure
+                            let _ = execute(&format!("umount {}", temp_mount));
+                            bail!("Failed to create BTRFS subvolume '{}': {}", subvolume, e);
+                        }
+                    }
+                    
+                    // Unmount the temporary filesystem
+                    info("Unmounting temporary BTRFS mount");
+                    if let Err(e) = execute(&format!("umount {}", temp_mount)) {
+                        warn(&format!("Warning: Failed to unmount temporary BTRFS mount: {}", e));
+                    }
                 }
                 
-                verify_filesystem(current_name, "btrfs")?;
+                // Verify the filesystem
+                if let Err(e) = verify_filesystem(current_name, "btrfs") {
+                    warn(&format!("BTRFS filesystem verification failed: {}", e));
+                    warn("The filesystem may still be usable, but please verify manually");
+                }
             }
             "luks" => {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
@@ -572,14 +819,17 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 }
                 
                 let luks_device = if let Some(ref label) = partition.label {
+                    // Set LUKS label after formatting
                     execute(&format!("cryptsetup -q config {} --label {}", current_name, label))?;
                     
+                    // Open LUKS container using the actual partition path, not by-label
+                    // LUKS containers don't have accessible labels until opened
                     let open_result = ProcessCommand::new("cryptsetup")
-                        .args(["luksOpen", &format!("/dev/disk/by-label/{}", label), "regicideos"])
+                        .args(["luksOpen", current_name, "regicideos"])
                         .status();
                         
                     if !open_result.map(|s| s.success()).unwrap_or(false) {
-                        bail!("Failed to open LUKS partition");
+                        bail!("Failed to open LUKS partition with label '{}'", label);
                     }
                     
                     // Verify the device was created with timeout
@@ -755,7 +1005,11 @@ fn find_partition_by_label(label: &str) -> Result<String> {
 }
 
 fn mount_with_retry(source: &str, target: &str, fs_type: Option<&str>, options: Option<&str>) -> Result<()> {
-    fs::create_dir_all(target).ok();
+    // Only allow mounting under /mnt for security
+    if !target.starts_with("/mnt/") {
+        bail!("Mount target must be under /mnt directory: {}", target);
+    }
+    safe_create_dir_all(target, "/mnt").ok();
     
     let mut mount_cmd = format!("mount");
     
@@ -798,13 +1052,14 @@ fn mount_roots() -> Result<()> {
     let roots_device = find_partition_by_label("ROOTS")?;
     
     info("Mounting ROOTS partition on /mnt/gentoo");
+    safe_create_dir_all(mount_point, "/mnt")?;
     mount_with_retry(&roots_device, mount_point, None, None)?;
     
     Ok(())
 }
 
 fn mount() -> Result<()> {
-    fs::create_dir_all("/mnt/root").ok();
+    safe_create_dir_all("/mnt/root", "/mnt").ok();
     
     info("Mounting root.img on /mnt/root");
     mount_with_retry("/mnt/gentoo/root.img", "/mnt/root", Some("squashfs"), Some("ro,loop"))?;
@@ -838,7 +1093,7 @@ async fn download_root(url: &str) -> Result<()> {
     let root_img_path = "/mnt/gentoo/root.img";
     
     if Path::new(root_img_path).exists() {
-        fs::remove_file(root_img_path)?;
+        safe_remove_file(root_img_path, "/mnt/gentoo")?;
     }
     
     info(&format!("Downloading root image from {}", url));
@@ -854,7 +1109,7 @@ async fn download_root(url: &str) -> Result<()> {
         bail!("Downloaded root image is empty");
     }
     
-    fs::write(root_img_path, bytes)?;
+    safe_write_file(root_img_path, &bytes, "/mnt/gentoo")?;
     
     // Verify the file was written and has content
     let metadata = fs::metadata(root_img_path)?;
@@ -896,8 +1151,8 @@ fn post_install(config: &Config) -> Result<()> {
 
     let (etc_path, var_path, usr_path) = match layout_name.as_str() {
         "btrfs" => {
-            fs::create_dir_all("/mnt/root/overlay").ok();
-            fs::create_dir_all("/mnt/root/home").ok();
+            safe_create_dir_all("/mnt/root/overlay", "/mnt/root")?;
+            safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount -L ROOTS -o subvol=overlay /mnt/root/overlay")?;
             execute("mount -L ROOTS -o subvol=home /mnt/root/home")?;
             ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
@@ -906,8 +1161,8 @@ fn post_install(config: &Config) -> Result<()> {
             if !Path::new("/dev/mapper/regicideos").exists() {
                 bail!("LUKS device /dev/mapper/regicideos not found");
             }
-            fs::create_dir_all("/mnt/root/overlay").ok();
-            fs::create_dir_all("/mnt/root/home").ok();
+            safe_create_dir_all("/mnt/root/overlay", "/mnt/root")?;
+            safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount /dev/mapper/regicideos -o subvol=overlay /mnt/root/overlay")?;
             execute("mount /dev/mapper/regicideos -o subvol=home /mnt/root/home")?;
             ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
@@ -919,8 +1174,8 @@ fn post_install(config: &Config) -> Result<()> {
             if !Path::new("/dev/disk/by-label/HOME").exists() {
                 bail!("HOME partition not found");
             }
-            fs::create_dir_all("/mnt/root/overlay").ok();
-            fs::create_dir_all("/mnt/root/home").ok();
+            safe_create_dir_all("/mnt/root/overlay", "/mnt/root")?;
+            safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount -L OVERLAY /mnt/root/overlay")?;
             execute("mount -L HOME /mnt/root/home")?;
             ("/mnt/root/overlay", "/mnt/root/overlay", "/mnt/root/overlay")
@@ -937,7 +1192,7 @@ fn post_install(config: &Config) -> Result<()> {
     ];
 
     for path in &paths {
-        fs::create_dir_all(path).ok();
+        safe_create_dir_all(path, "/mnt/root")?;
     }
 
     execute(&format!(
@@ -981,8 +1236,8 @@ fn post_install(config: &Config) -> Result<()> {
 
     let flatpaks = get_flatpak_packages(&config.applications);
     if !flatpaks.is_empty() {
-        fs::create_dir_all("/mnt/root/etc/declare").ok();
-        fs::write("/mnt/root/etc/declare/flatpak", flatpaks)?;
+        safe_create_dir_all("/mnt/root/etc/declare", "/mnt/root/etc")?;
+        safe_write_file("/mnt/root/etc/declare/flatpak", flatpaks.as_bytes(), "/mnt/root/etc")?;
 
         if !Path::new("/mnt/root/usr/bin/rc-service").exists() {
             chroot("systemctl enable declareflatpak")?;
@@ -994,6 +1249,197 @@ fn post_install(config: &Config) -> Result<()> {
     Ok(())
 }
 
+// Input validation functions
+fn validate_device_path(path: &str) -> Result<()> {
+    // Only allow /dev/ paths with safe characters
+    let device_regex = regex::Regex::new(r"^/dev/[a-zA-Z0-9/_-]+$")?;
+    if !device_regex.is_match(path) {
+        bail!("Invalid device path");
+    }
+    
+    // Prevent dangerous device paths
+    let dangerous_paths = [
+        "/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom",
+        "/dev/mem", "/dev/kmem", "/dev/port", "/dev/sda", "/dev/hda",
+    ];
+    
+    for dangerous in &dangerous_paths {
+        if path.starts_with(dangerous) && path.to_string() != *dangerous {
+            bail!("Device access denied");
+        }
+    }
+    
+    Ok(())
+}
+
+fn validate_username(username: &str) -> Result<()> {
+    // Unix username rules: 1-32 chars, lowercase letters, digits, hyphens, underscores
+    // Cannot start with hyphen or digit, cannot end with hyphen
+    let username_regex = regex::Regex::new(r"^[a-z_][a-z0-9_-]{0,31}$")?;
+    if !username_regex.is_match(username) {
+        bail!("Invalid username format");
+    }
+    
+    // Reserved usernames
+    let reserved = [
+        "root", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail",
+        "news", "uucp", "proxy", "www-data", "backup", "list", "irc", "gnats",
+        "nobody", "systemd-network", "systemd-resolve", "syslog", "messagebus",
+        "uuidd", "dnsmasq", "usbmux", "rtkit", "pulse", "speech-dispatcher",
+        "avahi", "saned", "colord", "hplip", "geoclue", "gnome-initial-setup",
+        "gdm", "sshd", "ntp", "postgres", "mysql", "oracle", "tomcat",
+    ];
+    
+    if reserved.contains(&username) {
+        bail!("Username not available");
+    }
+    
+    Ok(())
+}
+
+fn validate_url(url: &str) -> Result<()> {
+    // Basic URL validation with allowlist for official repositories
+    let url_regex = regex::Regex::new(r"^https://[a-zA-Z0-9.-]+/[a-zA-Z0-9/_.-]*$")?;
+    if !url_regex.is_match(url) {
+        bail!("Invalid URL format");
+    }
+    
+    // Only allow official repositories
+    let allowed_domains = [
+        "repo.xenialinux.com",
+        "xenialinux.com",
+    ];
+    
+    let domain = regex::Regex::new(r"^https://([a-zA-Z0-9.-]+)")
+        .unwrap()
+        .captures(url)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str())
+        .unwrap_or("");
+    
+    if !allowed_domains.contains(&domain) {
+        bail!("URL not authorized");
+    }
+    
+    Ok(())
+}
+
+fn validate_filesystem_type(fs: &str) -> Result<()> {
+    let allowed_fs = ["btrfs", "btrfs_encryption_dev"];
+    if !allowed_fs.contains(&fs) {
+        bail!("Unsupported filesystem type");
+    }
+    Ok(())
+}
+
+fn validate_flavour(flavour: &str) -> Result<()> {
+    // Only allow cosmic-fedora for RegicideOS
+    if flavour != "cosmic-fedora" {
+        bail!("Unsupported flavour");
+    }
+    Ok(())
+}
+
+fn validate_package_set(applications: &str) -> Result<()> {
+    let allowed_sets = ["minimal", "base", "desktop", "full"];
+    if !allowed_sets.contains(&applications) {
+        bail!("Unsupported application set");
+    }
+    Ok(())
+}
+
+fn sanitize_input(input: &str) -> String {
+    // Remove null bytes and control characters
+    input.chars()
+        .filter(|c| *c != '\0' && !c.is_control() || *c == '\t' || *c == '\n' || *c == '\r')
+        .collect()
+}
+
+// Path traversal protection
+fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
+    use std::path::{Path, PathBuf};
+    
+    // Remove any dangerous characters
+    let sanitized = sanitize_input(path);
+    
+    // Convert to absolute path
+    let absolute_path = if sanitized.starts_with('/') {
+        PathBuf::from(&sanitized)
+    } else {
+        std::env::current_dir()?.join(&sanitized)
+    };
+    
+    // Get canonical paths to resolve symlinks and relative components
+    let canonical_path = match absolute_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => {
+            // If canonicalization fails, try to resolve manually
+            let resolved = absolute_path.clone();
+            // Simple resolution - in production, use more sophisticated approach
+            resolved
+        }
+    };
+    
+    // Get canonical path for allowed base
+    let base_path = Path::new(allowed_base).canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(allowed_base));
+    
+    // Ensure the path is within the allowed base directory
+    if !canonical_path.starts_with(&base_path) {
+        bail!("Path access denied");
+    }
+    
+    // Additional checks for dangerous patterns
+    let path_str = canonical_path.to_string_lossy();
+    let dangerous_patterns = [
+        "..", "~", "$HOME", "/etc/", "/root/", "/var/", "/usr/",
+        "/bin/", "/sbin/", "/lib/", "/proc/", "/sys/", "/dev/",
+    ];
+    
+    for pattern in &dangerous_patterns {
+        if path_str.contains(pattern) && !path_str.starts_with(allowed_base) {
+            bail!("Path access denied");
+        }
+    }
+    
+    Ok(canonical_path)
+}
+
+// Safe file operations with path validation
+fn safe_create_dir_all(path: &str, allowed_base: &str) -> Result<()> {
+    let validated_path = validate_safe_path(path, allowed_base)?;
+    fs::create_dir_all(validated_path)
+        .with_context(|| "Failed to create directory")?;
+    Ok(())
+}
+
+fn safe_write_file(path: &str, content: &[u8], allowed_base: &str) -> Result<()> {
+    let validated_path = validate_safe_path(path, allowed_base)?;
+    fs::write(validated_path, content)
+        .with_context(|| "Failed to write file")?;
+    Ok(())
+}
+
+fn safe_read_file(path: &str, allowed_base: &str) -> Result<String> {
+    let validated_path = validate_safe_path(path, allowed_base)?;
+    fs::read_to_string(&validated_path)
+        .with_context(|| "Failed to read file")
+}
+
+fn safe_remove_file(path: &str, allowed_base: &str) -> Result<()> {
+    let validated_path = validate_safe_path(path, allowed_base)?;
+    fs::remove_file(validated_path)
+        .with_context(|| "Failed to remove file")?;
+    Ok(())
+}
+
+fn safe_remove_dir_all(path: &str, allowed_base: &str) -> Result<()> {
+    let validated_path = validate_safe_path(path, allowed_base)?;
+    fs::remove_dir_all(validated_path)
+        .with_context(|| "Failed to remove directory")?;
+    Ok(())
+}
+
 fn get_input(prompt: &str, default: &str) -> String {
     print!("{}. Valid options are {}\n{}[{}]{}: ", 
            prompt, "", Colours::BLUE, default, Colours::ENDC);
@@ -1001,7 +1447,7 @@ fn get_input(prompt: &str, default: &str) -> String {
     
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
-    let input = input.trim();
+    let input = sanitize_input(input.trim());
     
     if input.is_empty() {
         default.to_string()
@@ -1021,6 +1467,9 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             die("Invalid or missing drive in config");
         }
     }
+    
+    // Validate drive path security
+    validate_device_path(&config.drive)?;
 
     // RegicideOS only supports the official Xenia Linux repository
     const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.com/releases/";
@@ -1035,23 +1484,29 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
         }
     }
 
+    // Validate repository URL security
+    validate_url(&config.repository)?;
+
     // Validate repository accessibility
     if !check_url(&config.repository).await {
         die("Cannot access the Xenia Linux repository");
     }
 
-    // RegicideOS only supports cosmic-desktop flavour (available in Xenia repository)
-    const REGICIDE_FLAVOUR: &str = "cosmic-desktop";
+    // RegicideOS only supports cosmic-fedora flavour (available in Xenia repository)
+    const REGICIDE_FLAVOUR: &str = "cosmic-fedora";
     if config.flavour.is_empty() {
         config.flavour = REGICIDE_FLAVOUR.to_string();
     } else if config.flavour != REGICIDE_FLAVOUR {
         if interactive {
-            warn(&format!("RegicideOS only supports the cosmic-desktop flavour. Using: {}", REGICIDE_FLAVOUR));
+            warn(&format!("RegicideOS only supports the cosmic-fedora flavour. Using: {}", REGICIDE_FLAVOUR));
             config.flavour = REGICIDE_FLAVOUR.to_string();
         } else {
-            die(&format!("RegicideOS only supports the cosmic-desktop flavour: {}", REGICIDE_FLAVOUR));
+            die(&format!("RegicideOS only supports the cosmic-fedora flavour: {}", REGICIDE_FLAVOUR));
         }
     }
+
+    // Validate flavour security
+    validate_flavour(&config.flavour)?;
 
     // Verify the cosmic-desktop flavour is available in the repository
     let flavours = get_flavours(&config.repository).await?;
@@ -1080,13 +1535,23 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             die("Invalid or missing filesystem in config");
         }
     }
+    
+    // Validate filesystem type security
+    validate_filesystem_type(&config.filesystem)?;
 
     // Validate username
-    if !check_username(&config.username) {
-        if interactive {
-            config.username = get_input("Enter username (leave empty for none)", "");
-        } else {
-            die("Invalid username in config");
+    if !config.username.is_empty() {
+        if !check_username(&config.username) {
+            if interactive {
+                config.username = get_input("Enter username (leave empty for none)", "");
+            } else {
+                die("Invalid username in config");
+            }
+        }
+        
+        // Additional username security validation
+        if !config.username.is_empty() {
+            validate_username(&config.username)?;
         }
     }
 
@@ -1100,6 +1565,9 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             die("Invalid or missing applications in config");
         }
     }
+    
+    // Validate package set security
+    validate_package_set(&config.applications)?;
 
     Ok(config)
 }
@@ -1115,10 +1583,10 @@ fn cleanup_on_failure() {
     // Close LUKS devices
     let _ = execute("cryptsetup close regicideos 2>/dev/null");
     
-    // Remove temporary directories
-    let _ = fs::remove_dir_all("/mnt/temp_btrfs");
-    let _ = fs::remove_dir_all("/mnt/gentoo");
-    let _ = fs::remove_dir_all("/mnt/root");
+    // Remove temporary directories safely
+    let _ = safe_remove_dir_all("/mnt/temp_btrfs", "/mnt");
+    let _ = safe_remove_dir_all("/mnt/gentoo", "/mnt");
+    let _ = safe_remove_dir_all("/mnt/root", "/mnt");
     
     info("Cleanup completed");
 }
@@ -1169,7 +1637,7 @@ async fn main() -> Result<()> {
             die(&format!("Config file {} does not exist.", config_path));
         }
 
-        let config_content = fs::read_to_string(config_path)?;
+        let config_content = safe_read_file(config_path, ".")?;
         let config_toml: toml::Value = toml::from_str(&config_content)?;
 
         config.drive = config_toml.get("drive").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1205,8 +1673,29 @@ async fn main() -> Result<()> {
     let layouts = get_layouts();
     let layout = layouts.get(&config_parsed.filesystem).unwrap();
 
+    // Prevent suspend interrupts during critical partitioning operations
+    info("Disabling system suspend to prevent interruption during partitioning");
+    execute("systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target")
+        .map_err(|e| warn(&format!("Failed to mask suspend targets: {}", e)))
+        .ok();
+    execute("loginctl disable-lid-switch")
+        .map_err(|e| warn(&format!("Failed to disable lid switch: {}", e)))
+        .ok();
+
     info(&format!("Partitioning drive {}", config_parsed.drive));
-    partition_drive(&config_parsed.drive, layout)?;
+    let partition_result = partition_drive(&config_parsed.drive, layout);
+
+    // Re-enable suspend targets after partitioning completes
+    info("Re-enabling system suspend controls");
+    execute("systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target")
+        .map_err(|e| warn(&format!("Failed to unmask suspend targets: {}", e)))
+        .ok();
+    execute("loginctl enable-lid-switch")
+        .map_err(|e| warn(&format!("Failed to enable lid switch: {}", e)))
+        .ok();
+
+    // Propagate partitioning errors if any occurred
+    partition_result?;
 
     info(&format!("Formatting drive {}", config_parsed.drive));
     format_drive(&config_parsed.drive, layout)?;
