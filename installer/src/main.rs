@@ -127,7 +127,7 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // Filesystem commands
-        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" => {
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" | "dd" => {
             execute_safe_command(program, args)
         }
         
@@ -1443,19 +1443,39 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
     if platform.contains("efi") {
         // Install GRUB for EFI systems targeting the mounted root
-        execute(&format!(
+        let grub_install_cmd = format!(
             "{}-install --force --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\"",
             grub, platform
-        ))?;
+        );
+        println!("DEBUG: Running GRUB install: {}", grub_install_cmd);
+        match execute(&grub_install_cmd) {
+            Ok(_) => println!("DEBUG: GRUB install succeeded"),
+            Err(e) => {
+                println!("DEBUG: GRUB install failed: {}", e);
+                // Try alternative approach
+                let alt_cmd = format!(
+                    "{}-install --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\" --removable",
+                    grub, platform
+                );
+                println!("DEBUG: Trying alternative GRUB install: {}", alt_cmd);
+                execute(&alt_cmd)?;
+            }
+        }
         
         // Generate GRUB config using the chroot environment
-        chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        println!("DEBUG: Running GRUB mkconfig: {}", grub_mkconfig_cmd);
+        chroot(&grub_mkconfig_cmd)?;
     } else {
-        chroot(&format!(
+        let grub_install_cmd = format!(
             "{}-install --force --target=\"{}\" --boot-directory=\"/boot/efi\" {}",
             grub, platform, device
-        ))?;
-        chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
+        );
+        println!("DEBUG: Running BIOS GRUB install: {}", grub_install_cmd);
+        chroot(&grub_install_cmd)?;
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        println!("DEBUG: Running BIOS GRUB mkconfig: {}", grub_mkconfig_cmd);
+        chroot(&grub_mkconfig_cmd)?;
     }
     
     Ok(())
@@ -2028,6 +2048,23 @@ async fn main() -> Result<()> {
     post_install(&config_parsed)?;
 
     info("Installation completed successfully!");
+    
+    // Display completion message
+    println!("\n" + "=".repeat(60).as_str());
+    println!("🎉 REGICIDE OS INSTALLATION COMPLETED SUCCESSFULLY! 🎉");
+    println!("=".repeat(60));
+    println!();
+    println!("✅ System has been installed on: {}", config_parsed.drive);
+    println!("✅ Bootloader has been configured");
+    println!("✅ All filesystems are properly mounted");
+    println!();
+    println!("🔄 YOU CAN NOW REBOOT YOUR SYSTEM!");
+    println!("   Remove the installation media and reboot.");
+    println!("   Your new RegicideOS system should boot automatically.");
+    println!();
+    println!("⚠️  IMPORTANT: Make sure to save any work before rebooting.");
+    println!("=".repeat(60));
+    println!();
 
     Ok(()).or_else(|e| {
         cleanup_on_failure();
