@@ -934,6 +934,13 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             "luks" => {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
+                // Ensure partition is not mounted before LUKS format
+                println!("DEBUG: Ensuring {} is unmounted before LUKS format", current_name);
+                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                
+                // Wait a moment for unmount to complete
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                
                 // Special handling for LUKS format (interactive password required)
                 println!("DEBUG: Starting LUKS format for {}", current_name);
                 let result = ProcessCommand::new("cryptsetup")
