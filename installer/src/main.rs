@@ -147,13 +147,19 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // Package managers (read-only operations only, except for gdisk installation)
-        "which" | "dpkg" | "rpm" | "pacman" => {
+        "which" | "dpkg" | "rpm" => {
             if program == "which" || args.iter().any(|&arg| arg == "-l" || arg == "-Q") {
                 execute_safe_command(program, args)
-            } else if (program == "dnf" && args.contains(&"-y") && args.contains(&"gdisk")) ||
-                      (program == "apt" && args.contains(&"gdisk")) ||
-                      (program == "pacman" && args.contains(&"gdisk")) {
-                // Allow gdisk installation for EFI boot support
+            } else {
+                bail!("Package manager operation not allowed: {}", command)
+            }
+        }
+        
+        "dnf" | "apt" | "pacman" => {
+            // Allow gdisk installation for EFI boot support
+            if (program == "dnf" && args.contains(&"-y") && args.contains(&"gdisk")) ||
+               (program == "apt" && args.contains(&"gdisk")) ||
+               (program == "pacman" && args.contains(&"gdisk")) {
                 execute_safe_command(program, args)
             } else {
                 bail!("Package manager operation not allowed: {}", command)
