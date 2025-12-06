@@ -888,6 +888,47 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
+                // Check if partition is held by LUKS mapper
+                println!("DEBUG: Checking for LUKS holders on {}...", current_name);
+                
+                let holders_path = format!("/sys/block/{}/holders", 
+                    current_name.trim_start_matches("/dev/").replace("nvme", "nvme"));
+                match execute(&format!("ls -la {}", holders_path)) {
+                    Ok(holders_output) => {
+                        println!("DEBUG: Holders: {}", holders_output);
+                        if holders_output.contains("regicideos") {
+                            println!("DEBUG: Found LUKS mapper 'regicideos' holding partition!");
+                            println!("DEBUG: Closing LUKS mapper first...");
+                            
+                            // Close the LUKS container
+                            match execute("cryptsetup luksClose regicideos") {
+                                Ok(_) => {
+                                    println!("DEBUG: LUKS mapper closed successfully");
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Failed to close LUKS mapper: {}", e);
+                                }
+                            }
+                            
+                            // Wait for mapper to disappear
+                            std::thread::sleep(std::time::Duration::from_millis(2000));
+                            
+                            // Check if holders are now clear
+                            match execute(&format!("ls -la {}", holders_path)) {
+                                Ok(holders_after) => {
+                                    println!("DEBUG: Holders after close: {}", holders_after);
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Could not check holders after close: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("DEBUG: Could not check holders: {}", e);
+                    }
+                }
+                
                 // Try partition recreation if all else fails
                 println!("DEBUG: Trying partition recreation approach for {}...", current_name);
                 
