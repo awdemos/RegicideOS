@@ -127,7 +127,7 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // Filesystem commands
-        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" | "dd" => {
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" | "dd" | "ls" | "fdisk" | "sgdisk" | "cryptsetup" | "dmsetup" => {
             execute_safe_command(program, args)
         }
         
@@ -891,8 +891,9 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 // Check if partition is held by LUKS mapper
                 println!("DEBUG: Checking for LUKS holders on {}...", current_name);
                 
-                let holders_path = format!("/sys/block/{}/holders", 
-                    current_name.trim_start_matches("/dev/").replace("nvme", "nvme"));
+                // Convert /dev/nvme0n1p2 to nvme0n1p2 for sys path
+                let sys_name = current_name.trim_start_matches("/dev/");
+                let holders_path = format!("/sys/block/{}/holders", sys_name);
                 match execute(&format!("ls -la {}", holders_path)) {
                     Ok(holders_output) => {
                         println!("DEBUG: Holders: {}", holders_output);
