@@ -938,8 +938,11 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("DEBUG: Ensuring {} is unmounted before LUKS format", current_name);
                 let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
                 
-                // Wait a moment for unmount to complete
-                std::thread::sleep(std::time::Duration::from_millis(1000));
+                // Try to close any existing LUKS containers
+                let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
+                
+                // Wait a moment for operations to complete
+                std::thread::sleep(std::time::Duration::from_millis(2000));
                 
                 // Special handling for LUKS format (interactive password required)
                 println!("DEBUG: Starting LUKS format for {}", current_name);
