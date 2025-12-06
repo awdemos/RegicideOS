@@ -919,54 +919,58 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     Err(e) => println!("DEBUG: file failed: {}", e),
                 }
                 
-                // Check what's using the partition
-                println!("DEBUG: Checking processes using {}...", current_name);
-                match execute(&format!("lsof {} 2>/dev/null || true", current_name)) {
-                    Ok(output) => println!("DEBUG: lsof output: {}", output),
-                    Err(e) => println!("DEBUG: lsof failed: {}", e),
-                }
-                
-                // Aggressive unmount before formatting
-                println!("DEBUG: Aggressively unmounting {}...", current_name);
-                let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name)); // lazy unmount
-                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name)); // force unmount
-                let _ = execute(&format!("sync")); // sync filesystems
-                
-                // Wait a moment for unmount to complete
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                // Since partition is already formatted and mounted, try to format over it
+                println!("DEBUG: Partition already has filesystem, attempting to format over existing...");
                 
                 if let Some(ref label) = partition.label {
+                    // Try mkfs.ext4 directly - it should handle existing filesystem
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
                     println!("DEBUG: Running command: {}", cmd);
                     match execute(&cmd) {
-                        Ok(_) => println!("DEBUG: mkfs.ext4 succeeded"),
+                        Ok(_) => {
+                            println!("DEBUG: mkfs.ext4 succeeded");
+                            // Try to unmount after successful format
+                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                        }
                         Err(e) => {
                             println!("DEBUG: mkfs.ext4 failed with error: {}", e);
-                            // Try running with verbose output to see real error
-                            let verbose_cmd = format!("mkfs.ext4 -v -L {} {} 2>&1", label, current_name);
-                            println!("DEBUG: Running verbose: {}", verbose_cmd);
-                            match execute(&verbose_cmd) {
-                                Ok(output) => println!("DEBUG: Verbose output: {}", output),
-                                Err(e2) => println!("DEBUG: Verbose failed: {}", e2),
+                            // Try with force flag
+                            let force_cmd = format!("mkfs.ext4 -F -L {} {}", label, current_name);
+                            println!("DEBUG: Trying with force: {}", force_cmd);
+                            match execute(&force_cmd) {
+                                Ok(_) => {
+                                    println!("DEBUG: mkfs.ext4 with -F succeeded");
+                                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                }
+                                Err(e2) => {
+                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
+                                    bail!("mkfs.ext4 failed");
+                                }
                             }
-                            bail!("mkfs.ext4 failed");
                         }
                     }
                 } else {
                     let cmd = format!("mkfs.ext4 {}", current_name);
                     println!("DEBUG: Running command: {}", cmd);
                     match execute(&cmd) {
-                        Ok(_) => println!("DEBUG: mkfs.ext4 succeeded"),
+                        Ok(_) => {
+                            println!("DEBUG: mkfs.ext4 succeeded");
+                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                        }
                         Err(e) => {
                             println!("DEBUG: mkfs.ext4 failed with error: {}", e);
-                            // Try running with verbose output to see real error
-                            let verbose_cmd = format!("mkfs.ext4 -v {} 2>&1", current_name);
-                            println!("DEBUG: Running verbose: {}", verbose_cmd);
-                            match execute(&verbose_cmd) {
-                                Ok(output) => println!("DEBUG: Verbose output: {}", output),
-                                Err(e2) => println!("DEBUG: Verbose failed: {}", e2),
+                            let force_cmd = format!("mkfs.ext4 -F {}", current_name);
+                            println!("DEBUG: Trying with force: {}", force_cmd);
+                            match execute(&force_cmd) {
+                                Ok(_) => {
+                                    println!("DEBUG: Force mkfs.ext4 succeeded");
+                                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                }
+                                Err(e2) => {
+                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
+                                    bail!("mkfs.ext4 failed");
+                                }
                             }
-                            bail!("mkfs.ext4 failed");
                         }
                     }
                 }
