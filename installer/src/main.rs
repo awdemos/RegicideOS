@@ -237,7 +237,19 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
     for pattern in &allowed_patterns {
         if let Ok(regex) = regex::Regex::new(pattern) {
             if regex.is_match(shell_cmd) {
-                return execute_safe_command("sh", &["-c", shell_cmd]);
+                let output = ProcessCommand::new("sh")
+                    .args(&["-c", shell_cmd])
+                    .output()
+                    .with_context(|| format!("Failed to execute shell command: {}", shell_cmd))?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    bail!("Shell command failed: {} (exit code: {:?})\nSTDOUT: {}\nSTDERR: {}", 
+                          shell_cmd, output.status.code(), stdout, stderr);
+                }
+
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
             }
         }
     }
