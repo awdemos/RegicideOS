@@ -888,6 +888,57 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
+                // Simple Xenia-style approach: just format directly without overthinking
+                println!("DEBUG: Using simple Xenia-style approach for ext4 formatting");
+                
+                if let Some(ref label) = partition.label {
+                    let cmd = format!("mkfs.ext4 -q -L {} {}", label, current_name);
+                    println!("DEBUG: Running: {}", cmd);
+                    match execute(&cmd) {
+                        Ok(_) => {
+                            println!("DEBUG: Simple mkfs.ext4 succeeded");
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying with -F", e);
+                            let force_cmd = format!("mkfs.ext4 -q -F -L {} {}", label, current_name);
+                            match execute(&force_cmd) {
+                                Ok(_) => {
+                                    println!("DEBUG: Force mkfs.ext4 succeeded");
+                                    return Ok(());
+                                }
+                                Err(e2) => {
+                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
+                                    // Continue with complex approach only if simple approach fails
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    let cmd = format!("mkfs.ext4 -q {}", current_name);
+                    println!("DEBUG: Running: {}", cmd);
+                    match execute(&cmd) {
+                        Ok(_) => {
+                            println!("DEBUG: Simple mkfs.ext4 succeeded");
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying with -F", e);
+                            let force_cmd = format!("mkfs.ext4 -q -F {}", current_name);
+                            match execute(&force_cmd) {
+                                Ok(_) => {
+                                    println!("DEBUG: Force mkfs.ext4 succeeded");
+                                    return Ok(());
+                                }
+                                Err(e2) => {
+                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
+                                    // Continue with complex approach only if simple approach fails
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 // Check if mkfs.ext4 is available, attempt to install if missing
                 if execute("which mkfs.ext4").is_err() {
                     warn("mkfs.ext4 not found, attempting to install e2fsprogs package...");
@@ -919,8 +970,43 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     Err(e) => println!("DEBUG: file failed: {}", e),
                 }
                 
-                // Since partition is already formatted and mounted, try to format over it
-                println!("DEBUG: Partition already has filesystem, attempting to format over existing...");
+                // Since partition is already formatted, check if we can use it as-is
+                println!("DEBUG: Partition already has filesystem, checking if we can use it as-is...");
+                
+                // Check if it's the correct filesystem type and label
+                match execute(&format!("blkid -o value -s TYPE {}", current_name)) {
+                    Ok(output) => {
+                        let fs_type = output.trim();
+                        if fs_type == "ext4" {
+                            println!("DEBUG: Partition is already ext4, checking label...");
+                            match execute(&format!("blkid -o value -s LABEL {}", current_name)) {
+                                Ok(label_output) => {
+                                    let existing_label = label_output.trim();
+                                    if let Some(ref expected_label) = partition.label {
+                                        if existing_label == expected_label {
+                                            println!("DEBUG: Partition has correct ext4 filesystem and label '{}', skipping format", expected_label);
+                                            // Don't format, just ensure it's unmounted properly
+                                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                            return Ok(());
+                                        } else {
+                                            println!("DEBUG: Label mismatch: expected '{}', found '{}', attempting format", expected_label, existing_label);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Could not read label: {}, attempting format", e);
+                                }
+                            }
+                        } else {
+                            println!("DEBUG: Wrong filesystem type: {}, attempting format", fs_type);
+                        }
+                    }
+                    Err(e) => {
+                        println!("DEBUG: Could not determine filesystem type: {}, attempting format", e);
+                    }
+                }
+                
+                println!("DEBUG: Proceeding with formatting attempts...");
                 
                 // IMPORTANT: Unmount the partition first before attempting to format it
                 println!("DEBUG: Unmounting {} before formatting...", current_name);
