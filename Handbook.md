@@ -147,7 +147,7 @@ sudo ./binaries/regicide-installer -c regicide-config.toml
 
 The installer will guide you through:
 1. **Drive Selection**: Choose target installation drive
-2. **Filesystem Layout**: BTRFS with encryption options
+2. **Filesystem Layout**: BTRFS with LUKS encryption (recommended)
 3. **User Setup**: Create administrative user account
 4. **Application Sets**: Choose minimal or recommended packages
 
@@ -183,7 +183,7 @@ drive = "/dev/sda"
 repository = "https://repo.xenialinux.com/releases/"
 flavour = "cosmic-fedora"
 release_branch = "main"
-filesystem = "btrfs"
+filesystem = "btrfs_encryption_dev"
 username = "admin"
 applications = "recommended"
 EOF
@@ -206,7 +206,7 @@ The RegicideOS installer performs these steps:
 
 2. **Drive Partitioning**
    - EFI System Partition (512MB, FAT32) with boot flag
-   - Root Partition (remaining space, BTRFS) or LUKS-encrypted BTRFS
+   - Root Partition (8GB, ext4 for boot) + LUKS-encrypted BTRFS (remaining space)
    - Automatic retry and verification of partition creation
 
 3. **Filesystem Setup**
