@@ -924,19 +924,51 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 
                 // IMPORTANT: Unmount the partition first before attempting to format it
                 println!("DEBUG: Unmounting {} before formatting...", current_name);
-                if let Err(e) = execute(&format!("umount {} 2>/dev/null || true", current_name)) {
-                    println!("DEBUG: Initial umount failed: {}, continuing anyway...", e);
-                }
                 
-                // Wait a moment for the unmount to complete
-                std::thread::sleep(std::time::Duration::from_millis(1000));
+                // Try multiple unmount approaches since partition might be mounted multiple times
+                println!("DEBUG: Attempting aggressive unmount sequence...");
                 
-                // Check if still mounted and force unmount if needed
+                // 1. Standard unmount (might fail if mounted multiple times)
+                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                
+                // 2. Lazy unmount (detaches immediately)
+                let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
+                
+                // 3. Force unmount (for busy filesystems)
+                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
+                
+                // 4. Wait and check again
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+                
+                // 5. Check if still mounted and try again if needed
                 match execute(&format!("mount | grep {}", current_name)) {
-                    Ok(_) => {
-                        println!("DEBUG: Partition still mounted, attempting force unmount...");
-                        if let Err(e) = execute(&format!("umount -l {} 2>/dev/null || true", current_name)) {
-                            println!("DEBUG: Force umount failed: {}, continuing anyway...", e);
+                    Ok(mount_output) => {
+                        println!("DEBUG: Partition still mounted after first attempt:");
+                        println!("DEBUG: Mount output: {}", mount_output);
+                        
+                        // Try to find all mount points and unmount them individually
+                        let mount_lines: Vec<&str> = mount_output.lines().collect();
+                        for line in mount_lines {
+                            if line.contains(current_name) {
+                                let parts: Vec<&str> = line.split_whitespace().collect();
+                                if parts.len() >= 3 {
+                                    let mount_point = parts[2];
+                                    println!("DEBUG: Unmounting specific mount point: {}", mount_point);
+                                    let _ = execute(&format!("umount -l {} 2>/dev/null || true", mount_point));
+                                }
+                            }
+                        }
+                        
+                        // Final check
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                        match execute(&format!("mount | grep {}", current_name)) {
+                            Ok(_) => {
+                                println!("DEBUG: WARNING: Partition still mounted after all unmount attempts!");
+                                // Continue anyway and let mkfs.ext4 fail with clear error
+                            }
+                            Err(_) => {
+                                println!("DEBUG: Partition successfully unmounted after aggressive sequence");
+                            }
                         }
                     }
                     Err(_) => {
@@ -944,7 +976,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
                 
-                // Wait again for operations to complete
+                // Final wait before proceeding
                 std::thread::sleep(std::time::Duration::from_millis(1000));
                 
                 // First, try to wipe the filesystem signature to handle "needs journal recovery" issue
@@ -1047,19 +1079,51 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 } else {
                     // IMPORTANT: Unmount the partition first before attempting to format it
                     println!("DEBUG: Unmounting {} before formatting...", current_name);
-                    if let Err(e) = execute(&format!("umount {} 2>/dev/null || true", current_name)) {
-                        println!("DEBUG: Initial umount failed: {}, continuing anyway...", e);
-                    }
                     
-                    // Wait a moment for the unmount to complete
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    // Try multiple unmount approaches since partition might be mounted multiple times
+                    println!("DEBUG: Attempting aggressive unmount sequence...");
                     
-                    // Check if still mounted and force unmount if needed
+                    // 1. Standard unmount (might fail if mounted multiple times)
+                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                    
+                    // 2. Lazy unmount (detaches immediately)
+                    let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
+                    
+                    // 3. Force unmount (for busy filesystems)
+                    let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
+                    
+                    // 4. Wait and check again
+                    std::thread::sleep(std::time::Duration::from_millis(2000));
+                    
+                    // 5. Check if still mounted and try again if needed
                     match execute(&format!("mount | grep {}", current_name)) {
-                        Ok(_) => {
-                            println!("DEBUG: Partition still mounted, attempting force unmount...");
-                            if let Err(e) = execute(&format!("umount -l {} 2>/dev/null || true", current_name)) {
-                                println!("DEBUG: Force umount failed: {}, continuing anyway...", e);
+                        Ok(mount_output) => {
+                            println!("DEBUG: Partition still mounted after first attempt:");
+                            println!("DEBUG: Mount output: {}", mount_output);
+                            
+                            // Try to find all mount points and unmount them individually
+                            let mount_lines: Vec<&str> = mount_output.lines().collect();
+                            for line in mount_lines {
+                                if line.contains(current_name) {
+                                    let parts: Vec<&str> = line.split_whitespace().collect();
+                                    if parts.len() >= 3 {
+                                        let mount_point = parts[2];
+                                        println!("DEBUG: Unmounting specific mount point: {}", mount_point);
+                                        let _ = execute(&format!("umount -l {} 2>/dev/null || true", mount_point));
+                                    }
+                                }
+                            }
+                            
+                            // Final check
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                            match execute(&format!("mount | grep {}", current_name)) {
+                                Ok(_) => {
+                                    println!("DEBUG: WARNING: Partition still mounted after all unmount attempts!");
+                                    // Continue anyway and let mkfs.ext4 fail with clear error
+                                }
+                                Err(_) => {
+                                    println!("DEBUG: Partition successfully unmounted after aggressive sequence");
+                                }
                             }
                         }
                         Err(_) => {
@@ -1067,7 +1131,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         }
                     }
                     
-                    // Wait again for operations to complete
+                    // Final wait before proceeding
                     std::thread::sleep(std::time::Duration::from_millis(1000));
                     
                     // Try mkfs.ext4 directly after wiping
