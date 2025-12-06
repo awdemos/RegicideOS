@@ -263,8 +263,8 @@ fn is_safe_shell_command(cmd: &str) -> bool {
 }
 
 fn get_drive_size(drive: &str) -> Result<u64> {
-    let command = format!("lsblk -bo SIZE {} | grep -v SIZE | head -1", drive);
-    let output = execute(&command)?;
+    // Use direct command execution to avoid shell injection issues
+    let output = execute_safe_command("lsblk", &["-b", "-o", "SIZE", "-n", drive])?;
     let size_str = output.trim();
     
     if size_str.is_empty() {
