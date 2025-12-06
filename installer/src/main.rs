@@ -108,6 +108,16 @@ fn execute(command: &str) -> Result<String> {
             execute_safe_command(program, args)
         }
         
+        // Cat command (only for heredoc usage with sfdisk)
+        "cat" => {
+            // Only allow cat with heredoc and sfdisk
+            if args.len() >= 3 && args.contains(&"<<EOF") && args.iter().any(|&arg| arg.contains("sfdisk")) {
+                execute_safe_command(program, args)
+            } else {
+                bail!("Cat command not allowed in this context");
+            }
+        }
+        
         // Filesystem commands
         "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" => {
             execute_safe_command(program, args)
