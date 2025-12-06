@@ -908,10 +908,17 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
                 
+                // Ensure partition is not mounted before formatting
+                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
+                
                 if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.ext4 -q -L {} {}", label, current_name))?;
+                    let cmd = format!("mkfs.ext4 -q -F -L {} {}", label, current_name);
+                    println!("DEBUG: Running ext4 format command: {}", cmd);
+                    execute(&cmd)?;
                 } else {
-                    execute(&format!("mkfs.ext4 -q {}", current_name))?;
+                    let cmd = format!("mkfs.ext4 -q -F {}", current_name);
+                    println!("DEBUG: Running ext4 format command: {}", cmd);
+                    execute(&cmd)?;
                 }
                 verify_filesystem(current_name, "ext4")?;
             }
