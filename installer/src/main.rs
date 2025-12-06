@@ -284,6 +284,7 @@ fn check_drive_size(drive: &str) -> bool {
 fn get_drives() -> Result<Vec<String>> {
     let sys_block = Path::new("/sys/block");
     if !sys_block.exists() {
+        warn(&format!("Sys block directory not found: {}", sys_block.display()));
         return Ok(vec![]);
     }
 
@@ -293,9 +294,28 @@ fn get_drives() -> Result<Vec<String>> {
         let drive_name = entry.file_name();
         let drive_path = format!("/dev/{}", drive_name.to_string_lossy());
         
-        if check_drive_size(&drive_path) {
-            drives.push(drive_path);
+        // Skip loopback devices and other non-physical drives
+        let name_str = drive_name.to_string_lossy();
+        if name_str.starts_with("loop") || name_str.starts_with("ram") || name_str.starts_with("dm-") {
+            continue;
         }
+        
+        match check_drive_size(&drive_path) {
+            true => {
+                info(&format!("Found valid drive: {} (size > 12GB)", drive_path));
+                drives.push(drive_path);
+            }
+            false => {
+                // Only show debug info for actual block devices, not every entry
+                if name_str.starts_with("sd") || name_str.starts_with("nvme") || name_str.starts_with("hd") || name_str.starts_with("vd") {
+                    info(&format!("Drive {} too small or not accessible", drive_path));
+                }
+            }
+        }
+    }
+    
+    if drives.is_empty() {
+        warn("No suitable drives found (drives must be > 12GB)");
     }
     
     Ok(drives)
