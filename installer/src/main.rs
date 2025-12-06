@@ -127,7 +127,7 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // Filesystem commands
-        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" | "dd" | "ls" | "fdisk" | "sgdisk" | "cryptsetup" | "dmsetup" => {
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" | "dd" | "ls" | "fdisk" | "dmsetup" => {
             execute_safe_command(program, args)
         }
         
@@ -985,8 +985,6 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         bail!("Failed to create ext4 filesystem on {}: {}", current_name, e);
                     }
                 }
-
-                verify_filesystem(current_name, "ext4")?;
             }
             "btrfs" => {
                 // Following Xenia's BTRFS formatting approach with enhanced error handling
