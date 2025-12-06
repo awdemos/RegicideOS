@@ -1473,10 +1473,10 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             "{}-install --target=\"{}\" --boot-directory=\"/boot\" {}",
             grub, platform, device
         );
-        println!("DEBUG: Running BIOS GRUB install: {}", grub_install_cmd);
+        println!("DEBUG: Running Legacy BIOS/CSM GRUB install: {}", grub_install_cmd);
         chroot(&grub_install_cmd)?;
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
-        println!("DEBUG: Running BIOS GRUB mkconfig: {}", grub_mkconfig_cmd);
+        println!("DEBUG: Running Legacy BIOS/CSM GRUB mkconfig: {}", grub_mkconfig_cmd);
         chroot(&grub_mkconfig_cmd)?;
     }
     
