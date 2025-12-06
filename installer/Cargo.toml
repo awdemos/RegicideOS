@@ -7,10 +7,6 @@ edition = "2021"
 name = "installer"
 path = "src/main.rs"
 
-[[bin]]
-name = "regicide-installer"
-path = "src/main.rs"
-
 [lib]
 name = "installer"
 path = "src/lib.rs"
