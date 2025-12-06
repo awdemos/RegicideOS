@@ -127,7 +127,7 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // Filesystem commands
-        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" => {
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" => {
             execute_safe_command(program, args)
         }
         
@@ -908,13 +908,23 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
                 
+                // Debug: Check partition state before formatting
+                println!("DEBUG: Checking partition state for {}", current_name);
+                let _ = execute(&format!("lsblk {}", current_name));
+                let _ = execute(&format!("file -s {}", current_name));
+                
                 // Ensure partition is not mounted before formatting
+                println!("DEBUG: Ensuring {} is not mounted...", current_name);
                 let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
                 
                 if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.ext4 -L {} {}", label, current_name))?;
+                    let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
+                    println!("DEBUG: Running command: {}", cmd);
+                    execute(&cmd)?;
                 } else {
-                    execute(&format!("mkfs.ext4 {}", current_name))?;
+                    let cmd = format!("mkfs.ext4 {}", current_name);
+                    println!("DEBUG: Running command: {}", cmd);
+                    execute(&cmd)?;
                 }
                 verify_filesystem(current_name, "ext4")?;
             }
