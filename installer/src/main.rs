@@ -230,12 +230,6 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
         }
     }
     
-    // Debug: Show the exact command that failed
-    eprintln!("DEBUG: Failed shell command: '{}'", shell_cmd);
-    eprintln!("DEBUG: Available patterns:");
-    for (i, pattern) in allowed_patterns.iter().enumerate() {
-        eprintln!("  {}: {}", i + 1, pattern);
-    }
     bail!("Shell command pattern not allowed: {}", shell_cmd)
 }
 
@@ -1727,29 +1721,8 @@ async fn main() -> Result<()> {
     let layouts = get_layouts();
     let layout = layouts.get(&config_parsed.filesystem).unwrap();
 
-    // Prevent suspend interrupts during critical partitioning operations
-    info("Disabling system suspend to prevent interruption during partitioning");
-    execute("systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target")
-        .map_err(|e| warn(&format!("Failed to mask suspend targets: {}", e)))
-        .ok();
-    execute("loginctl disable-lid-switch")
-        .map_err(|e| warn(&format!("Failed to disable lid switch: {}", e)))
-        .ok();
-
     info(&format!("Partitioning drive {}", config_parsed.drive));
-    let partition_result = partition_drive(&config_parsed.drive, layout);
-
-    // Re-enable suspend targets after partitioning completes
-    info("Re-enabling system suspend controls");
-    execute("systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target")
-        .map_err(|e| warn(&format!("Failed to unmask suspend targets: {}", e)))
-        .ok();
-    execute("loginctl enable-lid-switch")
-        .map_err(|e| warn(&format!("Failed to enable lid switch: {}", e)))
-        .ok();
-
-    // Propagate partitioning errors if any occurred
-    partition_result?;
+    partition_drive(&config_parsed.drive, layout)?;
 
     info(&format!("Formatting drive {}", config_parsed.drive));
     format_drive(&config_parsed.drive, layout)?;
