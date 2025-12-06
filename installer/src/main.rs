@@ -937,6 +937,11 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 // Aggressive cleanup before LUKS format
                 println!("DEBUG: Aggressive cleanup for {}", current_name);
                 
+                // Check what's using the device
+                println!("DEBUG: Checking processes using {}:", current_name);
+                let _ = execute(&format!("lsof {} 2>/dev/null || true", current_name));
+                let _ = execute(&format!("fuser -v {} 2>/dev/null || true", current_name));
+                
                 // Unmount aggressively
                 let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
                 let _ = execute("umount -f /dev/mapper/regicideos 2>/dev/null || true");
@@ -947,8 +952,12 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 // Remove any device mapper references
                 let _ = execute("dmsetup remove_all 2>/dev/null || true");
                 
+                // Try to wipe the first few blocks to clear any filesystem signatures
+                let _ = execute(&format!("wipefs -a {} 2>/dev/null || true", current_name));
+                let _ = execute(&format!("dd if=/dev/zero of={} bs=1M count=1 2>/dev/null || true", current_name));
+                
                 // Wait longer for all operations to complete
-                std::thread::sleep(std::time::Duration::from_millis(3000));
+                std::thread::sleep(std::time::Duration::from_millis(5000));
                 
                 // Special handling for LUKS format (interactive password required)
                 println!("DEBUG: Starting LUKS format for {}", current_name);
