@@ -330,13 +330,22 @@ fn is_safe_shell_command(cmd: &str) -> bool {
 
 fn get_drive_size(drive: &str) -> Result<u64> {
     // Use direct command execution to avoid shell injection issues
-    let output = execute_safe_command("lsblk", &["-b", "-o", "SIZE", "-n", drive])?;
-    let size_str = output.trim();
-    
-    if size_str.is_empty() {
-        Ok(0)
-    } else {
-        Ok(size_str.parse::<u64>().unwrap_or(0))
+    println!("DEBUG: Attempting to get size for: {}", drive);
+    match execute_safe_command("lsblk", &["-b", "-o", "SIZE", "-n", drive]) {
+        Ok(output) => {
+            let size_str = output.trim();
+            println!("DEBUG: lsblk output: '{}'", size_str);
+            
+            if size_str.is_empty() {
+                Ok(0)
+            } else {
+                Ok(size_str.parse::<u64>().unwrap_or(0))
+            }
+        }
+        Err(e) => {
+            println!("DEBUG: lsblk failed: {}", e);
+            Err(e)
+        }
     }
 }
 
