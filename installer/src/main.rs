@@ -934,25 +934,14 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             "luks" => {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
-                // Use ProcessCommand for interactive password input
+                // Use execute() for interactive password input
                 println!("DEBUG: Starting LUKS format for {}", current_name);
-                let format_result = ProcessCommand::new("cryptsetup")
-                    .args(["-q", "luksFormat", current_name])
-                    .output();
-                    
-                match format_result {
-                    Ok(output) => {
-                        if !output.status.success() {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            let stdout = String::from_utf8_lossy(&output.stdout);
-                            bail!("Failed to format LUKS partition: {}\nSTDOUT: {}\nSTDERR: {}", 
-                                  output.status, stdout, stderr);
-                        } else {
-                            println!("DEBUG: LUKS format successful for {}", current_name);
-                        }
+                match execute(&format!("cryptsetup luksFormat {}", current_name)) {
+                    Ok(_) => {
+                        println!("DEBUG: LUKS format successful for {}", current_name);
                     }
                     Err(e) => {
-                        bail!("Failed to execute cryptsetup: {}", e);
+                        bail!("Failed to format LUKS partition: {}", e);
                     }
                 }
                 
