@@ -92,6 +92,12 @@ fn print_banner() {
 
 // Safe command execution with strict allowlist
 fn execute(command: &str) -> Result<String> {
+    // Check for heredoc patterns that need special handling
+    if command.contains("<<EOF") {
+        // For heredoc commands, route through shell execution to preserve newlines
+        return execute_safe_shell_command(command.trim());
+    }
+    
     // Parse command into program and arguments
     let parts: Vec<&str> = command.trim().split_whitespace().collect();
     if parts.is_empty() {
@@ -261,7 +267,7 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
 fn is_safe_shell_command(cmd: &str) -> bool {
     // First check for specific allowed patterns that might contain "dangerous" characters
     let allowed_special_patterns = [
-        r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+.*$",
+        r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+[\s\S]*EOF$",
         r"vgs \| awk '\{ print \$1 \}' \| grep -vw VG$",
     ];
     
