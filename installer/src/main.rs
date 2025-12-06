@@ -1533,6 +1533,8 @@ fn validate_url(url: &str) -> Result<()> {
     let allowed_domains = [
         "repo.regicideoslinux.com",
         "regicideoslinux.com",
+        "repo.xenialinux.com",
+        "xenialinux.com",
     ];
     
     let domain = regex::Regex::new(r"^https://([a-zA-Z0-9.-]+)")
