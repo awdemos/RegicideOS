@@ -992,6 +992,40 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
                     println!("DEBUG: Running command: {}", cmd);
                     
+                    // Check what processes are using the device
+                    println!("DEBUG: Checking what processes are using {}...", current_name);
+                    match execute(&format!("lsof {}", current_name)) {
+                        Ok(lsof_output) => {
+                            println!("DEBUG: Processes using device:");
+                            println!("{}", lsof_output);
+                        }
+                        Err(_) => {
+                            println!("DEBUG: No processes found using device (lsof failed or none found)");
+                        }
+                    }
+                    
+                    // Also try fuser as alternative
+                    match execute(&format!("fuser -v {}", current_name)) {
+                        Ok(fuser_output) => {
+                            println!("DEBUG: fuser output:");
+                            println!("{}", fuser_output);
+                        }
+                        Err(_) => {
+                            println!("DEBUG: fuser failed or no users found");
+                        }
+                    }
+                    
+                    // Check device-mapper usage
+                    match execute(&format!("dmsetup info | grep {}", current_name)) {
+                        Ok(dm_output) => {
+                            println!("DEBUG: Device mapper usage:");
+                            println!("{}", dm_output);
+                        }
+                        Err(_) => {
+                            println!("DEBUG: No device mapper usage found");
+                        }
+                    }
+                    
                     // Final check - if still mounted, try a different approach
                     let is_mounted = execute(&format!("findmnt -n -o TARGET -S {}", current_name)).is_ok();
                     if is_mounted {
@@ -1174,6 +1208,40 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     
                     // Final wait before proceeding
                     std::thread::sleep(std::time::Duration::from_millis(1000));
+                    
+                    // Check what processes are using the device
+                    println!("DEBUG: Checking what processes are using {}...", current_name);
+                    match execute(&format!("lsof {}", current_name)) {
+                        Ok(lsof_output) => {
+                            println!("DEBUG: Processes using device:");
+                            println!("{}", lsof_output);
+                        }
+                        Err(_) => {
+                            println!("DEBUG: No processes found using device (lsof failed or none found)");
+                        }
+                    }
+                    
+                    // Also try fuser as alternative
+                    match execute(&format!("fuser -v {}", current_name)) {
+                        Ok(fuser_output) => {
+                            println!("DEBUG: fuser output:");
+                            println!("{}", fuser_output);
+                        }
+                        Err(_) => {
+                            println!("DEBUG: fuser failed or no users found");
+                        }
+                    }
+                    
+                    // Check device-mapper usage
+                    match execute(&format!("dmsetup info | grep {}", current_name)) {
+                        Ok(dm_output) => {
+                            println!("DEBUG: Device mapper usage:");
+                            println!("{}", dm_output);
+                        }
+                        Err(_) => {
+                            println!("DEBUG: No device mapper usage found");
+                        }
+                    }
                     
                     // Try mkfs.ext4 directly after wiping
                     println!("DEBUG: Running command: mkfs.ext4 {}", current_name);
