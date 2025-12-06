@@ -734,7 +734,16 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     info(&format!("Partitioning drive {}", drive));
     
-    // Step 1: Unmount any existing partitions
+    // Step 1: Aggressive cleanup to ensure device is completely free
+    info("Performing aggressive cleanup to ensure device is free...");
+    
+    // 1.1: Close any LUKS containers and device-mapper tables FIRST
+    info("Closing any active LUKS containers...");
+    let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
+    let _ = execute("dmsetup remove_all 2>/dev/null || true");
+    
+    // 1.2: Unmount any existing partitions
+    info("Unmounting any existing partitions...");
     let base_drive = drive.trim_end_matches('/');
     let partitions_to_try = [
         format!("{}1", base_drive),
@@ -748,21 +757,35 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     ];
     
     for partition in &partitions_to_try {
-        let _ = execute(&format!("umount {} 2>/dev/null || true", partition));
+        let _ = execute(&format!("umount -f {} 2>/dev/null || true", partition));
+        let _ = execute(&format!("umount -l {} 2>/dev/null || true", partition));
     }
     
-    // Step 2: Clean existing partition table
+    // 1.3: For NVMe drives, try a hardware reset if available
+    if drive.contains("nvme") && execute("which nvme").is_ok() {
+        info("Attempting NVMe hardware reset...");
+        let _ = execute(&format!("nvme reset {} 2>/dev/null || true", drive));
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    
+    // 1.4: Force kernel to reread partition table
+    info("Forcing kernel to reread partition table...");
+    let _ = execute(&format!("partprobe {} 2>/dev/null || true", drive));
+    let _ = execute(&format!("sgdisk --zap-all {} 2>/dev/null || true", drive));
+    
+    // 1.5: Wait for the kernel to settle
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    
+    // Step 2: Clean existing partition table (now this should work)
     info("Cleaning existing partition table");
-    let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
-    let _ = execute("dmsetup remove_all 2>/dev/null || true");
     let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", drive));
     
-    // Step 2.5: Verify partitions are actually deleted
+    // Step 3: Verify partitions are actually deleted
     verify_partitions_deleted(drive)?;
     
-    // Step 3: Create new partition table
+    // Step 4: Create new partition table
+    info("Creating new partition table");
     if execute("which sgdisk").is_ok() {
-        execute(&format!("sgdisk --zap-all {}", drive))?;
         execute(&format!("sgdisk --clear {}", drive))?;
         
         // Create partitions
@@ -793,17 +816,17 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             part_num += 1;
         }
         
-        // Use --refresh flag to notify kernel - this is the standard approach
+        // Use --refresh flag to notify kernel
         execute(&format!("sgdisk --refresh {}", drive))?;
     } else {
         bail!("sgdisk not available");
     }
     
-    // Step 4: Wait for partitions to be recognized
+    // Step 5: Wait for partitions to be recognized
     info("Waiting for partitions to be recognized");
     let partition_names = wait_for_partitions(drive, layout.len())?;
     
-    // Step 4.5: Show what partitions were created
+    // Step 6: Show what partitions were created
     info("Verifying new partitions were created");
     println!("SUCCESS: Created {} partitions:", partition_names.len());
     for (i, partition) in partition_names.iter().enumerate() {
