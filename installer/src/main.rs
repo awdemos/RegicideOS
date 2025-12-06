@@ -948,6 +948,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 
                 // Close any existing LUKS containers
                 let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
+                let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
                 
                 // Remove any device mapper references
                 let _ = execute("dmsetup remove_all 2>/dev/null || true");
