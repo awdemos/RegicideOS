@@ -922,8 +922,16 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 // Since partition is already formatted and mounted, try to format over it
                 println!("DEBUG: Partition already has filesystem, attempting to format over existing...");
                 
+                // First, try to wipe the filesystem signature to handle "needs journal recovery" issue
+                println!("DEBUG: Wiping filesystem signature to handle journal recovery...");
+                if let Err(e) = execute(&format!("wipefs -a {}", current_name)) {
+                    println!("DEBUG: wipefs failed: {}, continuing with mkfs.ext4...", e);
+                } else {
+                    println!("DEBUG: Filesystem signature wiped successfully");
+                }
+                
                 if let Some(ref label) = partition.label {
-                    // Try mkfs.ext4 directly - it should handle existing filesystem
+                    // Try mkfs.ext4 directly after wiping
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
                     println!("DEBUG: Running command: {}", cmd);
                     match execute(&cmd) {
@@ -944,12 +952,31 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                                 }
                                 Err(e2) => {
                                     println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
-                                    bail!("mkfs.ext4 failed");
+                                    
+                                    // Last resort: zero out the first 1MB of the partition
+                                    println!("DEBUG: Zeroing first 1MB of partition as last resort...");
+                                    if let Err(e3) = execute(&format!("dd if=/dev/zero of={} bs=1M count=1", current_name)) {
+                                        println!("DEBUG: dd failed: {}", e3);
+                                    } else {
+                                        println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
+                                        let final_cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
+                                        match execute(&final_cmd) {
+                                            Ok(_) => {
+                                                println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
+                                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                            }
+                                            Err(e4) => {
+                                                println!("DEBUG: Final mkfs.ext4 attempt failed: {}", e4);
+                                                bail!("mkfs.ext4 failed after all cleanup attempts");
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 } else {
+                    // Try mkfs.ext4 directly after wiping
                     let cmd = format!("mkfs.ext4 {}", current_name);
                     println!("DEBUG: Running command: {}", cmd);
                     match execute(&cmd) {
@@ -968,7 +995,25 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                                 }
                                 Err(e2) => {
                                     println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
-                                    bail!("mkfs.ext4 failed");
+                                    
+                                    // Last resort: zero out the first 1MB of the partition
+                                    println!("DEBUG: Zeroing first 1MB of partition as last resort...");
+                                    if let Err(e3) = execute(&format!("dd if=/dev/zero of={} bs=1M count=1", current_name)) {
+                                        println!("DEBUG: dd failed: {}", e3);
+                                    } else {
+                                        println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
+                                        let final_cmd = format!("mkfs.ext4 {}", current_name);
+                                        match execute(&final_cmd) {
+                                            Ok(_) => {
+                                                println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
+                                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                            }
+                                            Err(e4) => {
+                                                println!("DEBUG: Final mkfs.ext4 attempt failed: {}", e4);
+                                                bail!("mkfs.ext4 failed after all cleanup attempts");
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
