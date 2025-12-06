@@ -922,6 +922,31 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 // Since partition is already formatted and mounted, try to format over it
                 println!("DEBUG: Partition already has filesystem, attempting to format over existing...");
                 
+                // IMPORTANT: Unmount the partition first before attempting to format it
+                println!("DEBUG: Unmounting {} before formatting...", current_name);
+                if let Err(e) = execute(&format!("umount {} 2>/dev/null || true", current_name)) {
+                    println!("DEBUG: Initial umount failed: {}, continuing anyway...", e);
+                }
+                
+                // Wait a moment for the unmount to complete
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                
+                // Check if still mounted and force unmount if needed
+                match execute(&format!("mount | grep {}", current_name)) {
+                    Ok(_) => {
+                        println!("DEBUG: Partition still mounted, attempting force unmount...");
+                        if let Err(e) = execute(&format!("umount -l {} 2>/dev/null || true", current_name)) {
+                            println!("DEBUG: Force umount failed: {}, continuing anyway...", e);
+                        }
+                    }
+                    Err(_) => {
+                        println!("DEBUG: Partition successfully unmounted");
+                    }
+                }
+                
+                // Wait again for operations to complete
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                
                 // First, try to wipe the filesystem signature to handle "needs journal recovery" issue
                 println!("DEBUG: Wiping filesystem signature to handle journal recovery...");
                 if let Err(e) = execute(&format!("wipefs -a {}", current_name)) {
@@ -983,6 +1008,31 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         }
                     }
                 } else {
+                    // IMPORTANT: Unmount the partition first before attempting to format it
+                    println!("DEBUG: Unmounting {} before formatting...", current_name);
+                    if let Err(e) = execute(&format!("umount {} 2>/dev/null || true", current_name)) {
+                        println!("DEBUG: Initial umount failed: {}, continuing anyway...", e);
+                    }
+                    
+                    // Wait a moment for the unmount to complete
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    
+                    // Check if still mounted and force unmount if needed
+                    match execute(&format!("mount | grep {}", current_name)) {
+                        Ok(_) => {
+                            println!("DEBUG: Partition still mounted, attempting force unmount...");
+                            if let Err(e) = execute(&format!("umount -l {} 2>/dev/null || true", current_name)) {
+                                println!("DEBUG: Force umount failed: {}, continuing anyway...", e);
+                            }
+                        }
+                        Err(_) => {
+                            println!("DEBUG: Partition successfully unmounted");
+                        }
+                    }
+                    
+                    // Wait again for operations to complete
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    
                     // Try mkfs.ext4 directly after wiping
                     let cmd = format!("mkfs.ext4 {}", current_name);
                     println!("DEBUG: Running command: {}", cmd);
