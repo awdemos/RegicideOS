@@ -340,23 +340,18 @@ fn is_safe_shell_command(cmd: &str) -> bool {
 
 fn get_drive_size(drive: &str) -> Result<u64> {
     // Use direct command execution to avoid shell injection issues
-    println!("DEBUG: Attempting to get size for: {}", drive);
     match execute_safe_command("lsblk", &["-b", "-o", "SIZE", "-n", drive]) {
         Ok(output) => {
             let size_str = output.trim();
-            println!("DEBUG: lsblk output: '{}'", size_str);
-            
             if size_str.is_empty() {
                 Ok(0)
             } else {
                 // Take only the first line (drive size, not partitions)
                 let first_line = size_str.lines().next().unwrap_or("").trim();
-                println!("DEBUG: Using first line as drive size: '{}'", first_line);
                 Ok(first_line.parse::<u64>().unwrap_or(0))
             }
         }
         Err(e) => {
-            println!("DEBUG: lsblk failed: {}", e);
             Err(e)
         }
     }
@@ -604,7 +599,7 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
             if expected_count == 1 && detected_partitions.is_empty() {
                 // For LUKS, we expect 1 mapper device instead of physical partitions
                 if Path::new("/dev/mapper/regicideos").exists() {
-                    println!("DEBUG: LUKS detected, using mapper device");
+
                     partition_names.push("/dev/mapper/regicideos".to_string());
                 }
             } else if detected_partitions.len() == expected_count {
@@ -646,8 +641,7 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
             }
         }
         
-        println!("DEBUG: Partition detection - expected: {}, found: {}, partitions: {:?}", 
-                 expected_count, partition_names.len(), partition_names);
+
         
         if partition_names.len() == expected_count {
             info(&format!("Found {} partitions", expected_count));
@@ -738,34 +732,25 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
         let _ = execute(&format!("umount {} 2>/dev/null || true", partition));
     }
     
-    // AGGRESSIVE WIPE: Remove all traces of existing partitions (key fix)
-    info("Aggressively wiping existing partition table and signatures...");
+    // Clean existing partition table and signatures
+    info("Cleaning existing partition table...");
     
-    // 1. Close any LUKS mappings first
+    // Close LUKS mappings and wipe signatures
     let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
     let _ = execute("dmsetup remove_all 2>/dev/null || true");
-    
-    // 2. Wipe filesystem signatures
     let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", drive));
     
-    // 3. COMPLETELY DESTROY partition table (this was the key fix)
+    // Destroy partition table (key fix)
     if execute("which sgdisk").is_ok() {
         execute(&format!("sgdisk --zap-all {}", drive))?;
         execute(&format!("sgdisk --clear {}", drive))?;
-    } else {
-        // Fallback: wipe first few MB if sgdisk not available
-        let _ = execute(&format!("dd if=/dev/zero of={} bs=1M count=10 2>/dev/null || true", drive));
     }
     
-    // 4. Force kernel to recognize changes
+    // Force kernel to recognize changes
     execute("sync")?;
-    if execute("which partprobe").is_ok() {
-        let _ = execute(&format!("partprobe {} 2>/dev/null || true", drive));
-    }
+    let _ = execute(&format!("partprobe {} 2>/dev/null || true", drive));
     let _ = execute(&format!("blockdev --rereadpt {} 2>/dev/null || true", drive))?;
-    
-    // 5. Wait for kernel to settle
-    std::thread::sleep(std::time::Duration::from_millis(3000));
+    std::thread::sleep(std::time::Duration::from_millis(2000));
     
     // Check if LVM is available before trying to use it
     let vgs_output = if Path::new("/sbin/vgs").exists() || Path::new("/usr/sbin/vgs").exists() {
@@ -810,10 +795,6 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     }
 
     command += "\nEOF";
-    
-    // Debug: print the command to see what we're actually executing
-    println!("DEBUG: Full sfdisk command:\n---\n{}\n---", command);
-    println!("DEBUG: Command length: {}", command.len());
     
     execute(&command)?;
     
@@ -917,112 +898,31 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
-                println!("DEBUG: Formatting {} as ext4...", current_name);
+                info(&format!("Formatting {} as ext4", current_name));
                 
-                // AGGRESSIVE CLEANUP: Remove all traces of existing data
-                println!("DEBUG: Performing aggressive cleanup of {}...", current_name);
-                
-                // 1. Unmount aggressively
-                println!("DEBUG: Unmounting partition...");
+                // Clean partition before formatting
                 let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
                 let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
                 
-                // 2. Check for and close LUKS mappers
-                println!("DEBUG: Checking for LUKS holders...");
-                let sys_name = current_name.trim_start_matches("/dev/");
-                let holders_path = format!("/sys/block/{}/holders", sys_name);
-                
-                // Try multiple approaches to find and close LUKS holders
+                // Close any LUKS mappings
                 let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
                 let _ = execute("dmsetup remove_all 2>/dev/null || true");
                 
-                // Check holders directory
-                match execute(&format!("ls {}", holders_path)) {
-                    Ok(holders_output) => {
-                        println!("DEBUG: Found holders: {}", holders_output);
-                        if !holders_output.trim().is_empty() {
-                            println!("DEBUG: Closing remaining holders...");
-                            for holder in holders_output.lines() {
-                                let holder_name = holder.trim();
-                                if !holder_name.is_empty() {
-                                    let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", holder_name));
-                                    let _ = execute(&format!("dmsetup remove {} 2>/dev/null || true", holder_name));
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        println!("DEBUG: No holders found or could not check");
-                    }
-                }
-                
-                // 3. Wait for cleanup
-                std::thread::sleep(std::time::Duration::from_millis(3000));
-                
-                // 4. Completely wipe all filesystem signatures
-                println!("DEBUG: Wiping all filesystem signatures...");
+                // Wipe signatures and zero first MB
                 let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
-                
-                // 4.5. Additional cleanup - remove from device mapper
-                println!("DEBUG: Removing from device mapper...");
-                let _ = execute(&format!("dmsetup remove_if_missing {} 2>/dev/null || true", current_name));
-                
-                // 5. Zero first few MB to ensure clean state
-                println!("DEBUG: Zeroing first 10MB of partition...");
                 match ProcessCommand::new("dd")
-                    .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=10"])
+                    .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
                     .output()
                 {
-                    Ok(_) => {
-                        println!("DEBUG: Partition zeroed successfully");
-                    }
-                    Err(e) => {
-                        println!("DEBUG: dd failed: {}, continuing...", e);
-                    }
+                    Ok(_) => {},
+                    Err(_) => {} // Continue even if dd fails
                 }
                 
-                // 5.5. Reread partition table to refresh kernel state
-                println!("DEBUG: Rereading partition table...");
-                let _ = execute("partprobe 2>/dev/null || true");
-                let _ = execute("blockdev --rereadpt /dev/nvme0n1 2>/dev/null || true");
-                
-                // 6. Sync and wait longer for kernel to settle
+                // Sync and wait for kernel
                 let _ = execute("sync");
-                std::thread::sleep(std::time::Duration::from_millis(5000));
+                std::thread::sleep(std::time::Duration::from_millis(2000));
                 
-                // 7. Final check for any remaining holders
-                match execute(&format!("ls {}", holders_path)) {
-                    Ok(holders_output) => {
-                        if !holders_output.trim().is_empty() {
-                            println!("DEBUG: WARNING: Holders still exist: {}", holders_output);
-                        } else {
-                            println!("DEBUG: No holders found, ready to format");
-                        }
-                    }
-                    Err(_) => {
-                        println!("DEBUG: Holders check failed, proceeding anyway");
-                    }
-                }
-                
-                // 7.5. Check device state before formatting
-                println!("DEBUG: Checking device state before formatting...");
-                match execute(&format!("lsblk {}", current_name)) {
-                    Ok(output) => println!("DEBUG: lsblk output: {}", output),
-                    Err(e) => println!("DEBUG: lsblk failed: {}", e),
-                }
-                match execute(&format!("file -s {}", current_name)) {
-                    Ok(output) => println!("DEBUG: file output: {}", output),
-                    Err(e) => println!("DEBUG: file failed: {}", e),
-                }
-                match execute(&format!("blkid {}", current_name)) {
-                    Ok(output) => println!("DEBUG: blkid output: {}", output),
-                    Err(e) => println!("DEBUG: blkid failed: {}", e),
-                }
-                
-                // 8. Format the clean partition
-                println!("DEBUG: Creating fresh ext4 filesystem on {}...", current_name);
-                
-                // Use ProcessCommand to capture stderr for better error reporting
+                // Format the clean partition
                 let format_result = if let Some(ref label) = partition.label {
                     ProcessCommand::new("mkfs.ext4")
                         .args(&["-F", "-L", label, current_name])
@@ -1036,15 +936,10 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 match format_result {
                     Ok(output) => {
                         if output.status.success() {
-                            println!("DEBUG: Successfully created fresh ext4 filesystem");
                             verify_filesystem(current_name, "ext4")?;
                             return Ok(());
                         } else {
                             let stderr = String::from_utf8_lossy(&output.stderr);
-                            let stdout = String::from_utf8_lossy(&output.stdout);
-                            println!("DEBUG: mkfs.ext4 failed with exit code: {:?}", output.status.code());
-                            println!("DEBUG: mkfs.ext4 stderr: {}", stderr);
-                            println!("DEBUG: mkfs.ext4 stdout: {}", stdout);
                             bail!("Failed to create ext4 filesystem on {}: {}", current_name, stderr.trim());
                         }
                     }
@@ -1110,10 +1005,6 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
                 // Aggressive cleanup before LUKS format
-                println!("DEBUG: Aggressive cleanup for {}", current_name);
-                
-                // Check what's using the device
-                println!("DEBUG: Checking processes using {}:", current_name);
                 let _ = execute(&format!("lsof {} 2>/dev/null || true", current_name));
                 let _ = execute(&format!("fuser -v {} 2>/dev/null || true", current_name));
                 
@@ -1136,7 +1027,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 std::thread::sleep(std::time::Duration::from_millis(5000));
                 
                 // Special handling for LUKS format (interactive password required)
-                println!("DEBUG: Starting LUKS format for {}", current_name);
+
                 let result = ProcessCommand::new("cryptsetup")
                     .args(&["luksFormat", current_name])
                     .stdin(std::process::Stdio::inherit())
@@ -1147,7 +1038,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 match result {
                     Ok(status) => {
                         if status.success() {
-                            println!("DEBUG: LUKS format successful for {}", current_name);
+
                         } else {
                             bail!("Failed to format LUKS partition: exit code {:?}", status.code());
                         }
@@ -1171,12 +1062,12 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         bail!("Failed to open LUKS partition with label '{}'", label);
                     }
                     
-                    println!("DEBUG: LUKS open command completed, checking for mapper device");
+
                     
                     // Verify the device was created with timeout
                     let mut attempts = 0;
                     while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
-                        println!("DEBUG: Waiting for /dev/mapper/regicideos (attempt {})", attempts + 1);
+
                         std::thread::sleep(std::time::Duration::from_millis(500));
                         attempts += 1;
                     }
@@ -1184,7 +1075,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     if !Path::new("/dev/mapper/regicideos").exists() {
                         bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
                     } else {
-                        println!("DEBUG: LUKS mapper device created successfully");
+
                     }
                     
                     "/dev/mapper/regicideos".to_string()
@@ -1468,19 +1359,12 @@ async fn download_root(url: &str) -> Result<()> {
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     // Check for grub binary, see if its grub2-install or grub-install
     let grub = if Path::new("/mnt/root/usr/bin/grub-install").exists() {
-        println!("DEBUG: Found grub-install, using 'grub' prefix");
         "grub"
     } else {
-        println!("DEBUG: grub-install not found, using 'grub2' prefix");
         "grub2"
     };
     
-    // Debug: Check if chroot environment is properly set up
-    println!("DEBUG: Checking chroot environment...");
-    match execute("ls /mnt/root/usr/sbin/ | grep grub") {
-        Ok(output) => println!("DEBUG: Available GRUB binaries: {}", output),
-        Err(e) => println!("DEBUG: Failed to list GRUB binaries: {}", e),
-    }
+
 
     if platform.contains("efi") {
         // Install GRUB for EFI systems - run INSIDE chroot for correct path resolution
@@ -1488,24 +1372,21 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --bootloader-id=RegicideOS --recheck",
             grub, platform
         );
-        println!("DEBUG: Running GRUB install INSIDE chroot: {}", grub_install_cmd);
         match chroot(&grub_install_cmd) {
-            Ok(_) => println!("DEBUG: GRUB install succeeded"),
-            Err(e) => {
-                println!("DEBUG: GRUB install failed: {}", e);
+            Ok(_) => {},
+            Err(_e) => {
                 // Try alternative approach with --removable flag
                 let alt_cmd = format!(
                     "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --removable --recheck",
                     grub, platform
                 );
-                println!("DEBUG: Trying alternative GRUB install: {}", alt_cmd);
                 chroot(&alt_cmd)?;
             }
         }
         
         // Generate GRUB config using the chroot environment
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
-        println!("DEBUG: Running GRUB mkconfig: {}", grub_mkconfig_cmd);
+
         chroot(&grub_mkconfig_cmd)?;
     } else {
         // For BIOS, we need to install to the device directly
@@ -1514,10 +1395,10 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             "{}-install --target=\"{}\" --boot-directory=\"/boot\" {}",
             grub, platform, device
         );
-        println!("DEBUG: Running Legacy BIOS/CSM GRUB install: {}", grub_install_cmd);
+
         chroot(&grub_install_cmd)?;
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
-        println!("DEBUG: Running Legacy BIOS/CSM GRUB mkconfig: {}", grub_mkconfig_cmd);
+
         chroot(&grub_mkconfig_cmd)?;
     }
     
