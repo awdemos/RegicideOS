@@ -93,7 +93,7 @@ fn print_banner() {
 // Safe command execution with strict allowlist
 fn execute(command: &str) -> Result<String> {
     // Check for heredoc patterns that need special handling
-    if command.contains("<<EOF") {
+    if command.contains("<<") {
         // For heredoc commands, route through shell execution to preserve newlines
         return execute_safe_shell_command(command.trim());
     }
@@ -244,6 +244,7 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
         r"mount --bind /run /mnt/root/run",
         r"mount --make-slave /mnt/root/run",
         r"cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+",
+        r"chroot /mnt/root /bin/bash <<'EOT'[\s\S]*EOT$",
         r"mount -t overlay overlay -o [^[:space:]]+ [^[:space:]]+",
         r"lsblk -ln -o NAME [^[:space:]]+",
         r"lsblk -fn -o NAME,LABEL",
@@ -1542,11 +1543,13 @@ async fn download_root(url: &str) -> Result<()> {
 }
 
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
-    // Check for grub binary, see if its grub2-install or grub-install
-    let grub = if Path::new("/mnt/root/usr/bin/grub-install").exists() {
+    // Check for grub binary in correct locations with more robust detection
+    let grub = if Path::new("/mnt/root/usr/sbin/grub-install").exists() || Path::new("/mnt/root/sbin/grub-install").exists() {
         "grub"
-    } else {
+    } else if Path::new("/mnt/root/usr/sbin/grub2-install").exists() || Path::new("/mnt/root/sbin/grub2-install").exists() {
         "grub2"
+    } else {
+        bail!("GRUB installer not found in chroot environment");
     };
     
 
