@@ -934,15 +934,21 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             "luks" => {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
-                // Ensure partition is not mounted before LUKS format
-                println!("DEBUG: Ensuring {} is unmounted before LUKS format", current_name);
-                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                // Aggressive cleanup before LUKS format
+                println!("DEBUG: Aggressive cleanup for {}", current_name);
                 
-                // Try to close any existing LUKS containers
+                // Unmount aggressively
+                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
+                let _ = execute(&format!("umount -f /dev/mapper/regicideos 2>/dev/null || true", current_name));
+                
+                // Close any existing LUKS containers
                 let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
                 
-                // Wait a moment for operations to complete
-                std::thread::sleep(std::time::Duration::from_millis(2000));
+                // Remove any device mapper references
+                let _ = execute("dmsetup remove_all 2>/dev/null || true");
+                
+                // Wait longer for all operations to complete
+                std::thread::sleep(std::time::Duration::from_millis(3000));
                 
                 // Special handling for LUKS format (interactive password required)
                 println!("DEBUG: Starting LUKS format for {}", current_name);
