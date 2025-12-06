@@ -910,12 +910,21 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 
                 // Debug: Check partition state before formatting
                 println!("DEBUG: Checking partition state for {}", current_name);
-                let _ = execute(&format!("lsblk {}", current_name));
-                let _ = execute(&format!("file -s {}", current_name));
+                match execute(&format!("lsblk {}", current_name)) {
+                    Ok(output) => println!("DEBUG: lsblk output: {}", output),
+                    Err(e) => println!("DEBUG: lsblk failed: {}", e),
+                }
+                match execute(&format!("file -s {}", current_name)) {
+                    Ok(output) => println!("DEBUG: file output: {}", output),
+                    Err(e) => println!("DEBUG: file failed: {}", e),
+                }
                 
                 // Ensure partition is not mounted before formatting
                 println!("DEBUG: Ensuring {} is not mounted...", current_name);
-                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
+                match execute(&format!("umount -f {} 2>/dev/null || true", current_name)) {
+                    Ok(_) => println!("DEBUG: Unmount completed"),
+                    Err(e) => println!("DEBUG: Unmount failed: {}", e),
+                }
                 
                 if let Some(ref label) = partition.label {
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
