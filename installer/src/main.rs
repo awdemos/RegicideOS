@@ -181,8 +181,18 @@ fn execute(command: &str) -> Result<String> {
             execute_safe_command(program, args)
         }
         
+        // EFI bootloader tools
+        "efibootmgr" | "efivar" => {
+            execute_safe_command(program, args)
+        }
+        
         // Service management (chroot only)
         "rc-update" | "rc-service" => {
+            execute_safe_command(program, args)
+        }
+        
+        // Chroot for bootloader installation and system setup
+        "chroot" => {
             execute_safe_command(program, args)
         }
         
@@ -1298,23 +1308,41 @@ async fn download_root(url: &str) -> Result<()> {
 }
 
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
-    let grub = if Path::new("/mnt/root/usr/bin/grub-install").exists() {
+    // Install GRUB packages on host if needed
+    if execute("which grub2-install").is_err() {
+        info("GRUB not found on host, attempting to install...");
+        if execute("which dnf").is_ok() {
+            execute("dnf install -y grub2-efi-x64 grub2-efi-x64-modules grub2-pc efibootmgr")?;
+        } else if execute("which apt").is_ok() {
+            execute("apt update && apt install -y grub-efi-amd64 grub-efi-amd64-signed efibootmgr")?;
+        } else {
+            warn("Could not install GRUB - please install manually");
+        }
+    }
+
+    let grub = if execute("which grub-install").is_ok() {
         "grub"
     } else {
         "grub2"
     };
 
     if platform.contains("efi") {
-        chroot(&format!(
-            "{}-install --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\"",
+        // Install GRUB for EFI systems targeting the mounted root
+        execute(&format!(
+            "{}-install --force --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\"",
             grub, platform
         ))?;
+        
+        // Generate GRUB config using the chroot environment
         chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
     } else {
-        chroot(&format!(
-            "{}-install --force --target=\"{}\" --boot-directory=\"/boot\" {}",
+        // Install GRUB for BIOS systems
+        execute(&format!(
+            "{}-install --force --target=\"{}\" --boot-directory=\"/mnt/root/boot\" {}",
             grub, platform, device
         ))?;
+        
+        // Generate GRUB config
         chroot(&format!("{}-mkconfig -o /boot/{}/grub.cfg", grub, grub))?;
     }
     
