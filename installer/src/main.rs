@@ -959,52 +959,89 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     // Try mkfs.ext4 directly after wiping
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
                     println!("DEBUG: Running command: {}", cmd);
-                    match execute(&cmd) {
-                        Ok(_) => {
-                            println!("DEBUG: mkfs.ext4 succeeded");
-                            // Try to unmount after successful format
-                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                        }
-                        Err(e) => {
-                            println!("DEBUG: mkfs.ext4 failed with error: {}", e);
-                            // Try with force flag
-                            let force_cmd = format!("mkfs.ext4 -F -L {} {}", label, current_name);
-                            println!("DEBUG: Trying with force: {}", force_cmd);
-                            match execute(&force_cmd) {
-                                Ok(_) => {
-                                    println!("DEBUG: mkfs.ext4 with -F succeeded");
-                                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                                }
-                                Err(e2) => {
-                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
-                                    
-                                    // Last resort: zero out the first 1MB of the partition
-                                    println!("DEBUG: Zeroing first 1MB of partition as last resort...");
-                                    match ProcessCommand::new("dd")
-                                        .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
-                                        .output()
-                                    {
-                                        Ok(_) => {
-                                            println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
-                                            let final_cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
-                                            match execute(&final_cmd) {
+                    
+                    // Use ProcessCommand to capture stderr properly
+                    match ProcessCommand::new("mkfs.ext4")
+                        .args(&["-L", label, current_name])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                println!("DEBUG: mkfs.ext4 succeeded");
+                                // Try to unmount after successful format
+                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                            } else {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                println!("DEBUG: mkfs.ext4 failed with exit code: {:?}", output.status.code());
+                                println!("DEBUG: mkfs.ext4 stderr: {}", stderr);
+                                println!("DEBUG: mkfs.ext4 stdout: {}", stdout);
+                                
+                                // Try with force flag
+                                println!("DEBUG: Trying with force: mkfs.ext4 -F -L {} {}", label, current_name);
+                                match ProcessCommand::new("mkfs.ext4")
+                                    .args(&["-F", "-L", label, current_name])
+                                    .output()
+                                {
+                                    Ok(output2) => {
+                                        if output2.status.success() {
+                                            println!("DEBUG: mkfs.ext4 with -F succeeded");
+                                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                        } else {
+                                            let stderr2 = String::from_utf8_lossy(&output2.stderr);
+                                            let stdout2 = String::from_utf8_lossy(&output2.stdout);
+                                            println!("DEBUG: Force mkfs.ext4 failed with exit code: {:?}", output2.status.code());
+                                            println!("DEBUG: Force mkfs.ext4 stderr: {}", stderr2);
+                                            println!("DEBUG: Force mkfs.ext4 stdout: {}", stdout2);
+                                            
+                                            // Last resort: zero out the first 1MB of the partition
+                                            println!("DEBUG: Zeroing first 1MB of partition as last resort...");
+                                            match ProcessCommand::new("dd")
+                                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
+                                                .output()
+                                            {
                                                 Ok(_) => {
-                                                    println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
-                                                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                                    println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
+                                                    match ProcessCommand::new("mkfs.ext4")
+                                                        .args(&["-L", label, current_name])
+                                                        .output()
+                                                    {
+                                                        Ok(output3) => {
+                                                            if output3.status.success() {
+                                                                println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
+                                                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                                            } else {
+                                                                let stderr3 = String::from_utf8_lossy(&output3.stderr);
+                                                                let stdout3 = String::from_utf8_lossy(&output3.stdout);
+                                                                println!("DEBUG: Final mkfs.ext4 failed with exit code: {:?}", output3.status.code());
+                                                                println!("DEBUG: Final mkfs.ext4 stderr: {}", stderr3);
+                                                                println!("DEBUG: Final mkfs.ext4 stdout: {}", stdout3);
+                                                                bail!("mkfs.ext4 failed after all cleanup attempts");
+                                                            }
+                                                        }
+                                                        Err(e3) => {
+                                                            println!("DEBUG: Final mkfs.ext4 command failed: {:?}", e3);
+                                                            bail!("mkfs.ext4 failed after all cleanup attempts");
+                                                        }
+                                                    }
                                                 }
-                                                Err(e4) => {
-                                                    println!("DEBUG: Final mkfs.ext4 attempt failed: {}", e4);
+                                                Err(e3) => {
+                                                    println!("DEBUG: dd failed: {:?}", e3);
                                                     bail!("mkfs.ext4 failed after all cleanup attempts");
                                                 }
                                             }
                                         }
-                                        Err(e3) => {
-                                            println!("DEBUG: dd failed: {:?}", e3);
-                                            bail!("mkfs.ext4 failed after all cleanup attempts");
-                                        }
+                                    }
+                                    Err(e2) => {
+                                        println!("DEBUG: Force mkfs.ext4 command failed: {:?}", e2);
+                                        bail!("mkfs.ext4 failed after all cleanup attempts");
                                     }
                                 }
                             }
+                        }
+                        Err(e) => {
+                            println!("DEBUG: mkfs.ext4 command failed: {:?}", e);
+                            bail!("mkfs.ext4 failed after all cleanup attempts");
                         }
                     }
                 } else {
@@ -1034,52 +1071,88 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     std::thread::sleep(std::time::Duration::from_millis(1000));
                     
                     // Try mkfs.ext4 directly after wiping
-                    let cmd = format!("mkfs.ext4 {}", current_name);
-                    println!("DEBUG: Running command: {}", cmd);
-                    match execute(&cmd) {
-                        Ok(_) => {
-                            println!("DEBUG: mkfs.ext4 succeeded");
-                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                        }
-                        Err(e) => {
-                            println!("DEBUG: mkfs.ext4 failed with error: {}", e);
-                            let force_cmd = format!("mkfs.ext4 -F {}", current_name);
-                            println!("DEBUG: Trying with force: {}", force_cmd);
-                            match execute(&force_cmd) {
-                                Ok(_) => {
-                                    println!("DEBUG: Force mkfs.ext4 succeeded");
-                                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                                }
-                                Err(e2) => {
-                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
-                                    
-                                    // Last resort: zero out the first 1MB of the partition
-                                    println!("DEBUG: Zeroing first 1MB of partition as last resort...");
-                                    match ProcessCommand::new("dd")
-                                        .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
-                                        .output()
-                                    {
-                                        Ok(_) => {
-                                            println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
-                                            let final_cmd = format!("mkfs.ext4 {}", current_name);
-                                            match execute(&final_cmd) {
+                    println!("DEBUG: Running command: mkfs.ext4 {}", current_name);
+                    
+                    match ProcessCommand::new("mkfs.ext4")
+                        .args(&[current_name])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                println!("DEBUG: mkfs.ext4 succeeded");
+                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                            } else {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                println!("DEBUG: mkfs.ext4 failed with exit code: {:?}", output.status.code());
+                                println!("DEBUG: mkfs.ext4 stderr: {}", stderr);
+                                println!("DEBUG: mkfs.ext4 stdout: {}", stdout);
+                                
+                                // Try with force flag
+                                println!("DEBUG: Trying with force: mkfs.ext4 -F {}", current_name);
+                                match ProcessCommand::new("mkfs.ext4")
+                                    .args(&["-F", current_name])
+                                    .output()
+                                {
+                                    Ok(output2) => {
+                                        if output2.status.success() {
+                                            println!("DEBUG: Force mkfs.ext4 succeeded");
+                                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                        } else {
+                                            let stderr2 = String::from_utf8_lossy(&output2.stderr);
+                                            let stdout2 = String::from_utf8_lossy(&output2.stdout);
+                                            println!("DEBUG: Force mkfs.ext4 failed with exit code: {:?}", output2.status.code());
+                                            println!("DEBUG: Force mkfs.ext4 stderr: {}", stderr2);
+                                            println!("DEBUG: Force mkfs.ext4 stdout: {}", stdout2);
+                                            
+                                            // Last resort: zero out the first 1MB of the partition
+                                            println!("DEBUG: Zeroing first 1MB of partition as last resort...");
+                                            match ProcessCommand::new("dd")
+                                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
+                                                .output()
+                                            {
                                                 Ok(_) => {
-                                                    println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
-                                                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                                    println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
+                                                    match ProcessCommand::new("mkfs.ext4")
+                                                        .args(&[current_name])
+                                                        .output()
+                                                    {
+                                                        Ok(output3) => {
+                                                            if output3.status.success() {
+                                                                println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
+                                                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
+                                                            } else {
+                                                                let stderr3 = String::from_utf8_lossy(&output3.stderr);
+                                                                let stdout3 = String::from_utf8_lossy(&output3.stdout);
+                                                                println!("DEBUG: Final mkfs.ext4 failed with exit code: {:?}", output3.status.code());
+                                                                println!("DEBUG: Final mkfs.ext4 stderr: {}", stderr3);
+                                                                println!("DEBUG: Final mkfs.ext4 stdout: {}", stdout3);
+                                                                bail!("mkfs.ext4 failed after all cleanup attempts");
+                                                            }
+                                                        }
+                                                        Err(e3) => {
+                                                            println!("DEBUG: Final mkfs.ext4 command failed: {:?}", e3);
+                                                            bail!("mkfs.ext4 failed after all cleanup attempts");
+                                                        }
+                                                    }
                                                 }
-                                                Err(e4) => {
-                                                    println!("DEBUG: Final mkfs.ext4 attempt failed: {}", e4);
+                                                Err(e3) => {
+                                                    println!("DEBUG: dd failed: {:?}", e3);
                                                     bail!("mkfs.ext4 failed after all cleanup attempts");
                                                 }
                                             }
                                         }
-                                        Err(e3) => {
-                                            println!("DEBUG: dd failed: {:?}", e3);
-                                            bail!("mkfs.ext4 failed after all cleanup attempts");
-                                        }
+                                    }
+                                    Err(e2) => {
+                                        println!("DEBUG: Force mkfs.ext4 command failed: {:?}", e2);
+                                        bail!("mkfs.ext4 failed after all cleanup attempts");
                                     }
                                 }
                             }
+                        }
+                        Err(e) => {
+                            println!("DEBUG: mkfs.ext4 command failed: {:?}", e);
+                            bail!("mkfs.ext4 failed after all cleanup attempts");
                         }
                     }
                 }
