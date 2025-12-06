@@ -138,7 +138,7 @@ fn execute(command: &str) -> Result<String> {
         }
         
         // LVM commands (read-only only)
-        "vgs" => {
+        "vgs" | "vgchange" => {
             execute_safe_command(program, args)
         }
         
@@ -197,6 +197,7 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
     // Allow only specific, safe shell patterns
     let allowed_patterns = [
         r"umount -ql [^[:space:]]+\?\* 2>/dev/null \|\| true",
+        r"umount -ql /dev/[^[:space:]]+\?\* 2>/dev/null \|\| true",
         r"mount --rbind /dev /mnt/root/dev",
         r"mount --rbind /sys /mnt/root/sys", 
         r"mount --bind /run /mnt/root/run",
