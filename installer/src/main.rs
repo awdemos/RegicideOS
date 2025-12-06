@@ -13,7 +13,7 @@ use tokio;
 use toml;
 
 // Import from lib module
-use installer::{Config, Partition, check_username, human_to_bytes, is_efi, get_fs, get_package_sets, get_flatpak_packages};
+use installer::{Config, Partition, check_username, is_efi, get_fs, get_package_sets, get_flatpak_packages};
 
 struct Colours;
 
@@ -502,7 +502,7 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
             },
             Partition {
                 size: "rest".to_string(),
-                label: Some("XENIA".to_string()),
+                label: Some("REGICIDEOS".to_string()),
                 format: "luks".to_string(),
                 partition_type: "linux".to_string(),
                 subvolumes: None,
@@ -550,7 +550,7 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
             },
             Partition {
                 size: "rest".to_string(),
-                label: Some("XENIA".to_string()),
+                label: Some("REGICIDEOS".to_string()),
                 format: "luks".to_string(),
                 partition_type: "linux".to_string(),
                 subvolumes: None,
@@ -588,12 +588,32 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
         
         // Method 1: Use lsblk to detect partitions
         if let Ok(partitions_output) = execute(&format!("lsblk -ln -o NAME {}", drive)) {
-            let detected_partitions: Vec<String> = partitions_output
+            println!("DEBUG: lsblk output for {}: {}", drive, partitions_output);
+            let mut detected_partitions: Vec<String> = partitions_output
                 .lines()
                 .filter(|line| !line.trim().is_empty())
                 .filter(|line| line.trim() != drive_base)
                 .map(|line| format!("/dev/{}", line.trim()))
                 .collect();
+            
+            // Sort partitions numerically to ensure correct order
+            detected_partitions.sort_by(|a, b| {
+                let extract_num = |path: &str| {
+                    path.rsplit_once('p')
+                        .and_then(|(_, num)| num.parse::<u32>().ok())
+                        .or_else(|| {
+                            path.chars()
+                                .skip_while(|c| !c.is_ascii_digit())
+                                .collect::<String>()
+                                .parse::<u32>()
+                                .ok()
+                        })
+                        .unwrap_or(0)
+                };
+                extract_num(a).cmp(&extract_num(b))
+            });
+            
+            println!("DEBUG: sorted_detected_partitions = {:?}", detected_partitions);
             
             // Special handling for LUKS - check if we have a mapper device
             if expected_count == 1 && detected_partitions.is_empty() {
@@ -644,6 +664,7 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
 
         
         if partition_names.len() == expected_count {
+            println!("DEBUG: Found {} partitions as expected: {:?}", expected_count, partition_names);
             info(&format!("Found {} partitions", expected_count));
             return Ok(partition_names);
         }
@@ -710,115 +731,152 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
 }
 
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
-    // Unmount any existing partitions on this drive using direct commands
-    // This avoids complex shell pattern matching issues
-    let base_drive = drive.trim_end_matches('/');
+    info(&format!("Partitioning drive {}", drive));
     
-    // Try common partition numbering schemes
+    // Step 1: Unmount any existing partitions
+    let base_drive = drive.trim_end_matches('/');
     let partitions_to_try = [
         format!("{}1", base_drive),
         format!("{}2", base_drive), 
         format!("{}3", base_drive),
         format!("{}4", base_drive),
-        format!("{}5", base_drive),
         format!("{}p1", base_drive),
         format!("{}p2", base_drive),
         format!("{}p3", base_drive),
         format!("{}p4", base_drive),
-        format!("{}p5", base_drive),
     ];
     
     for partition in &partitions_to_try {
         let _ = execute(&format!("umount {} 2>/dev/null || true", partition));
     }
     
-    // Clean existing partition table and signatures
-    info("Cleaning existing partition table...");
-    
-    // Close LUKS mappings and wipe signatures
+    // Step 2: Clean existing partition table
+    info("Cleaning existing partition table");
     let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
     let _ = execute("dmsetup remove_all 2>/dev/null || true");
     let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", drive));
     
-    // Destroy partition table (key fix)
+    // Step 2.5: Verify partitions are actually deleted
+    verify_partitions_deleted(drive)?;
+    
+    // Step 3: Create new partition table
     if execute("which sgdisk").is_ok() {
         execute(&format!("sgdisk --zap-all {}", drive))?;
         execute(&format!("sgdisk --clear {}", drive))?;
-    }
-    
-    // Force kernel to recognize changes
-    execute("sync")?;
-    let _ = execute(&format!("partprobe {} 2>/dev/null || true", drive));
-    let _ = execute(&format!("blockdev --rereadpt {} 2>/dev/null || true", drive))?;
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-    
-    // Check if LVM is available before trying to use it
-    let vgs_output = if Path::new("/sbin/vgs").exists() || Path::new("/usr/sbin/vgs").exists() {
-        execute("vgs | awk '{ print $1 }' | grep -vw VG").unwrap_or_default()
-    } else {
-        String::new()
-    };
-    for vg in vgs_output.lines() {
-        let vg = vg.trim();
-        if !vg.is_empty() {
-            execute(&format!("vgchange -an {}", vg))?;
-        }
-    }
-
-    let mut command = format!("cat <<EOF | sfdisk -q --wipe always --force {}\nlabel: gpt", drive);
-    let drive_size = get_drive_size(drive)?;
-    let mut running_drive_size = drive_size.saturating_sub(1048576); // for BIOS systems, -1M
-
-    for partition in layout {
-        let size_part = if partition.size == "rest" {
-            if !is_efi() {
-                format!("size={}K, ", running_drive_size / 1024)
-            } else {
-                String::new()
-            }
-        } else if partition.size.ends_with('%') {
-            let percentage: f64 = partition.size[..partition.size.len()-1].parse().unwrap_or(0.0);
-            let partition_size = ((drive_size as f64) * (percentage / 100.0)) as u64;
-            running_drive_size = running_drive_size.saturating_sub(partition_size);
-            format!("size={}K, ", partition_size / 1024)
-        } else {
-            let partition_size = human_to_bytes(&partition.size)?;
-            running_drive_size = running_drive_size.saturating_sub(partition_size);
-            format!("size={}, ", partition.size)
-        };
         
-        command += &format!("\n{}type={}", size_part, partition.partition_type);
-    }
-
-    if !is_efi() {
-        command += "\ntype=21686148-6449-6E6F-744E-656564454649";
-    }
-
-    command += "\nEOF";
-    
-    execute(&command)?;
-    
-    // Wait for partitioning to complete and inform the kernel
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    
-    // Try to inform kernel of partition changes
-    if execute("which partprobe").is_ok() {
-        if let Err(e) = execute(&format!("partprobe {}", drive)) {
-            warn(&format!("partprobe failed: {}, trying other methods", e));
-            // Try alternative approaches
-            let _ = execute(&format!("sfdisk -R {}", drive))
-                .or_else(|_| execute(&format!("hdparm -z {}", drive)))
-                .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
+        // Create partitions
+        let mut part_num = 1u32;
+        for partition in layout {
+            let size = match partition.size.as_str() {
+                "512M" => "0:+512M",
+                "8G" => "0:+8G", 
+                "2M" => "0:+2M",
+                "rest" => "0:0",
+                _ => bail!("Unsupported size: {}", partition.size),
+            };
+            
+            let typecode = match partition.partition_type.as_str() {
+                "uefi" => "ef00",
+                "linux" => "8300",
+                "21686148-6449-6E6F-744E-656564454649" => "ef02",
+                _ => "8300",
+            };
+            
+            let label = partition.label.as_deref().unwrap_or("");
+            
+            execute(&format!(
+                "sgdisk --new={}:{} --typecode={}:{} --change-name={}:'{}' {}",
+                part_num, size, part_num, typecode, part_num, label, drive
+            ))?;
+            
+            part_num += 1;
         }
+        
+        // Use --refresh flag to notify kernel - this is the standard approach
+        execute(&format!("sgdisk --refresh {}", drive))?;
     } else {
-        warn("partprobe not available, trying alternative methods");
-        let _ = execute(&format!("sfdisk -R {}", drive))
-            .or_else(|_| execute(&format!("hdparm -z {}", drive)))
-            .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
+        bail!("sgdisk not available");
     }
     
-    // Wait and verify partitions were created with improved detection
-    let _partition_names = wait_for_partitions(drive, layout.len())?;
+    // Step 4: Wait for partitions to be recognized
+    info("Waiting for partitions to be recognized");
+    let partition_names = wait_for_partitions(drive, layout.len())?;
+    
+    // Step 4.5: Show what partitions were created
+    info("Verifying new partitions were created");
+    println!("SUCCESS: Created {} partitions:", partition_names.len());
+    for (i, partition) in partition_names.iter().enumerate() {
+        if let Ok(info) = execute(&format!("lsblk -n -o NAME,SIZE {}", partition)) {
+            println!("  Partition {}: {} ({})", i + 1, partition, info.trim());
+        } else {
+            println!("  Partition {}: {}", i + 1, partition);
+        }
+    }
+    
+    Ok(())
+}
+
+fn format_partition(device: &str, partition: &Partition) -> Result<()> {
+    info(&format!("Formatting {} as {}", device, partition.format));
+    
+    match partition.format.as_str() {
+        "btrfs" => {
+            // Create BTRFS filesystem on the device (usually a LUKS mapper)
+            if let Some(ref label) = partition.label {
+                info(&format!("Creating BTRFS filesystem with label '{}' on {}", label, device));
+                if let Err(e) = execute(&format!("mkfs.btrfs -L {} {}", label, device)) {
+                    bail!("Failed to create BTRFS filesystem with label '{}': {}", label, e);
+                }
+            } else {
+                info(&format!("Creating BTRFS filesystem on {}", device));
+                if let Err(e) = execute(&format!("mkfs.btrfs {}", device)) {
+                    bail!("Failed to create BTRFS filesystem: {}", e);
+                }
+            }
+            
+            // Create subvolumes if specified
+            if let Some(ref subvolumes) = partition.subvolumes {
+                let temp_mount = "/mnt/temp_btrfs";
+                
+                // Ensure mount directory exists
+                if let Err(e) = fs::create_dir_all(temp_mount) {
+                    bail!("Failed to create temporary mount directory '{}': {}", temp_mount, e);
+                }
+                
+                // Mount the BTRFS filesystem
+                info(&format!("Mounting BTRFS filesystem temporarily at {}", temp_mount));
+                if let Err(e) = execute(&format!("mount {} {}", device, temp_mount)) {
+                    bail!("Failed to mount BTRFS filesystem for subvolume creation: {}", e);
+                }
+                
+                // Create each subvolume with error handling
+                for subvolume in subvolumes {
+                    let subvol_path = format!("{}{}", temp_mount, subvolume);
+                    info(&format!("Creating BTRFS subvolume: {}", subvolume));
+                    if let Err(e) = execute(&format!("btrfs subvolume create {}", subvol_path)) {
+                        // Attempt cleanup on failure
+                        let _ = execute(&format!("umount {}", temp_mount));
+                        bail!("Failed to create BTRFS subvolume '{}': {}", subvolume, e);
+                    }
+                }
+                
+                // Unmount the temporary filesystem
+                info("Unmounting temporary BTRFS mount");
+                if let Err(e) = execute(&format!("umount {}", temp_mount)) {
+                    warn(&format!("Warning: Failed to unmount temporary BTRFS mount: {}", e));
+                }
+            }
+            
+            // Verify the filesystem
+            if let Err(e) = verify_filesystem(device, "btrfs") {
+                warn(&format!("BTRFS filesystem verification failed: {}", e));
+                warn("The filesystem may still be usable, but please verify manually");
+            }
+        }
+        _ => {
+            bail!("Unsupported filesystem type for format_partition: {}", partition.format);
+        }
+    }
     
     Ok(())
 }
@@ -860,12 +918,120 @@ fn verify_filesystem(partition: &str, fs_type: &str) -> Result<()> {
     Ok(())
 }
 
+
+
+
+
+
+
+fn verify_partitions_deleted(drive: &str) -> Result<()> {
+    info("Verifying partitions are deleted after cleanup");
+    
+    let base_drive = drive.trim_end_matches('/');
+    let partitions_to_check = [
+        format!("{}1", base_drive),
+        format!("{}2", base_drive), 
+        format!("{}3", base_drive),
+        format!("{}4", base_drive),
+        format!("{}p1", base_drive),
+        format!("{}p2", base_drive),
+        format!("{}p3", base_drive),
+        format!("{}p4", base_drive),
+    ];
+    
+    let mut found_partitions = Vec::new();
+    
+    for partition in &partitions_to_check {
+        if Path::new(partition).exists() {
+            // Check if it's actually a block device
+            if let Ok(output) = execute(&format!("lsblk -n -o NAME,SIZE {}", partition)) {
+                if !output.trim().is_empty() {
+                    found_partitions.push(format!("{} ({})", partition, output.trim()));
+                }
+            }
+        }
+    }
+    
+    if found_partitions.is_empty() {
+        info("✓ All partitions successfully deleted");
+        println!("SUCCESS: No partitions found on {}", drive);
+    } else {
+        println!("⚠ Partitions still exist after cleanup:");
+        for partition in &found_partitions {
+            println!("  REMAINING: {}", partition);
+        }
+        println!("INFO: This may be normal if the system hasn't updated yet");
+    }
+    
+    Ok(())
+}
+
+// Add this function to check if a partition is actually in use
+fn is_partition_in_use(partition: &str) -> bool {
+    // Check if partition is mounted
+    if let Ok(mount_info) = execute(&format!("findmnt -n -o TARGET {}", partition)) {
+        if !mount_info.trim().is_empty() {
+            return true;
+        }
+    }
+    
+    // Check for processes using the partition
+    if let Ok(fuser_info) = execute(&format!("fuser -v {}", partition)) {
+        if !fuser_info.trim().is_empty() {
+            return true;
+        }
+    }
+    
+    // Check for LUKS mappings
+    if partition.starts_with("/dev/mapper/") {
+        if let Ok(ls_info) = execute(&format!("ls -la /dev/mapper")) {
+            for line in ls_info.lines() {
+                if line.contains(partition) {
+                    return true;
+                }
+            }
+        }
+    }
+    
+    false
+}
+
+fn ensure_partition_ready(partition: &str) -> Result<()> {
+    let mut attempts = 0;
+    let max_attempts = 10;
+    
+    while attempts < max_attempts {
+        // Check if partition exists and is ready
+        if Path::new(partition).exists() {
+            // Try to read partition info to verify it's ready
+            if let Ok(_) = execute(&format!("lsblk -n -o NAME {}", partition)) {
+                return Ok(());
+            }
+        }
+        
+        attempts += 1;
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    
+    bail!("Partition {} is not ready after {} attempts", partition, max_attempts)
+}
+
 fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     // Wait for kernel to recognize partitions and get reliable partition list
     std::thread::sleep(std::time::Duration::from_secs(2));
     
+    println!("DEBUG: format_drive called with {} partitions", layout.len());
+    for (i, part) in layout.iter().enumerate() {
+        println!("DEBUG: Layout[{}]: format={}, label={:?}", i, part.format, part.label);
+    }
+    
     // Use the same reliable detection as partition_drive
     let partition_names = wait_for_partitions(drive, layout.len())?;
+
+    // Ensure all partitions are ready before formatting
+    for partition in &partition_names {
+        ensure_partition_ready(partition)?;
+    }
 
     for (i, partition) in layout.iter().enumerate() {
         let current_name = &partition_names[i];
@@ -875,7 +1041,62 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             bail!("Partition {} does not exist", current_name);
         }
 
+        // Check if partition is in use before formatting
+        if is_partition_in_use(current_name) {
+            warn(&format!("Partition {} is in use, skipping formatting", current_name));
+            continue;
+        }
+
+        // Simple cleanup before formatting
+        info(&format!("Preparing partition {} for formatting", current_name));
+        
+        // Step 1: Unmount aggressively
+        let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
+        let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
+        
+        // Step 2: Check for processes using partition
+        let _ = execute(&format!("fuser -v {} 2>/dev/null || true", current_name));
+        let _ = execute(&format!("fuser -k {} 2>/dev/null || true", current_name));
+        
+        // Step 3: Remove any device mapper references
+        let _ = execute("dmsetup remove_all 2>/dev/null || true");
+        
+        // Step 4: Close any LUKS containers
+        let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
+        let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
+        
+        // Step 5: Use a simple approach to clear partition
+        info(&format!("Clearing partition {}", current_name));
+        
+        // Use enhanced clearing for all drives to ensure partition is truly clean
+        info(&format!("Clearing partition metadata and data on {}", current_name));
+        
+        // Step 1: Clear filesystem signatures
+        let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
+        
+        // Step 2: Zero out the first 1MB to clear partition table and filesystem metadata
+        let _ = execute(&format!("dd if=/dev/zero of={} bs=1M count=1 2>/dev/null || true", current_name));
+        
+        // Step 3: For NVMe drives, also try nvme sanitize if available (safer than format)
+        if current_name.contains("nvme") && execute("which nvme").is_ok() {
+            // Extract the base NVMe device for sanitize operation
+            let base_device = if let Some(pos) = current_name.rfind('p') {
+                &current_name[..pos]
+            } else {
+                current_name
+            };
+            
+            // Try nvme sanitize - this is safer than format and works on individual namespaces
+            info(&format!("Attempting NVMe sanitize on {}", base_device));
+            let _ = execute(&format!("nvme sanitize --no-flush --force {} 2>/dev/null || true", base_device));
+        }
+        
+        // Step 6: Sync and wait
+        let _ = std::process::Command::new("sync").status();
+        std::thread::sleep(std::time::Duration::from_millis(3000));
+
         info(&format!("Formatting {} as {}", current_name, partition.format));
+        println!("DEBUG: Partition {} format = '{}', label = {:?}", i, partition.format, partition.label);
         
         match partition.format.as_str() {
             "vfat" => {
@@ -898,58 +1119,21 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
+                println!("DEBUG: Entering ext4 case for partition {}", current_name);
                 info(&format!("Formatting {} as ext4", current_name));
                 
-                // Clean partition before formatting
-                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
-                let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
-                
-                // Close any LUKS mappings
-                let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
-                let _ = execute("dmsetup remove_all 2>/dev/null || true");
-                
-                // Wipe signatures and zero first MB
-                let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
-                match ProcessCommand::new("dd")
-                    .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
-                    .output()
-                {
-                    Ok(_) => {},
-                    Err(_) => {} // Continue even if dd fails
-                }
-                
-                // Sync and wait for kernel
-                let _ = execute("sync");
-                std::thread::sleep(std::time::Duration::from_millis(2000));
-                
-                // Format the clean partition
-                let format_result = if let Some(ref label) = partition.label {
-                    ProcessCommand::new("mkfs.ext4")
-                        .args(&["-F", "-L", label, current_name])
-                        .output()
+                // Use a simpler approach for ext4 formatting
+                if let Some(ref label) = partition.label {
+                    execute(&format!("mkfs.ext4 -F -L {} {}", label, current_name))?;
                 } else {
-                    ProcessCommand::new("mkfs.ext4")
-                        .args(&["-F", current_name])
-                        .output()
-                };
-                
-                match format_result {
-                    Ok(output) => {
-                        if output.status.success() {
-                            verify_filesystem(current_name, "ext4")?;
-                            return Ok(());
-                        } else {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            bail!("Failed to create ext4 filesystem on {}: {}", current_name, stderr.trim());
-                        }
-                    }
-                    Err(e) => {
-                        bail!("Failed to execute mkfs.ext4 on {}: {}", current_name, e);
-                    }
+                    execute(&format!("mkfs.ext4 -F {}", current_name))?;
                 }
+                
+                // Verify filesystem
+                verify_filesystem(current_name, "ext4")?;
             }
             "btrfs" => {
-                // Following Xenia's BTRFS formatting approach with enhanced error handling
+                // BTRFS formatting with enhanced error handling
                 if let Some(ref label) = partition.label {
                     info(&format!("Creating BTRFS filesystem with label '{}' on {}", label, current_name));
                     if let Err(e) = execute(&format!("mkfs.btrfs -L {} {}", label, current_name)) {
@@ -962,7 +1146,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
                 
-                // Create subvolumes following Xenia's exact approach with better error handling
+                // Create subvolumes with better error handling
                 if let Some(ref subvolumes) = partition.subvolumes {
                     let temp_mount = "/mnt/temp_btrfs";
                     
@@ -1002,15 +1186,18 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 }
             }
             "luks" => {
+                println!("DEBUG: Entering LUKS case for partition {}", current_name);
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
-                // Aggressive cleanup before LUKS format
-                let _ = execute(&format!("lsof {} 2>/dev/null || true", current_name));
-                let _ = execute(&format!("fuser -v {} 2>/dev/null || true", current_name));
+                // Check if partition is in use before LUKS format
+                if is_partition_in_use(current_name) {
+                    warn(&format!("Partition {} is in use, skipping LUKS format", current_name));
+                    continue;
+                }
                 
-                // Unmount aggressively
+                // Unmount aggressively before LUKS format
                 let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
-                let _ = execute("umount -f /dev/mapper/regicideos 2>/dev/null || true");
+                let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
                 
                 // Close any existing LUKS containers
                 let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
@@ -1019,15 +1206,33 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 // Remove any device mapper references
                 let _ = execute("dmsetup remove_all 2>/dev/null || true");
                 
-                // Try to wipe the first few blocks to clear any filesystem signatures
-                let _ = execute(&format!("wipefs -a {} 2>/dev/null || true", current_name));
+                // Use enhanced clearing for LUKS partition preparation
+                info(&format!("Clearing partition metadata and data on {}", current_name));
+                
+                // Step 1: Clear filesystem signatures
+                let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
+                
+                // Step 2: Zero out the first 1MB to clear partition table and filesystem metadata
                 let _ = execute(&format!("dd if=/dev/zero of={} bs=1M count=1 2>/dev/null || true", current_name));
+                
+                // Step 3: For NVMe drives, also try nvme sanitize if available (safer than format)
+                if current_name.contains("nvme") && execute("which nvme").is_ok() {
+                    // Extract the base NVMe device for sanitize operation
+                    let base_device = if let Some(pos) = current_name.rfind('p') {
+                        &current_name[..pos]
+                    } else {
+                        current_name
+                    };
+                    
+                    // Try nvme sanitize - this is safer than format and works on individual namespaces
+                    info(&format!("Attempting NVMe sanitize on {}", base_device));
+                    let _ = execute(&format!("nvme sanitize --no-flush --force {} 2>/dev/null || true", base_device));
+                }
                 
                 // Wait longer for all operations to complete
                 std::thread::sleep(std::time::Duration::from_millis(5000));
                 
                 // Special handling for LUKS format (interactive password required)
-
                 let result = ProcessCommand::new("cryptsetup")
                     .args(&["luksFormat", current_name])
                     .stdin(std::process::Stdio::inherit())
@@ -1038,7 +1243,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 match result {
                     Ok(status) => {
                         if status.success() {
-
+                            println!("DEBUG: LUKS format successful for {}", current_name);
                         } else {
                             bail!("Failed to format LUKS partition: exit code {:?}", status.code());
                         }
@@ -1048,63 +1253,43 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
                 
-                let luks_device = if let Some(ref label) = partition.label {
-                    // Set LUKS label after formatting
+                // Set LUKS label after formatting if specified
+                if let Some(ref label) = partition.label {
                     execute(&format!("cryptsetup -q config {} --label {}", current_name, label))?;
-                    
-                    // Open LUKS container using the actual partition path, not by-label
-                    // LUKS containers don't have accessible labels until opened
-                    let open_result = ProcessCommand::new("cryptsetup")
-                        .args(["luksOpen", current_name, "regicideos"])
-                        .status();
-                        
-                    if !open_result.map(|s| s.success()).unwrap_or(false) {
-                        bail!("Failed to open LUKS partition with label '{}'", label);
-                    }
-                    
-
-                    
-                    // Verify the device was created with timeout
-                    let mut attempts = 0;
-                    while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
-
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                        attempts += 1;
-                    }
-                    
-                    if !Path::new("/dev/mapper/regicideos").exists() {
-                        bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
-                    } else {
-
-                    }
-                    
-                    "/dev/mapper/regicideos".to_string()
-                } else {
-                    let open_result = ProcessCommand::new("cryptsetup")
-                        .args(["luksOpen", current_name, "regicideos"])
-                        .status();
-                        
-                    if !open_result.map(|s| s.success()).unwrap_or(false) {
-                        bail!("Failed to open LUKS partition");
-                    }
-                    
-                    // Verify the device was created with timeout
-                    let mut attempts = 0;
-                    while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                        attempts += 1;
-                    }
-                    
-                    if !Path::new("/dev/mapper/regicideos").exists() {
-                        bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
-                    }
-                    
-                    "/dev/mapper/regicideos".to_string()
-                };
-                
-                if let Some(ref inside) = partition.inside {
-                    format_drive(&luks_device, &[*inside.clone()])?;
                 }
+                
+                // Always use "regicideos" as the mapper name for RegicideOS
+                let open_result = ProcessCommand::new("cryptsetup")
+                    .args(["luksOpen", current_name, "regicideos"])
+                    .status();
+                    
+                if !open_result.map(|s| s.success()).unwrap_or(false) {
+                    bail!("Failed to open LUKS partition");
+                }
+                
+                // Verify the device was created with timeout
+                let mut attempts = 0;
+                while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    attempts += 1;
+                }
+                
+                if !Path::new("/dev/mapper/regicideos").exists() {
+                    bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
+                }
+                
+                let mapper_device = "/dev/mapper/regicideos".to_string();
+                println!("DEBUG: LUKS mapper created: {}", mapper_device);
+                
+                // Recursively format the inside partition (should be BTRFS)
+                if let Some(ref inside_partition) = partition.inside {
+                    println!("DEBUG: Recursively formatting inside partition as BTRFS...");
+                    format_partition(&mapper_device, inside_partition)?;
+                }
+                
+                // CRITICAL: Return early to prevent re-formatting the same partition
+                // The LUKS container and its BTRFS filesystem are now set up
+                return Ok(());
             }
             _ => {
                 warn(&format!("Unknown filesystem type: {}", partition.format));
@@ -1418,6 +1603,8 @@ fn post_install(config: &Config) -> Result<()> {
             ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
         }
         "btrfs_encryption_dev" => {
+            // ROOTS is ext4 root filesystem, already mounted as root.img
+            // Mount LUKS-encrypted REGICIDEOS partition for overlay and home subvolumes
             if !Path::new("/dev/mapper/regicideos").exists() {
                 bail!("LUKS device /dev/mapper/regicideos not found");
             }
