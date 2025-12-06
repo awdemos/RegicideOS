@@ -929,11 +929,37 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 if let Some(ref label) = partition.label {
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
                     println!("DEBUG: Running command: {}", cmd);
-                    execute(&cmd)?;
+                    match execute(&cmd) {
+                        Ok(_) => println!("DEBUG: mkfs.ext4 succeeded"),
+                        Err(e) => {
+                            println!("DEBUG: mkfs.ext4 failed with error: {}", e);
+                            // Try running with verbose output to see real error
+                            let verbose_cmd = format!("mkfs.ext4 -v -L {} {} 2>&1", label, current_name);
+                            println!("DEBUG: Running verbose: {}", verbose_cmd);
+                            match execute(&verbose_cmd) {
+                                Ok(output) => println!("DEBUG: Verbose output: {}", output),
+                                Err(e2) => println!("DEBUG: Verbose failed: {}", e2),
+                            }
+                            bail!("mkfs.ext4 failed");
+                        }
+                    }
                 } else {
                     let cmd = format!("mkfs.ext4 {}", current_name);
                     println!("DEBUG: Running command: {}", cmd);
-                    execute(&cmd)?;
+                    match execute(&cmd) {
+                        Ok(_) => println!("DEBUG: mkfs.ext4 succeeded"),
+                        Err(e) => {
+                            println!("DEBUG: mkfs.ext4 failed with error: {}", e);
+                            // Try running with verbose output to see real error
+                            let verbose_cmd = format!("mkfs.ext4 -v {} 2>&1", current_name);
+                            println!("DEBUG: Running verbose: {}", verbose_cmd);
+                            match execute(&verbose_cmd) {
+                                Ok(output) => println!("DEBUG: Verbose output: {}", output),
+                                Err(e2) => println!("DEBUG: Verbose failed: {}", e2),
+                            }
+                            bail!("mkfs.ext4 failed");
+                        }
+                    }
                 }
                 verify_filesystem(current_name, "ext4")?;
             }
