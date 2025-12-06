@@ -888,9 +888,10 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
-                // Simple Xenia-style approach: just format directly without overthinking
-                println!("DEBUG: Using simple Xenia-style approach for ext4 formatting");
+                // Aggressive filesystem destruction approach
+                println!("DEBUG: Using aggressive filesystem destruction for ext4 formatting");
                 
+                // First, try simple approach
                 if let Some(ref label) = partition.label {
                     let cmd = format!("mkfs.ext4 -q -L {} {}", label, current_name);
                     println!("DEBUG: Running: {}", cmd);
@@ -900,21 +901,68 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                             return Ok(());
                         }
                         Err(e) => {
-                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying with -F", e);
-                            let force_cmd = format!("mkfs.ext4 -q -F -L {} {}", label, current_name);
-                            match execute(&force_cmd) {
+                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying destruction", e);
+                            
+                            // DESTROY existing filesystem completely
+                            println!("DEBUG: Destroying existing filesystem on {}...", current_name);
+                            
+                            // 1. Zero out entire partition (not just 1MB)
+                            println!("DEBUG: Zeroing entire partition to destroy filesystem...");
+                            match ProcessCommand::new("dd")
+                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M"])
+                                .output()
+                            {
                                 Ok(_) => {
-                                    println!("DEBUG: Force mkfs.ext4 succeeded");
+                                    println!("DEBUG: Partition zeroed successfully");
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: dd failed: {}, continuing anyway...", e);
+                                }
+                            }
+                            
+                            // 2. Sync to ensure writes complete
+                            let _ = execute("sync");
+                            
+                            // 3. Wait for kernel to recognize changes
+                            std::thread::sleep(std::time::Duration::from_millis(3000));
+                            
+                            // 4. Try to format the destroyed partition
+                            let destroy_cmd = format!("mkfs.ext4 -F -L {} {}", label, current_name);
+                            println!("DEBUG: Running on destroyed partition: {}", destroy_cmd);
+                            match execute(&destroy_cmd) {
+                                Ok(_) => {
+                                    println!("DEBUG: mkfs.ext4 on destroyed partition succeeded");
                                     return Ok(());
                                 }
                                 Err(e2) => {
-                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
-                                    // Continue with complex approach only if simple approach fails
+                                    println!("DEBUG: Even destroyed partition formatting failed: {}", e2);
+                                    
+                                    // 5. Last resort - use wipefs to completely erase signatures
+                                    println!("DEBUG: Trying complete signature wipe...");
+                                    match execute(&format!("wipefs -af {}", current_name)) {
+                                        Ok(_) => {
+                                            println!("DEBUG: Complete wipe succeeded, trying final format...");
+                                            let final_cmd = format!("mkfs.ext4 -F -L {} {}", label, current_name);
+                                            match execute(&final_cmd) {
+                                                Ok(_) => {
+                                                    println!("DEBUG: Final format after complete wipe succeeded");
+                                                    return Ok(());
+                                                }
+                                                Err(e3) => {
+                                                    println!("DEBUG: Final format failed: {}", e3);
+                                                }
+                                            }
+                                        }
+                                        Err(e3) => {
+                                            println!("DEBUG: Complete wipe failed: {}", e3);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 } else {
+                    // Similar logic for unlabeled partitions
                     let cmd = format!("mkfs.ext4 -q {}", current_name);
                     println!("DEBUG: Running: {}", cmd);
                     match execute(&cmd) {
@@ -923,16 +971,50 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                             return Ok(());
                         }
                         Err(e) => {
-                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying with -F", e);
-                            let force_cmd = format!("mkfs.ext4 -q -F {}", current_name);
-                            match execute(&force_cmd) {
+                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying destruction", e);
+                            
+                            // DESTROY existing filesystem completely
+                            println!("DEBUG: Destroying existing filesystem on {}...", current_name);
+                            
+                            // Zero out entire partition
+                            match ProcessCommand::new("dd")
+                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M"])
+                                .output()
+                            {
+                                Ok(_) => println!("DEBUG: Partition zeroed successfully"),
+                                Err(e) => println!("DEBUG: dd failed: {}, continuing...", e),
+                            }
+                            
+                            let _ = execute("sync");
+                            std::thread::sleep(std::time::Duration::from_millis(3000));
+                            
+                            let destroy_cmd = format!("mkfs.ext4 -F {}", current_name);
+                            println!("DEBUG: Running on destroyed partition: {}", destroy_cmd);
+                            match execute(&destroy_cmd) {
                                 Ok(_) => {
-                                    println!("DEBUG: Force mkfs.ext4 succeeded");
+                                    println!("DEBUG: mkfs.ext4 on destroyed partition succeeded");
                                     return Ok(());
                                 }
                                 Err(e2) => {
-                                    println!("DEBUG: Force mkfs.ext4 also failed: {}", e2);
-                                    // Continue with complex approach only if simple approach fails
+                                    println!("DEBUG: Even destroyed partition formatting failed: {}", e2);
+                                    
+                                    match execute(&format!("wipefs -af {}", current_name)) {
+                                        Ok(_) => {
+                                            let final_cmd = format!("mkfs.ext4 -F {}", current_name);
+                                            match execute(&final_cmd) {
+                                                Ok(_) => {
+                                                    println!("DEBUG: Final format after complete wipe succeeded");
+                                                    return Ok(());
+                                                }
+                                                Err(e3) => {
+                                                    println!("DEBUG: Final format failed: {}", e3);
+                                                }
+                                            }
+                                        }
+                                        Err(e3) => {
+                                            println!("DEBUG: Complete wipe failed: {}", e3);
+                                        }
+                                    }
                                 }
                             }
                         }
