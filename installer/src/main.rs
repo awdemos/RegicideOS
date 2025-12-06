@@ -128,9 +128,14 @@ fn execute(command: &str) -> Result<String> {
             execute_safe_command(program, args)
         }
         
-        // Package managers (read-only operations only)
+        // Package managers (read-only operations only, except for gdisk installation)
         "which" | "dpkg" | "rpm" | "pacman" => {
             if program == "which" || args.iter().any(|&arg| arg == "-l" || arg == "-Q") {
+                execute_safe_command(program, args)
+            } else if (program == "dnf" && args.contains(&"-y") && args.contains(&"gdisk")) ||
+                      (program == "apt" && args.contains(&"gdisk")) ||
+                      (program == "pacman" && args.contains(&"gdisk")) {
+                // Allow gdisk installation for EFI boot support
                 execute_safe_command(program, args)
             } else {
                 bail!("Package manager operation not allowed: {}", command)
@@ -198,6 +203,8 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
     let allowed_patterns = [
         r"umount -ql [^[:space:]]+\?\* 2>/dev/null \|\| true",
         r"umount -ql /dev/[^[:space:]]+\?\* 2>/dev/null \|\| true",
+        r"umount -R [^[:space:]]+ 2>/dev/null",
+        r"umount [^[:space:]]+ 2>/dev/null",
         r"mount --rbind /dev /mnt/root/dev",
         r"mount --rbind /sys /mnt/root/sys", 
         r"mount --bind /run /mnt/root/run",
@@ -208,6 +215,7 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
         r"lsblk -fn -o NAME,LABEL",
         r"blkid -L [^[:space:]]+",
         r"vgs \| awk '\{ print \$1 \}' \| grep -vw VG",
+        r"cryptsetup close [^[:space:]]+ 2>/dev/null",
     ];
     
     for pattern in &allowed_patterns {
