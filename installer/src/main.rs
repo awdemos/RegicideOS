@@ -934,14 +934,25 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             "luks" => {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
-                // Use execute_safe_command for interactive password input
+                // Special handling for LUKS format (interactive password required)
                 println!("DEBUG: Starting LUKS format for {}", current_name);
-                match execute_safe_command("cryptsetup", &["luksFormat", current_name]) {
-                    Ok(_) => {
-                        println!("DEBUG: LUKS format successful for {}", current_name);
+                let result = ProcessCommand::new("cryptsetup")
+                    .args(&["luksFormat", current_name])
+                    .stdin(std::process::Stdio::inherit())
+                    .stdout(std::process::Stdio::inherit())
+                    .stderr(std::process::Stdio::inherit())
+                    .status();
+                    
+                match result {
+                    Ok(status) => {
+                        if status.success() {
+                            println!("DEBUG: LUKS format successful for {}", current_name);
+                        } else {
+                            bail!("Failed to format LUKS partition: exit code {:?}", status.code());
+                        }
                     }
                     Err(e) => {
-                        bail!("Failed to format LUKS partition: {}", e);
+                        bail!("Failed to execute cryptsetup: {}", e);
                     }
                 }
                 
