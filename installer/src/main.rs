@@ -634,8 +634,27 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
 }
 
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
-    // Use sh -c to properly expand the glob pattern
-    execute(&format!("sh -c 'umount -ql {}?* 2>/dev/null || true'", drive))?;
+    // Unmount any existing partitions on this drive using direct commands
+    // This avoids complex shell pattern matching issues
+    let base_drive = drive.trim_end_matches('/');
+    
+    // Try common partition numbering schemes
+    let partitions_to_try = [
+        format!("{}1", base_drive),
+        format!("{}2", base_drive), 
+        format!("{}3", base_drive),
+        format!("{}4", base_drive),
+        format!("{}5", base_drive),
+        format!("{}p1", base_drive),
+        format!("{}p2", base_drive),
+        format!("{}p3", base_drive),
+        format!("{}p4", base_drive),
+        format!("{}p5", base_drive),
+    ];
+    
+    for partition in &partitions_to_try {
+        let _ = execute(&format!("umount {} 2>/dev/null || true", partition));
+    }
     
     // Check if LVM is available before trying to use it
     let vgs_output = if Path::new("/sbin/vgs").exists() || Path::new("/usr/sbin/vgs").exists() {
