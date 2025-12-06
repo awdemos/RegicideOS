@@ -939,7 +939,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 
                 // Unmount aggressively
                 let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
-                let _ = execute(&format!("umount -f /dev/mapper/regicideos 2>/dev/null || true", current_name));
+                let _ = execute("umount -f /dev/mapper/regicideos 2>/dev/null || true");
                 
                 // Close any existing LUKS containers
                 let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
