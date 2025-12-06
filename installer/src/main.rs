@@ -251,7 +251,10 @@ fn is_safe_shell_command(cmd: &str) -> bool {
     
     // Only allow specific safe patterns
     let safe_patterns = [
-        r"^umount -ql [^[:space:]]+\?\* 2>/dev/null \|\| true$",
+        r"^umount -ql /[a-zA-Z0-9/]+[np]?[0-9]*\?\* 2>/dev/null \|\| true$",
+        r"^umount -ql /[a-zA-Z0-9/]+\?\* 2>/dev/null \|\| true$",
+        r"^umount -R [^[:space:]]+ 2>/dev/null$",
+        r"^umount [^[:space:]]+ 2>/dev/null$",
         r"^mount --rbind /dev /mnt/root/dev$",
         r"^mount --rbind /sys /mnt/root/sys$",
         r"^mount --bind /run /mnt/root/run$", 
