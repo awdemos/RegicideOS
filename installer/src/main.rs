@@ -953,7 +953,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 
                 // Create subvolumes following Xenia's exact approach with better error handling
                 if let Some(ref subvolumes) = partition.subvolumes {
-                    let temp_mount = "/mnt/gentoo";
+                    let temp_mount = "/mnt/temp_btrfs";
                     
                     // Ensure mount directory exists
                     if let Err(e) = fs::create_dir_all(temp_mount) {
