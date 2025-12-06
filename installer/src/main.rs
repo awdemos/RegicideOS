@@ -888,772 +888,104 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
-                // Check if partition is held by LUKS mapper
-                println!("DEBUG: Checking for LUKS holders on {}...", current_name);
+                println!("DEBUG: Formatting {} as ext4...", current_name);
                 
-                // Convert /dev/nvme0n1p2 to nvme0n1p2 for sys path
-                let sys_name = current_name.trim_start_matches("/dev/");
-                let holders_path = format!("/sys/block/{}/holders", sys_name);
-                match execute(&format!("ls -la {}", holders_path)) {
-                    Ok(holders_output) => {
-                        println!("DEBUG: Holders: {}", holders_output);
-                        if holders_output.contains("regicideos") {
-                            println!("DEBUG: Found LUKS mapper 'regicideos' holding partition!");
-                            println!("DEBUG: Closing LUKS mapper first...");
-                            
-                            // Close the LUKS container
-                            match execute("cryptsetup luksClose regicideos") {
-                                Ok(_) => {
-                                    println!("DEBUG: LUKS mapper closed successfully");
-                                }
-                                Err(e) => {
-                                    println!("DEBUG: Failed to close LUKS mapper: {}", e);
-                                }
-                            }
-                            
-                            // Wait for mapper to disappear
-                            std::thread::sleep(std::time::Duration::from_millis(2000));
-                            
-                            // Check if holders are now clear
-                            match execute(&format!("ls -la {}", holders_path)) {
-                                Ok(holders_after) => {
-                                    println!("DEBUG: Holders after close: {}", holders_after);
-                                }
-                                Err(e) => {
-                                    println!("DEBUG: Could not check holders after close: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("DEBUG: Could not check holders: {}", e);
-                    }
-                }
+                // AGGRESSIVE CLEANUP: Remove all traces of existing data
+                println!("DEBUG: Performing aggressive cleanup of {}...", current_name);
                 
-                // Try partition recreation if all else fails
-                println!("DEBUG: Trying partition recreation approach for {}...", current_name);
-                
-                // First, try simple formatting
-                if let Some(ref label) = partition.label {
-                    let cmd = format!("mkfs.ext4 -q -L {} {}", label, current_name);
-                    println!("DEBUG: Running: {}", cmd);
-                    match execute(&cmd) {
-                        Ok(_) => {
-                            println!("DEBUG: Simple mkfs.ext4 succeeded");
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying recreation", e);
-                            
-                            // RECREATE THE PARTITION COMPLETELY
-                            println!("DEBUG: Recreating partition to clear all system locks...");
-                            
-                            // Get partition info from fdisk
-                            match execute("fdisk -l /dev/nvme0n1 | grep nvme0n1p2") {
-                                Ok(fdisk_output) => {
-                                    println!("DEBUG: Current partition info: {}", fdisk_output);
-                                    
-                                    // Delete and recreate partition
-                                    let delete_cmd = format!("sgdisk --delete=2 /dev/nvme0n1 2>/dev/null || true");
-                                    match execute(&delete_cmd) {
-                                        Ok(_) => println!("DEBUG: Partition 2 deleted"),
-                                        Err(e) => println!("DEBUG: Delete failed: {}", e),
-                                    }
-                                    
-                                    // Recreate partition with same parameters
-                                    let recreate_cmd = "sgdisk --new=2:1050624:+8G --typecode=8300 /dev/nvme0n1";
-                                    match execute(recreate_cmd) {
-                                        Ok(_) => println!("DEBUG: Partition 2 recreated"),
-                                        Err(e) => println!("DEBUG: Recreate failed: {}", e),
-                                    }
-                                    
-                                    // Reread partition table
-                                    let _ = execute("partprobe");
-                                    std::thread::sleep(std::time::Duration::from_millis(3000));
-                                    
-                                    // Try formatting on recreated partition
-                                    let format_cmd = format!("mkfs.ext4 -q -L {} /dev/nvme0n1p2", label);
-                                    println!("DEBUG: Formatting recreated partition: {}", format_cmd);
-                                    match execute(&format_cmd) {
-                                        Ok(_) => {
-                                            println!("DEBUG: Format on recreated partition succeeded!");
-                                            return Ok(());
-                                        }
-                                        Err(e2) => {
-                                            println!("DEBUG: Even recreated partition failed: {}", e2);
-                                            
-                                            // LAST RESORT: Accept existing filesystem
-                                            println!("DEBUG: Accepting existing filesystem as last resort...");
-                                            return Ok(());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("DEBUG: Could not get partition info: {}", e);
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Similar for unlabeled
-                    let cmd = format!("mkfs.ext4 -q {}", current_name);
-                    println!("DEBUG: Running: {}", cmd);
-                    match execute(&cmd) {
-                        Ok(_) => {
-                            println!("DEBUG: Simple mkfs.ext4 succeeded");
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            println!("DEBUG: Simple mkfs.ext4 failed: {}, accepting existing", e);
-                            return Ok(());
-                        }
-                    }
-                }
-                if let Some(ref label) = partition.label {
-                    let cmd = format!("mkfs.ext4 -q -L {} {}", label, current_name);
-                    println!("DEBUG: Running: {}", cmd);
-                    match execute(&cmd) {
-                        Ok(_) => {
-                            println!("DEBUG: Simple mkfs.ext4 succeeded");
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying destruction", e);
-                            
-                            // DESTROY existing filesystem completely
-                            println!("DEBUG: Destroying existing filesystem on {}...", current_name);
-                            
-                            // 1. Zero out entire partition (not just 1MB)
-                            println!("DEBUG: Zeroing entire partition to destroy filesystem...");
-                            match ProcessCommand::new("dd")
-                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M"])
-                                .output()
-                            {
-                                Ok(_) => {
-                                    println!("DEBUG: Partition zeroed successfully");
-                                }
-                                Err(e) => {
-                                    println!("DEBUG: dd failed: {}, continuing anyway...", e);
-                                }
-                            }
-                            
-                            // 2. Sync to ensure writes complete
-                            let _ = execute("sync");
-                            
-                            // 3. Wait for kernel to recognize changes
-                            std::thread::sleep(std::time::Duration::from_millis(3000));
-                            
-                            // 4. Try to format the destroyed partition
-                            let destroy_cmd = format!("mkfs.ext4 -F -L {} {}", label, current_name);
-                            println!("DEBUG: Running on destroyed partition: {}", destroy_cmd);
-                            match execute(&destroy_cmd) {
-                                Ok(_) => {
-                                    println!("DEBUG: mkfs.ext4 on destroyed partition succeeded");
-                                    return Ok(());
-                                }
-                                Err(e2) => {
-                                    println!("DEBUG: Even destroyed partition formatting failed: {}", e2);
-                                    
-                                    // 5. Last resort - use wipefs to completely erase signatures
-                                    println!("DEBUG: Trying complete signature wipe...");
-                                    match execute(&format!("wipefs -af {}", current_name)) {
-                                        Ok(_) => {
-                                            println!("DEBUG: Complete wipe succeeded, trying final format...");
-                                            let final_cmd = format!("mkfs.ext4 -F -L {} {}", label, current_name);
-                                            match execute(&final_cmd) {
-                                                Ok(_) => {
-                                                    println!("DEBUG: Final format after complete wipe succeeded");
-                                                    return Ok(());
-                                                }
-                                                Err(e3) => {
-                                                    println!("DEBUG: Final format failed: {}", e3);
-                                                }
-                                            }
-                                        }
-                                        Err(e3) => {
-                                            println!("DEBUG: Complete wipe failed: {}", e3);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Similar logic for unlabeled partitions
-                    let cmd = format!("mkfs.ext4 -q {}", current_name);
-                    println!("DEBUG: Running: {}", cmd);
-                    match execute(&cmd) {
-                        Ok(_) => {
-                            println!("DEBUG: Simple mkfs.ext4 succeeded");
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            println!("DEBUG: Simple mkfs.ext4 failed: {}, trying destruction", e);
-                            
-                            // DESTROY existing filesystem completely
-                            println!("DEBUG: Destroying existing filesystem on {}...", current_name);
-                            
-                            // Zero out entire partition
-                            match ProcessCommand::new("dd")
-                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M"])
-                                .output()
-                            {
-                                Ok(_) => println!("DEBUG: Partition zeroed successfully"),
-                                Err(e) => println!("DEBUG: dd failed: {}, continuing...", e),
-                            }
-                            
-                            let _ = execute("sync");
-                            std::thread::sleep(std::time::Duration::from_millis(3000));
-                            
-                            let destroy_cmd = format!("mkfs.ext4 -F {}", current_name);
-                            println!("DEBUG: Running on destroyed partition: {}", destroy_cmd);
-                            match execute(&destroy_cmd) {
-                                Ok(_) => {
-                                    println!("DEBUG: mkfs.ext4 on destroyed partition succeeded");
-                                    return Ok(());
-                                }
-                                Err(e2) => {
-                                    println!("DEBUG: Even destroyed partition formatting failed: {}", e2);
-                                    
-                                    match execute(&format!("wipefs -af {}", current_name)) {
-                                        Ok(_) => {
-                                            let final_cmd = format!("mkfs.ext4 -F {}", current_name);
-                                            match execute(&final_cmd) {
-                                                Ok(_) => {
-                                                    println!("DEBUG: Final format after complete wipe succeeded");
-                                                    return Ok(());
-                                                }
-                                                Err(e3) => {
-                                                    println!("DEBUG: Final format failed: {}", e3);
-                                                }
-                                            }
-                                        }
-                                        Err(e3) => {
-                                            println!("DEBUG: Complete wipe failed: {}", e3);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Check if mkfs.ext4 is available, attempt to install if missing
-                if execute("which mkfs.ext4").is_err() {
-                    warn("mkfs.ext4 not found, attempting to install e2fsprogs package...");
-                    if execute("which dnf").is_ok() {
-                        execute("dnf install -y e2fsprogs")
-                            .map_err(|e| warn(&format!("Failed to install e2fsprogs via dnf: {}", e)))
-                            .ok();
-                    } else if execute("which apt").is_ok() {
-                        execute("apt update && apt install -y e2fsprogs")
-                            .map_err(|e| warn(&format!("Failed to install e2fsprogs via apt: {}", e)))
-                            .ok();
-                    } else if execute("which pacman").is_ok() {
-                        execute("pacman -S --noconfirm e2fsprogs")
-                            .map_err(|e| warn(&format!("Failed to install e2fsprogs via pacman: {}", e)))
-                            .ok();
-                    } else {
-                        warn("Could not determine package manager to install e2fsprogs");
-                    }
-                }
-                
-                // Debug: Check partition state before formatting
-                println!("DEBUG: Checking partition state for {}", current_name);
-                match execute(&format!("lsblk {}", current_name)) {
-                    Ok(output) => println!("DEBUG: lsblk output: {}", output),
-                    Err(e) => println!("DEBUG: lsblk failed: {}", e),
-                }
-                match execute(&format!("file -s {}", current_name)) {
-                    Ok(output) => println!("DEBUG: file output: {}", output),
-                    Err(e) => println!("DEBUG: file failed: {}", e),
-                }
-                
-                // Since partition is already formatted, check if we can use it as-is
-                println!("DEBUG: Partition already has filesystem, checking if we can use it as-is...");
-                
-                // Check if it's the correct filesystem type and label
-                match execute(&format!("blkid -o value -s TYPE {}", current_name)) {
-                    Ok(output) => {
-                        let fs_type = output.trim();
-                        if fs_type == "ext4" {
-                            println!("DEBUG: Partition is already ext4, checking label...");
-                            match execute(&format!("blkid -o value -s LABEL {}", current_name)) {
-                                Ok(label_output) => {
-                                    let existing_label = label_output.trim();
-                                    if let Some(ref expected_label) = partition.label {
-                                        if existing_label == expected_label {
-                                            println!("DEBUG: Partition has correct ext4 filesystem and label '{}', skipping format", expected_label);
-                                            // Don't format, just ensure it's unmounted properly
-                                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                                            return Ok(());
-                                        } else {
-                                            println!("DEBUG: Label mismatch: expected '{}', found '{}', attempting format", expected_label, existing_label);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("DEBUG: Could not read label: {}, attempting format", e);
-                                }
-                            }
-                        } else {
-                            println!("DEBUG: Wrong filesystem type: {}, attempting format", fs_type);
-                        }
-                    }
-                    Err(e) => {
-                        println!("DEBUG: Could not determine filesystem type: {}, attempting format", e);
-                    }
-                }
-                
-                println!("DEBUG: Proceeding with formatting attempts...");
-                
-                // IMPORTANT: Unmount the partition first before attempting to format it
-                println!("DEBUG: Unmounting {} before formatting...", current_name);
-                
-                // Try multiple unmount approaches since partition might be mounted multiple times
-                println!("DEBUG: Attempting aggressive unmount sequence...");
-                
-                // 1. Standard unmount (might fail if mounted multiple times)
-                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                
-                // 2. Lazy unmount (detaches immediately)
+                // 1. Unmount aggressively
+                println!("DEBUG: Unmounting partition...");
+                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
                 let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
                 
-                // 3. Force unmount (for busy filesystems)
-                let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
+                // 2. Check for and close LUKS mappers
+                println!("DEBUG: Checking for LUKS holders...");
+                let sys_name = current_name.trim_start_matches("/dev/");
+                let holders_path = format!("/sys/block/{}/holders", sys_name);
                 
-                // 4. Wait and check again
-                std::thread::sleep(std::time::Duration::from_millis(2000));
+                // Try multiple approaches to find and close LUKS holders
+                let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
+                let _ = execute("dmsetup remove_all 2>/dev/null || true");
                 
-                // 5. Check if still mounted and try again if needed
-                match execute(&format!("mount | grep {}", current_name)) {
-                    Ok(mount_output) => {
-                        println!("DEBUG: Partition still mounted after first attempt:");
-                        println!("DEBUG: Mount output: {}", mount_output);
-                        
-                        // Try to find all mount points and unmount them individually
-                        let mount_lines: Vec<&str> = mount_output.lines().collect();
-                        for line in mount_lines {
-                            if line.contains(current_name) {
-                                let parts: Vec<&str> = line.split_whitespace().collect();
-                                if parts.len() >= 3 {
-                                    let mount_point = parts[2];
-                                    println!("DEBUG: Unmounting specific mount point: {}", mount_point);
-                                    let _ = execute(&format!("umount -l {} 2>/dev/null || true", mount_point));
+                // Check holders directory
+                match execute(&format!("ls {}", holders_path)) {
+                    Ok(holders_output) => {
+                        println!("DEBUG: Found holders: {}", holders_output);
+                        if !holders_output.trim().is_empty() {
+                            println!("DEBUG: Closing remaining holders...");
+                            for holder in holders_output.lines() {
+                                let holder_name = holder.trim();
+                                if !holder_name.is_empty() {
+                                    let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", holder_name));
+                                    let _ = execute(&format!("dmsetup remove {} 2>/dev/null || true", holder_name));
                                 }
-                            }
-                        }
-                        
-                        // Final check
-                        std::thread::sleep(std::time::Duration::from_millis(1000));
-                        match execute(&format!("mount | grep {}", current_name)) {
-                            Ok(_) => {
-                                println!("DEBUG: WARNING: Partition still mounted after all unmount attempts!");
-                                // Continue anyway and let mkfs.ext4 fail with clear error
-                            }
-                            Err(_) => {
-                                println!("DEBUG: Partition successfully unmounted after aggressive sequence");
                             }
                         }
                     }
                     Err(_) => {
-                        println!("DEBUG: Partition successfully unmounted");
+                        println!("DEBUG: No holders found or could not check");
                     }
                 }
                 
-                // Final wait before proceeding
-                std::thread::sleep(std::time::Duration::from_millis(1000));
+                // 3. Wait for cleanup
+                std::thread::sleep(std::time::Duration::from_millis(3000));
                 
-                // First, try to wipe the filesystem signature to handle "needs journal recovery" issue
-                println!("DEBUG: Wiping filesystem signature to handle journal recovery...");
-                if let Err(e) = execute(&format!("wipefs -a {}", current_name)) {
-                    println!("DEBUG: wipefs failed: {}, continuing with mkfs.ext4...", e);
+                // 4. Completely wipe all filesystem signatures
+                println!("DEBUG: Wiping all filesystem signatures...");
+                let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
+                
+                // 5. Zero first few MB to ensure clean state
+                println!("DEBUG: Zeroing first 10MB of partition...");
+                match ProcessCommand::new("dd")
+                    .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=10"])
+                    .output()
+                {
+                    Ok(_) => {
+                        println!("DEBUG: Partition zeroed successfully");
+                    }
+                    Err(e) => {
+                        println!("DEBUG: dd failed: {}, continuing...", e);
+                    }
+                }
+                
+                // 6. Sync and wait
+                let _ = execute("sync");
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+                
+                // 7. Final check for any remaining holders
+                match execute(&format!("ls {}", holders_path)) {
+                    Ok(holders_output) => {
+                        if !holders_output.trim().is_empty() {
+                            println!("DEBUG: WARNING: Holders still exist: {}", holders_output);
+                        } else {
+                            println!("DEBUG: No holders found, ready to format");
+                        }
+                    }
+                    Err(_) => {
+                        println!("DEBUG: Holders check failed, proceeding anyway");
+                    }
+                }
+                
+                // 8. Format the clean partition
+                println!("DEBUG: Creating fresh ext4 filesystem on {}...", current_name);
+                
+                let format_result = if let Some(ref label) = partition.label {
+                    execute(&format!("mkfs.ext4 -F -L {} {}", label, current_name))
                 } else {
-                    println!("DEBUG: Filesystem signature wiped successfully");
-                }
+                    execute(&format!("mkfs.ext4 -F {}", current_name))
+                };
                 
-                if let Some(ref label) = partition.label {
-                    // Try mkfs.ext4 directly after wiping
-                    let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
-                    println!("DEBUG: Running command: {}", cmd);
-                    
-                    // Check what processes are using the device
-                    println!("DEBUG: Checking what processes are using {}...", current_name);
-                    match execute(&format!("lsof {}", current_name)) {
-                        Ok(lsof_output) => {
-                            println!("DEBUG: Processes using device:");
-                            println!("{}", lsof_output);
-                        }
-                        Err(_) => {
-                            println!("DEBUG: No processes found using device (lsof failed or none found)");
-                        }
+                match format_result {
+                    Ok(_) => {
+                        println!("DEBUG: Successfully created fresh ext4 filesystem");
+                        verify_filesystem(current_name, "ext4")?;
+                        return Ok(());
                     }
-                    
-                    // Also try fuser as alternative
-                    match execute(&format!("fuser -v {}", current_name)) {
-                        Ok(fuser_output) => {
-                            println!("DEBUG: fuser output:");
-                            println!("{}", fuser_output);
-                        }
-                        Err(_) => {
-                            println!("DEBUG: fuser failed or no users found");
-                        }
-                    }
-                    
-                    // Check device-mapper usage
-                    match execute(&format!("dmsetup info | grep {}", current_name)) {
-                        Ok(dm_output) => {
-                            println!("DEBUG: Device mapper usage:");
-                            println!("{}", dm_output);
-                        }
-                        Err(_) => {
-                            println!("DEBUG: No device mapper usage found");
-                        }
-                    }
-                    
-                    // Final check - if still mounted, try a different approach
-                    let is_mounted = execute(&format!("findmnt -n -o TARGET -S {}", current_name)).is_ok();
-                    if is_mounted {
-                        println!("DEBUG: Partition is still mounted! Trying workaround...");
-                        // Try to format with mkfs.ext4 -F which might work on mounted systems in some cases
-                        // Or we could try to remount as read-only first
-                        let _ = execute(&format!("mount -o remount,ro {} 2>/dev/null || true", current_name));
-                    }
-                    
-                    // Use ProcessCommand to capture stderr properly
-                    match ProcessCommand::new("mkfs.ext4")
-                        .args(&["-L", label, current_name])
-                        .output()
-                    {
-                        Ok(output) => {
-                            if output.status.success() {
-                                println!("DEBUG: mkfs.ext4 succeeded");
-                                // Try to unmount after successful format
-                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                            } else {
-                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                println!("DEBUG: mkfs.ext4 failed with exit code: {:?}", output.status.code());
-                                println!("DEBUG: mkfs.ext4 stderr: {}", stderr);
-                                println!("DEBUG: mkfs.ext4 stdout: {}", stdout);
-                                
-                                // Try with force flag
-                                println!("DEBUG: Trying with force: mkfs.ext4 -F -L {} {}", label, current_name);
-                                match ProcessCommand::new("mkfs.ext4")
-                                    .args(&["-F", "-L", label, current_name])
-                                    .output()
-                                {
-                                    Ok(output2) => {
-                                        if output2.status.success() {
-                                            println!("DEBUG: mkfs.ext4 with -F succeeded");
-                                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                                        } else {
-                                            let stderr2 = String::from_utf8_lossy(&output2.stderr);
-                                            let stdout2 = String::from_utf8_lossy(&output2.stdout);
-                                            println!("DEBUG: Force mkfs.ext4 failed with exit code: {:?}", output2.status.code());
-                                            println!("DEBUG: Force mkfs.ext4 stderr: {}", stderr2);
-                                            println!("DEBUG: Force mkfs.ext4 stdout: {}", stdout2);
-                                            
-                                            // Last resort: zero out the first 1MB of the partition
-                                            println!("DEBUG: Zeroing first 1MB of partition as last resort...");
-                                            match ProcessCommand::new("dd")
-                                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
-                                                .output()
-                                            {
-                                                Ok(_) => {
-                                                    println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
-                                                    match ProcessCommand::new("mkfs.ext4")
-                                                        .args(&["-L", label, current_name])
-                                                        .output()
-                                                    {
-                                                        Ok(output3) => {
-                                                            if output3.status.success() {
-                                                                println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
-                                                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                                                            } else {
-                                                                let stderr3 = String::from_utf8_lossy(&output3.stderr);
-                                                                let stdout3 = String::from_utf8_lossy(&output3.stdout);
-                                                                println!("DEBUG: Final mkfs.ext4 failed with exit code: {:?}", output3.status.code());
-                                                                println!("DEBUG: Final mkfs.ext4 stderr: {}", stderr3);
-                                                                println!("DEBUG: Final mkfs.ext4 stdout: {}", stdout3);
-                                                                bail!("mkfs.ext4 failed after all cleanup attempts");
-                                                            }
-                                                        }
-                                                        Err(e3) => {
-                                                            println!("DEBUG: Final mkfs.ext4 command failed: {:?}", e3);
-                                                            bail!("mkfs.ext4 failed after all cleanup attempts");
-                                                        }
-                                                    }
-                                                }
-                                                Err(e3) => {
-                                                    println!("DEBUG: dd failed: {:?}", e3);
-                                                    bail!("mkfs.ext4 failed after all cleanup attempts");
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(e2) => {
-                                        println!("DEBUG: Force mkfs.ext4 command failed: {:?}", e2);
-                                        bail!("mkfs.ext4 failed after all cleanup attempts");
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("DEBUG: mkfs.ext4 command failed: {:?}", e);
-                            bail!("mkfs.ext4 failed after all cleanup attempts");
-                        }
-                    }
-                } else {
-                    // IMPORTANT: Unmount the partition first before attempting to format it
-                    println!("DEBUG: Unmounting {} before formatting...", current_name);
-                    
-                    // Try multiple unmount approaches since partition might be mounted multiple times
-                    println!("DEBUG: Attempting aggressive unmount sequence...");
-                    
-                    // 1. Standard unmount (might fail if mounted multiple times)
-                    let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                    
-                    // 2. Lazy unmount (detaches immediately)
-                    let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
-                    
-                    // 3. Force unmount (for busy filesystems)
-                    let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
-                    
-                    // 4. Wait and check again
-                    std::thread::sleep(std::time::Duration::from_millis(2000));
-                    
-                    // 5. Check if still mounted and try again if needed
-                    println!("DEBUG: Checking mount status before unmount attempts...");
-                    match execute(&format!("mount | grep {}", current_name)) {
-                        Ok(mount_output) => {
-                            println!("DEBUG: Partition still mounted after first attempt:");
-                            println!("DEBUG: Mount output: {}", mount_output);
-                            
-                            // Try to find all mount points and unmount them individually
-                            let mount_lines: Vec<&str> = mount_output.lines().collect();
-                            for line in mount_lines {
-                                if line.contains(current_name) {
-                                    let parts: Vec<&str> = line.split_whitespace().collect();
-                                    if parts.len() >= 3 {
-                                        let mount_point = parts[2];
-                                        println!("DEBUG: Unmounting specific mount point: {}", mount_point);
-                                        let _ = execute(&format!("umount -l {} 2>/dev/null || true", mount_point));
-                                    }
-                                }
-                            }
-                            
-                            // Final check
-                            std::thread::sleep(std::time::Duration::from_millis(1000));
-                            println!("DEBUG: Final mount check after all unmount attempts:");
-                            match execute(&format!("mount | grep {}", current_name)) {
-                                Ok(final_output) => {
-                                    println!("DEBUG: CRITICAL: Partition still mounted after all unmount attempts!");
-                                    println!("DEBUG: Final mount output: {}", final_output);
-                                    
-                                    // Try one more approach - use findmnt for better detection
-                                    println!("DEBUG: Trying findmnt for better detection...");
-                                    match execute(&format!("findmnt -n -o TARGET -S {}", current_name)) {
-                                        Ok(findmnt_output) => {
-                                            println!("DEBUG: findmnt shows mount points: {}", findmnt_output);
-                                            let mount_points: Vec<&str> = findmnt_output.lines().collect();
-                                            for mount_point in mount_points {
-                                                if !mount_point.trim().is_empty() {
-                                                    println!("DEBUG: Final attempt to unmount: {}", mount_point);
-                                                    let _ = execute(&format!("umount -lf {} 2>/dev/null || true", mount_point));
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            println!("DEBUG: findmnt failed: {}", e);
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    println!("DEBUG: Partition successfully unmounted after aggressive sequence");
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("DEBUG: Partition successfully unmounted (grep failed: {})", e);
-                        }
-                    }
-                    
-                    // Final verification right before mkfs.ext4
-                    println!("DEBUG: FINAL VERIFICATION - checking mount status right before mkfs.ext4...");
-                    match execute(&format!("findmnt -n -o TARGET -S {}", current_name)) {
-                        Ok(output) => {
-                            println!("DEBUG: CRITICAL ERROR: Partition is STILL mounted! Mount points: {}", output);
-                            println!("DEBUG: This will cause mkfs.ext4 to fail!");
-                        }
-                        Err(_) => {
-                            println!("DEBUG: GOOD: findmnt shows partition is not mounted");
-                        }
-                    }
-                    
-                    // Final wait before proceeding
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
-                    
-                    // Check what processes are using the device
-                    println!("DEBUG: Checking what processes are using {}...", current_name);
-                    match execute(&format!("lsof {}", current_name)) {
-                        Ok(lsof_output) => {
-                            println!("DEBUG: Processes using device:");
-                            println!("{}", lsof_output);
-                        }
-                        Err(_) => {
-                            println!("DEBUG: No processes found using device (lsof failed or none found)");
-                        }
-                    }
-                    
-                    // Also try fuser as alternative
-                    match execute(&format!("fuser -v {}", current_name)) {
-                        Ok(fuser_output) => {
-                            println!("DEBUG: fuser output:");
-                            println!("{}", fuser_output);
-                        }
-                        Err(_) => {
-                            println!("DEBUG: fuser failed or no users found");
-                        }
-                    }
-                    
-                    // Check device-mapper usage
-                    match execute(&format!("dmsetup info | grep {}", current_name)) {
-                        Ok(dm_output) => {
-                            println!("DEBUG: Device mapper usage:");
-                            println!("{}", dm_output);
-                        }
-                        Err(_) => {
-                            println!("DEBUG: No device mapper usage found");
-                        }
-                    }
-                    
-                    // Try mkfs.ext4 directly after wiping
-                    println!("DEBUG: Running command: mkfs.ext4 {}", current_name);
-                    
-                    match ProcessCommand::new("mkfs.ext4")
-                        .args(&[current_name])
-                        .output()
-                    {
-                        Ok(output) => {
-                            if output.status.success() {
-                                println!("DEBUG: mkfs.ext4 succeeded");
-                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                            } else {
-                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                println!("DEBUG: mkfs.ext4 failed with exit code: {:?}", output.status.code());
-                                println!("DEBUG: mkfs.ext4 stderr: {}", stderr);
-                                println!("DEBUG: mkfs.ext4 stdout: {}", stdout);
-                                
-                                // Try with force flag
-                                println!("DEBUG: Trying with force: mkfs.ext4 -F {}", current_name);
-                                match ProcessCommand::new("mkfs.ext4")
-                                    .args(&["-F", current_name])
-                                    .output()
-                                {
-                                    Ok(output2) => {
-                                        if output2.status.success() {
-                                            println!("DEBUG: Force mkfs.ext4 succeeded");
-                                            let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                                        } else {
-                                            let stderr2 = String::from_utf8_lossy(&output2.stderr);
-                                            let stdout2 = String::from_utf8_lossy(&output2.stdout);
-                                            println!("DEBUG: Force mkfs.ext4 failed with exit code: {:?}", output2.status.code());
-                                            println!("DEBUG: Force mkfs.ext4 stderr: {}", stderr2);
-                                            println!("DEBUG: Force mkfs.ext4 stdout: {}", stdout2);
-                                            
-                                            // Last resort: zero out the first 1MB of the partition
-                                            println!("DEBUG: Zeroing first 1MB of partition as last resort...");
-                                            match ProcessCommand::new("dd")
-                                                .args(&["if=/dev/zero", &format!("of={}", current_name), "bs=1M", "count=1"])
-                                                .output()
-                                            {
-                                                Ok(_) => {
-                                                    println!("DEBUG: Partition zeroed, trying mkfs.ext4 one more time...");
-                                                    match ProcessCommand::new("mkfs.ext4")
-                                                        .args(&[current_name])
-                                                        .output()
-                                                    {
-                                                        Ok(output3) => {
-                                                            if output3.status.success() {
-                                                                println!("DEBUG: Final mkfs.ext4 succeeded after zeroing");
-                                                                let _ = execute(&format!("umount {} 2>/dev/null || true", current_name));
-                                                            } else {
-                                                                let stderr3 = String::from_utf8_lossy(&output3.stderr);
-                                                                let stdout3 = String::from_utf8_lossy(&output3.stdout);
-                                                                println!("DEBUG: Final mkfs.ext4 failed with exit code: {:?}", output3.status.code());
-                                                                println!("DEBUG: Final mkfs.ext4 stderr: {}", stderr3);
-                                                                println!("DEBUG: Final mkfs.ext4 stdout: {}", stdout3);
-                                                                bail!("mkfs.ext4 failed after all cleanup attempts");
-                                                            }
-                                                        }
-                                                        Err(e3) => {
-                                                            println!("DEBUG: Final mkfs.ext4 command failed: {:?}", e3);
-                                                            bail!("mkfs.ext4 failed after all cleanup attempts");
-                                                        }
-                                                    }
-                                                }
-                                                Err(e3) => {
-                                                    println!("DEBUG: dd failed: {:?}", e3);
-                                                    bail!("mkfs.ext4 failed after all cleanup attempts");
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(e2) => {
-                                        println!("DEBUG: Force mkfs.ext4 command failed: {:?}", e2);
-                                        bail!("mkfs.ext4 failed after all cleanup attempts");
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("DEBUG: mkfs.ext4 command failed: {:?}", e);
-                             // FINAL WORKAROUND: Accept existing filesystem if it's ext4
-                             println!("DEBUG: All formatting failed, checking existing filesystem...");
-                             match execute(&format!("blkid -o value -s TYPE {}", current_name)) {
-                                 Ok(fs_output) => {
-                                     let fs_type = fs_output.trim();
-                                     if fs_type == "ext4" {
-                                         println!("DEBUG: Existing filesystem is ext4, accepting it...");
-                                         
-                                         // Run fsck to ensure it's clean
-                                         match execute(&format!("fsck.ext4 -fy {}", current_name)) {
-                                             Ok(_) => {
-                                                 println!("DEBUG: fsck completed, existing filesystem is usable");
-                                                 
-                                                 // Set correct label if needed
-                                                 if let Some(ref label) = partition.label {
-                                                     match execute(&format!("e2label {} {}", current_name, label)) {
-                                                         Ok(_) => {
-                                                             println!("DEBUG: Successfully set label to '{}', using existing filesystem", label);
-                                                             return Ok(());
-                                                         }
-                                                         Err(e) => {
-                                                             println!("DEBUG: Failed to set label: {}, but continuing", e);
-                                                         }
-                                                     }
-                                                 }
-                                                 return Ok(());
-                                             }
-                                             Err(e) => {
-                                                 println!("DEBUG: fsck failed: {}, but trying anyway", e);
-                                             }
-                                         }
-                                     } else {
-                                         println!("DEBUG: Existing filesystem is not ext4: {}", fs_type);
-                                     }
-                                 }
-                                 Err(e) => {
-                                     println!("DEBUG: Could not check existing filesystem: {}", e);
-                                 }
-                             }
-                             
-                             bail!("mkfs.ext4 failed after all cleanup attempts");
-                        }
+                    Err(e) => {
+                        bail!("Failed to create ext4 filesystem on {}: {}", current_name, e);
                     }
                 }
+
                 verify_filesystem(current_name, "ext4")?;
             }
             "btrfs" => {
