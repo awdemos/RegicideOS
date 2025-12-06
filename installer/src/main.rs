@@ -934,9 +934,9 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             "luks" => {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
-                // Use execute() for interactive password input
+                // Use execute_safe_command for interactive password input
                 println!("DEBUG: Starting LUKS format for {}", current_name);
-                match execute(&format!("cryptsetup luksFormat {}", current_name)) {
+                match execute_safe_command("cryptsetup", &["luksFormat", current_name]) {
                     Ok(_) => {
                         println!("DEBUG: LUKS format successful for {}", current_name);
                     }
