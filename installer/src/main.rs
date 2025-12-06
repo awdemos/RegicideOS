@@ -737,6 +737,11 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     }
 
     command += "\nEOF";
+    
+    // Debug: print the command to see what we're actually executing
+    println!("DEBUG: Full sfdisk command:\n---\n{}\n---", command);
+    println!("DEBUG: Command length: {}", command.len());
+    
     execute(&command)?;
     
     // Wait for partitioning to complete and inform the kernel
