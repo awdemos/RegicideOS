@@ -181,8 +181,18 @@ fn execute(command: &str) -> Result<String> {
             execute_safe_command(program, args)
         }
         
+        // EFI bootloader tools
+        "efibootmgr" | "efivar" => {
+            execute_safe_command(program, args)
+        }
+        
         // Service management (chroot only)
         "rc-update" | "rc-service" => {
+            execute_safe_command(program, args)
+        }
+        
+        // Chroot for bootloader installation and system setup
+        "chroot" => {
             execute_safe_command(program, args)
         }
         
@@ -1326,10 +1336,13 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     };
 
     if platform.contains("efi") {
-        chroot(&format!(
-            "{}-install --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\"",
+        // Install GRUB for EFI systems targeting the mounted root
+        execute(&format!(
+            "{}-install --force --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\"",
             grub, platform
         ))?;
+        
+        // Generate GRUB config using the chroot environment
         chroot(&format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub))?;
     } else {
         chroot(&format!(
