@@ -1251,22 +1251,37 @@ fn post_install(config: &Config) -> Result<()> {
 
 // Input validation functions
 fn validate_device_path(path: &str) -> Result<()> {
-    // Only allow /dev/ paths with safe characters
-    let device_regex = regex::Regex::new(r"^/dev/[a-zA-Z0-9/_-]+$")?;
+    // Allow common block device patterns: /dev/sd*, /dev/nvme*, /dev/hd*, /dev/vd*, /dev/mmcblk*
+    let device_regex = regex::Regex::new(r"^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|hd[a-z]+|vd[a-z]+|mmcblk[0-9]+)(p[0-9]+)?$")?;
     if !device_regex.is_match(path) {
         bail!("Invalid device path");
     }
     
-    // Prevent dangerous device paths
-    let dangerous_paths = [
+    // Prevent dangerous device paths (but allow legitimate block devices)
+    let dangerous_exact = [
         "/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom",
-        "/dev/mem", "/dev/kmem", "/dev/port", "/dev/sda", "/dev/hda",
+        "/dev/mem", "/dev/kmem", "/dev/port", "/dev/console", "/dev/initctl",
     ];
     
-    for dangerous in &dangerous_paths {
-        if path.starts_with(dangerous) && path.to_string() != *dangerous {
+    let dangerous_prefixes = [
+        "/dev/shm/", "/dev/pts/", "/dev/mqueue/", "/dev/hugepages/",
+    ];
+    
+    // Block exact matches to dangerous devices
+    if dangerous_exact.contains(&path) {
+        bail!("Device access denied");
+    }
+    
+    // Block dangerous prefixes
+    for dangerous in &dangerous_prefixes {
+        if path.starts_with(dangerous) {
             bail!("Device access denied");
         }
+    }
+    
+    // Allow whole disk devices but warn about partitions for user selection
+    if path.contains("p") && path.chars().last().unwrap_or('a').is_ascii_digit() {
+        // This is a partition, not a whole disk - still allow but could warn
     }
     
     Ok(())
