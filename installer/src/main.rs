@@ -992,6 +992,15 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     let cmd = format!("mkfs.ext4 -L {} {}", label, current_name);
                     println!("DEBUG: Running command: {}", cmd);
                     
+                    // Final check - if still mounted, try a different approach
+                    let is_mounted = execute(&format!("findmnt -n -o TARGET -S {}", current_name)).is_ok();
+                    if is_mounted {
+                        println!("DEBUG: Partition is still mounted! Trying workaround...");
+                        // Try to format with mkfs.ext4 -F which might work on mounted systems in some cases
+                        // Or we could try to remount as read-only first
+                        let _ = execute(&format!("mount -o remount,ro {} 2>/dev/null || true", current_name));
+                    }
+                    
                     // Use ProcessCommand to capture stderr properly
                     match ProcessCommand::new("mkfs.ext4")
                         .args(&["-L", label, current_name])
@@ -1096,6 +1105,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     std::thread::sleep(std::time::Duration::from_millis(2000));
                     
                     // 5. Check if still mounted and try again if needed
+                    println!("DEBUG: Checking mount status before unmount attempts...");
                     match execute(&format!("mount | grep {}", current_name)) {
                         Ok(mount_output) => {
                             println!("DEBUG: Partition still mounted after first attempt:");
@@ -1116,18 +1126,49 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                             
                             // Final check
                             std::thread::sleep(std::time::Duration::from_millis(1000));
+                            println!("DEBUG: Final mount check after all unmount attempts:");
                             match execute(&format!("mount | grep {}", current_name)) {
-                                Ok(_) => {
-                                    println!("DEBUG: WARNING: Partition still mounted after all unmount attempts!");
-                                    // Continue anyway and let mkfs.ext4 fail with clear error
+                                Ok(final_output) => {
+                                    println!("DEBUG: CRITICAL: Partition still mounted after all unmount attempts!");
+                                    println!("DEBUG: Final mount output: {}", final_output);
+                                    
+                                    // Try one more approach - use findmnt for better detection
+                                    println!("DEBUG: Trying findmnt for better detection...");
+                                    match execute(&format!("findmnt -n -o TARGET -S {}", current_name)) {
+                                        Ok(findmnt_output) => {
+                                            println!("DEBUG: findmnt shows mount points: {}", findmnt_output);
+                                            let mount_points: Vec<&str> = findmnt_output.lines().collect();
+                                            for mount_point in mount_points {
+                                                if !mount_point.trim().is_empty() {
+                                                    println!("DEBUG: Final attempt to unmount: {}", mount_point);
+                                                    let _ = execute(&format!("umount -lf {} 2>/dev/null || true", mount_point));
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("DEBUG: findmnt failed: {}", e);
+                                        }
+                                    }
                                 }
                                 Err(_) => {
                                     println!("DEBUG: Partition successfully unmounted after aggressive sequence");
                                 }
                             }
                         }
+                        Err(e) => {
+                            println!("DEBUG: Partition successfully unmounted (grep failed: {})", e);
+                        }
+                    }
+                    
+                    // Final verification right before mkfs.ext4
+                    println!("DEBUG: FINAL VERIFICATION - checking mount status right before mkfs.ext4...");
+                    match execute(&format!("findmnt -n -o TARGET -S {}", current_name)) {
+                        Ok(output) => {
+                            println!("DEBUG: CRITICAL ERROR: Partition is STILL mounted! Mount points: {}", output);
+                            println!("DEBUG: This will cause mkfs.ext4 to fail!");
+                        }
                         Err(_) => {
-                            println!("DEBUG: Partition successfully unmounted");
+                            println!("DEBUG: GOOD: findmnt shows partition is not mounted");
                         }
                     }
                     
