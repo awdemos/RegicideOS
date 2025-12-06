@@ -629,6 +629,9 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
             }
         }
         
+        println!("DEBUG: Partition detection - expected: {}, found: {}, partitions: {:?}", 
+                 expected_count, partition_names.len(), partition_names);
+        
         if partition_names.len() == expected_count {
             info(&format!("Found {} partitions", expected_count));
             return Ok(partition_names);
@@ -932,12 +935,25 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
                 
                 // Use ProcessCommand for interactive password input
+                println!("DEBUG: Starting LUKS format for {}", current_name);
                 let format_result = ProcessCommand::new("cryptsetup")
                     .args(["-q", "luksFormat", current_name])
-                    .status();
+                    .output();
                     
-                if !format_result.map(|s| s.success()).unwrap_or(false) {
-                    bail!("Failed to format LUKS partition");
+                match format_result {
+                    Ok(output) => {
+                        if !output.status.success() {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            bail!("Failed to format LUKS partition: {}\nSTDOUT: {}\nSTDERR: {}", 
+                                  output.status, stdout, stderr);
+                        } else {
+                            println!("DEBUG: LUKS format successful for {}", current_name);
+                        }
+                    }
+                    Err(e) => {
+                        bail!("Failed to execute cryptsetup: {}", e);
+                    }
                 }
                 
                 let luks_device = if let Some(ref label) = partition.label {
@@ -954,15 +970,20 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         bail!("Failed to open LUKS partition with label '{}'", label);
                     }
                     
+                    println!("DEBUG: LUKS open command completed, checking for mapper device");
+                    
                     // Verify the device was created with timeout
                     let mut attempts = 0;
                     while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
+                        println!("DEBUG: Waiting for /dev/mapper/regicideos (attempt {})", attempts + 1);
                         std::thread::sleep(std::time::Duration::from_millis(500));
                         attempts += 1;
                     }
                     
                     if !Path::new("/dev/mapper/regicideos").exists() {
                         bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
+                    } else {
+                        println!("DEBUG: LUKS mapper device created successfully");
                     }
                     
                     "/dev/mapper/regicideos".to_string()
