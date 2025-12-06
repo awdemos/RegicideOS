@@ -934,6 +934,10 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("DEBUG: Wiping all filesystem signatures...");
                 let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
                 
+                // 4.5. Additional cleanup - remove from device mapper
+                println!("DEBUG: Removing from device mapper...");
+                let _ = execute(&format!("dmsetup remove_if_missing {} 2>/dev/null || true", current_name));
+                
                 // 5. Zero first few MB to ensure clean state
                 println!("DEBUG: Zeroing first 10MB of partition...");
                 match ProcessCommand::new("dd")
@@ -948,9 +952,14 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
                 
-                // 6. Sync and wait
+                // 5.5. Reread partition table to refresh kernel state
+                println!("DEBUG: Rereading partition table...");
+                let _ = execute("partprobe 2>/dev/null || true");
+                let _ = execute("blockdev --rereadpt /dev/nvme0n1 2>/dev/null || true");
+                
+                // 6. Sync and wait longer for kernel to settle
                 let _ = execute("sync");
-                std::thread::sleep(std::time::Duration::from_millis(2000));
+                std::thread::sleep(std::time::Duration::from_millis(5000));
                 
                 // 7. Final check for any remaining holders
                 match execute(&format!("ls {}", holders_path)) {
@@ -966,23 +975,52 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
                 
+                // 7.5. Check device state before formatting
+                println!("DEBUG: Checking device state before formatting...");
+                match execute(&format!("lsblk {}", current_name)) {
+                    Ok(output) => println!("DEBUG: lsblk output: {}", output),
+                    Err(e) => println!("DEBUG: lsblk failed: {}", e),
+                }
+                match execute(&format!("file -s {}", current_name)) {
+                    Ok(output) => println!("DEBUG: file output: {}", output),
+                    Err(e) => println!("DEBUG: file failed: {}", e),
+                }
+                match execute(&format!("blkid {}", current_name)) {
+                    Ok(output) => println!("DEBUG: blkid output: {}", output),
+                    Err(e) => println!("DEBUG: blkid failed: {}", e),
+                }
+                
                 // 8. Format the clean partition
                 println!("DEBUG: Creating fresh ext4 filesystem on {}...", current_name);
                 
+                // Use ProcessCommand to capture stderr for better error reporting
                 let format_result = if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.ext4 -F -L {} {}", label, current_name))
+                    ProcessCommand::new("mkfs.ext4")
+                        .args(&["-F", "-L", label, current_name])
+                        .output()
                 } else {
-                    execute(&format!("mkfs.ext4 -F {}", current_name))
+                    ProcessCommand::new("mkfs.ext4")
+                        .args(&["-F", current_name])
+                        .output()
                 };
                 
                 match format_result {
-                    Ok(_) => {
-                        println!("DEBUG: Successfully created fresh ext4 filesystem");
-                        verify_filesystem(current_name, "ext4")?;
-                        return Ok(());
+                    Ok(output) => {
+                        if output.status.success() {
+                            println!("DEBUG: Successfully created fresh ext4 filesystem");
+                            verify_filesystem(current_name, "ext4")?;
+                            return Ok(());
+                        } else {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            println!("DEBUG: mkfs.ext4 failed with exit code: {:?}", output.status.code());
+                            println!("DEBUG: mkfs.ext4 stderr: {}", stderr);
+                            println!("DEBUG: mkfs.ext4 stdout: {}", stdout);
+                            bail!("Failed to create ext4 filesystem on {}: {}", current_name, stderr.trim());
+                        }
                     }
                     Err(e) => {
-                        bail!("Failed to create ext4 filesystem on {}: {}", current_name, e);
+                        bail!("Failed to execute mkfs.ext4 on {}: {}", current_name, e);
                     }
                 }
             }
