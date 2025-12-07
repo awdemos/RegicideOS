@@ -1594,7 +1594,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         );
         chroot(&grub_install_cmd)?;
         
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{grub}/grub.cfg", grub);
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
         chroot(&grub_mkconfig_cmd)?;
     }
     
