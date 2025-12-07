@@ -1681,9 +1681,9 @@ fn mount() -> Result<()> {
     execute("mount --bind /run /mnt/root/run")?;
     execute("mount --make-slave /mnt/root/run")?;
 
-    // Ensure proper boot directory structure for GRUB on actual boot partition
+    // Ensure proper boot directory structure for GRUB on writable EFI partition
     info("Creating boot directory structure for GRUB");
-    safe_create_dir_all("/mnt/root/boot/grub", "/mnt/root/boot")?;
+    safe_create_dir_all("/mnt/root/boot/efi/grub", "/mnt/root/boot/efi")?;
     
     // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
     // This fixes grub2-mkconfig calling grub2-probe from wrong location
@@ -2057,7 +2057,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         verify_grub_environment()?;
 
         // Run GRUB mkconfig to generate configuration
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         
         chroot(&grub_mkconfig_cmd)?;
@@ -2078,7 +2078,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         verify_grub_environment()?;
 
         // Run GRUB mkconfig to generate configuration
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         
         chroot(&grub_mkconfig_cmd)?;
