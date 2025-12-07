@@ -90,6 +90,21 @@ fn print_banner() {
     println!("{}", Colours::ENDC);
 }
 
+// Execute commands with error output
+fn execute_with_output(command: &str) -> Result<String> {
+    let output = ProcessCommand::new("sh")
+        .args(&["-c", &format!("{} 2>&1", command)])
+        .output()
+        .with_context(|| format!("Failed to execute command: {}", command))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Command failed: {}\nError: {}", command, stderr);
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 // Safe command execution with strict allowlist
 fn execute(command: &str) -> Result<String> {
     // Check for heredoc patterns that need special handling
@@ -1088,15 +1103,14 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
-                println!("DEBUG: Entering ext4 case for partition {}", current_name);
-                info(&format!("Formatting {} as ext4", current_name));
-                
-                // Use a simpler approach for ext4 formatting
-                if let Some(ref label) = partition.label {
-                    execute(&format!("mkfs.ext4 -F -L {} {}", label, current_name))?;
+                let cmd = if let Some(ref label) = partition.label {
+                    format!("mkfs.ext4 -F -L {} {}", label, current_name)
                 } else {
-                    execute(&format!("mkfs.ext4 -F {}", current_name))?;
-                }
+                    format!("mkfs.ext4 -F {}", current_name)
+                };
+                
+                // Execute with full error output
+                execute_with_output(&cmd)?;
                 
                 // Verify filesystem
                 verify_filesystem(current_name, "ext4")?;
