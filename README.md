@@ -113,6 +113,10 @@ Motivational slogan:
 - UEFI or Legacy BIOS firmware
 - Internet connection
 
+### Installation Configuration
+
+The installer defaults to minimal packages only (no recommended packages) and BTRFS filesystem. Common configurations:
+
 ### Installation Steps
 
 **Step 1: Boot Live Environment**
@@ -146,13 +150,7 @@ If you need to build from source or use a custom configuration:
 ```bash
 # Install required packages in live environment
 # For Fedora:
-sudo dnf install git curl gcc btrfs-progs
-
-# For Ubuntu/Debian:
-sudo apt update && sudo apt install git curl gcc btrfs-progs
-
-# For Arch:
-sudo pacman -S git curl gcc btrfs-progs
+sudo dnf install git curl gcc btrfs-progs sgdisk
 
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -165,9 +163,13 @@ cargo build --release
 sudo ./target/release/installer
 ```
 
-### Installation Configuration
+```
+# For Ubuntu/Debian:
+sudo apt update && sudo apt install git curl gcc btrfs-progs
 
-The installer defaults to minimal packages only (no recommended packages) and BTRFS filesystem. Common configurations:
+# For Arch:
+sudo pacman -S git curl gcc btrfs-progs
+```
 
 #### Interactive Mode (Default)
 ```bash
