@@ -1310,8 +1310,20 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 }
 
 fn chroot(command: &str) -> Result<()> {
-    let full_command = format!("chroot /mnt/root /bin/bash <<'EOT'\n{}\nEOT", command);
-    execute(&full_command)?;
+    // Use ProcessCommand directly for chroot to avoid shell heredoc issues
+    let args = vec!["/mnt/root", "/bin/bash", "-c", command];
+    
+    let output = ProcessCommand::new("chroot")
+        .args(&args)
+        .output()
+        .with_context(|| format!("Failed to execute chroot command: {}", command))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Chroot command failed: {}\nError: {}", command, stderr);
+    }
+
+    info(&format!("Successfully executed chroot command: {}", command));
     Ok(())
 }
 
