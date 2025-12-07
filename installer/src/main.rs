@@ -737,53 +737,38 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     // Step 1: Aggressive cleanup to ensure device is completely free
     info("Performing aggressive cleanup to ensure device is free...");
     
-    // 1.1: Close any LUKS containers and device-mapper tables FIRST
-    info("Closing any active LUKS containers...");
+    // Close LUKS containers and device-mapper tables
     let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
     let _ = execute("dmsetup remove_all 2>/dev/null || true");
-    
-    // 1.2: Unmount any existing partitions
-    info("Unmounting any existing partitions...");
+
+    // Unmount any existing partitions
     let base_drive = drive.trim_end_matches('/');
-    let partitions_to_try = [
-        format!("{}1", base_drive),
-        format!("{}2", base_drive), 
-        format!("{}3", base_drive),
-        format!("{}4", base_drive),
-        format!("{}p1", base_drive),
-        format!("{}p2", base_drive),
-        format!("{}p3", base_drive),
-        format!("{}p4", base_drive),
-    ];
-    
-    for partition in &partitions_to_try {
-        let _ = execute(&format!("umount -f {} 2>/dev/null || true", partition));
-        let _ = execute(&format!("umount -l {} 2>/dev/null || true", partition));
+    for i in 1..=4 {
+        let part = if drive.contains("nvme") {
+            format!("{}p{}", base_drive, i)
+        } else {
+            format!("{}{}", base_drive, i)
+        };
+        let _ = execute(&format!("umount -f {} 2>/dev/null || true", part));
+        let _ = execute(&format!("umount -l {} 2>/dev/null || true", part));
     }
-    
-    // 1.3: For NVMe drives, try a hardware reset if available
+
+    // For NVMe drives, try a hardware reset if available
     if drive.contains("nvme") && execute("which nvme").is_ok() {
         info("Attempting NVMe hardware reset...");
         let _ = execute(&format!("nvme reset {} 2>/dev/null || true", drive));
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
     
-    // 1.4: Force kernel to reread partition table
-    info("Forcing kernel to reread partition table...");
-    let _ = execute(&format!("partprobe {} 2>/dev/null || true", drive));
+    // Force kernel to reread partition table and wipe it
+    info("Forcing kernel to reread partition table and wiping disk...");
     let _ = execute(&format!("sgdisk --zap-all {} 2>/dev/null || true", drive));
-    
-    // 1.5: Wait for the kernel to settle
-    std::thread::sleep(std::time::Duration::from_secs(5));
-    
-    // Step 2: Clean existing partition table (now this should work)
-    info("Cleaning existing partition table");
     let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", drive));
     
-    // Step 3: Verify partitions are actually deleted
-    verify_partitions_deleted(drive)?;
+    // Wait for the kernel to settle
+    std::thread::sleep(std::time::Duration::from_secs(5));
     
-    // Step 4: Create new partition table
+    // Step 2: Create new partition table
     info("Creating new partition table");
     if execute("which sgdisk").is_ok() {
         execute(&format!("sgdisk --clear {}", drive))?;
@@ -822,11 +807,11 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
         bail!("sgdisk not available");
     }
     
-    // Step 5: Wait for partitions to be recognized
+    // Step 3: Wait for partitions to be recognized
     info("Waiting for partitions to be recognized");
     let partition_names = wait_for_partitions(drive, layout.len())?;
     
-    // Step 6: Show what partitions were created
+    // Step 4: Show what partitions were created
     info("Verifying new partitions were created");
     println!("SUCCESS: Created {} partitions:", partition_names.len());
     for (i, partition) in partition_names.iter().enumerate() {
@@ -948,47 +933,7 @@ fn verify_filesystem(partition: &str, fs_type: &str) -> Result<()> {
 
 
 
-fn verify_partitions_deleted(drive: &str) -> Result<()> {
-    info("Verifying partitions are deleted after cleanup");
-    
-    let base_drive = drive.trim_end_matches('/');
-    let partitions_to_check = [
-        format!("{}1", base_drive),
-        format!("{}2", base_drive), 
-        format!("{}3", base_drive),
-        format!("{}4", base_drive),
-        format!("{}p1", base_drive),
-        format!("{}p2", base_drive),
-        format!("{}p3", base_drive),
-        format!("{}p4", base_drive),
-    ];
-    
-    let mut found_partitions = Vec::new();
-    
-    for partition in &partitions_to_check {
-        if Path::new(partition).exists() {
-            // Check if it's actually a block device
-            if let Ok(output) = execute(&format!("lsblk -n -o NAME,SIZE {}", partition)) {
-                if !output.trim().is_empty() {
-                    found_partitions.push(format!("{} ({})", partition, output.trim()));
-                }
-            }
-        }
-    }
-    
-    if found_partitions.is_empty() {
-        info("✓ All partitions successfully deleted");
-        println!("SUCCESS: No partitions found on {}", drive);
-    } else {
-        println!("⚠ Partitions still exist after cleanup:");
-        for partition in &found_partitions {
-            println!("  REMAINING: {}", partition);
-        }
-        println!("INFO: This may be normal if the system hasn't updated yet");
-    }
-    
-    Ok(())
-}
+
 
 // Add this function to check if a partition is actually in use
 fn is_partition_in_use(partition: &str) -> bool {
@@ -1579,8 +1524,9 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
     if platform.contains("efi") {
         // Install GRUB for EFI systems - run INSIDE chroot for correct path resolution
+        // The --force flag is needed for some EFI systems that complain about Secure Boot
         let grub_install_cmd = format!(
-            "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --bootloader-id=RegicideOS --recheck",
+            "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --bootloader-id=RegicideOS --recheck --force",
             grub, platform
         );
         match chroot(&grub_install_cmd) {
@@ -1588,7 +1534,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             Err(_e) => {
                 // Try alternative approach with --removable flag
                 let alt_cmd = format!(
-                    "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --removable --recheck",
+                    "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --removable --recheck --force",
                     grub, platform
                 );
                 chroot(&alt_cmd)?;
