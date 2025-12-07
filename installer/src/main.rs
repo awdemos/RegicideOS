@@ -13,7 +13,9 @@ use tokio;
 use toml;
 
 // Import from lib module
-use installer::{Config, Partition, check_username, is_efi, get_fs, get_package_sets, get_flatpak_packages};
+use installer::{
+    check_username, get_flatpak_packages, get_fs, get_package_sets, is_efi, Config, Partition,
+};
 
 struct Colours;
 
@@ -27,7 +29,13 @@ impl Colours {
 fn die(message: &str) -> ! {
     // Sanitize error message to prevent information disclosure
     let sanitized = sanitize_error_message(message);
-    eprintln!("{}{}{} {}", Colours::RED, "[ERROR]", Colours::ENDC, sanitized);
+    eprintln!(
+        "{}{}{} {}",
+        Colours::RED,
+        "[ERROR]",
+        Colours::ENDC,
+        sanitized
+    );
     std::process::exit(1);
 }
 
@@ -35,33 +43,33 @@ fn die(message: &str) -> ! {
 fn sanitize_error_message(message: &str) -> String {
     // Remove potentially sensitive information
     let sensitive_patterns = [
-        r"/home/[^/\s]+",           // Home directory paths
-        r"/root/[^/\s]+",           // Root directory paths  
-        r"/tmp/[^/\s]+",            // Temp file paths
+        r"/home/[^/\s]+",             // Home directory paths
+        r"/root/[^/\s]+",             // Root directory paths
+        r"/tmp/[^/\s]+",              // Temp file paths
         r"password[^=\s]*=\s*[^\s]+", // Passwords in error messages
         r"token[^=\s]*=\s*[^\s]+",    // Tokens in error messages
         r"key[^=\s]*=\s*[^\s]+",      // Keys in error messages
-        r"secret[^=\s]*=\s*[^\s]+",    // Secrets in error messages
+        r"secret[^=\s]*=\s*[^\s]+",   // Secrets in error messages
     ];
-    
+
     let mut sanitized = message.to_string();
-    
+
     for pattern in &sensitive_patterns {
         if let Ok(regex) = regex::Regex::new(pattern) {
             sanitized = regex.replace_all(&sanitized, "[REDACTED]").to_string();
         }
     }
-    
+
     // Remove full paths, keep only filenames
     let path_regex = regex::Regex::new(r"/([^/\s]+/)+([^/\s]+)").unwrap();
     sanitized = path_regex.replace_all(&sanitized, "[PATH]/$2").to_string();
-    
+
     // Limit error message length to prevent log flooding
     if sanitized.len() > 200 {
         sanitized.truncate(197);
         sanitized.push_str("...");
     }
-    
+
     sanitized
 }
 
@@ -71,22 +79,30 @@ fn info(message: &str) {
 
 fn warn(message: &str) {
     let sanitized = sanitize_error_message(message);
-    println!("{}{}{} {}", Colours::YELLOW, "[WARN]", Colours::ENDC, sanitized);
+    println!(
+        "{}{}{} {}",
+        Colours::YELLOW,
+        "[WARN]",
+        Colours::ENDC,
+        sanitized
+    );
 }
 
 fn print_banner() {
     println!("{}", Colours::BLUE);
-    println!(r#"
+    println!(
+        r#"
     ██████╗ ███████╗ ██████╗ ██╗ ██████╗██╗██████╗ ███████╗ ██████╗ ███████╗
     ██╔══██╗██╔════╝██╔════╝ ██║██╔════╝██║██╔══██╗██╔════╝██╔═══██╗██╔════╝
     ██████╔╝█████╗  ██║  ███╗██║██║     ██║██║  ██║█████╗  ██║   ██║███████╗
     ██╔══██╗██╔══╝  ██║   ██║██║██║     ██║██║  ██║██╔══╝  ██║   ██║╚════██║
     ██║  ██║███████╗╚██████╔╝██║╚██████╗██║██████╔╝███████╗╚██████╔╝███████║
     ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝ ╚═════╝╚═╝╚═════╝ ╚══════╝ ╚═════╝ ╚══════╝
-                                                                              
+
               🏰 A Rust-first, AI-powered Linux Distribution 🚀
                         Cosmic Desktop • BTRFS • Gentoo Base
-    "#);
+    "#
+    );
     println!("{}", Colours::ENDC);
 }
 
@@ -112,27 +128,30 @@ fn execute(command: &str) -> Result<String> {
         // For heredoc commands, route through shell execution to preserve newlines
         return execute_safe_shell_command(command.trim());
     }
-    
+
     // Parse command into program and arguments
     let parts: Vec<&str> = command.trim().split_whitespace().collect();
     if parts.is_empty() {
         bail!("Empty command");
     }
-    
+
     let program = parts[0];
     let args = &parts[1..];
-    
+
     // Allowlist of safe commands with their expected argument patterns
     match program {
         // Block device commands
         "lsblk" | "blkid" | "partprobe" | "sfdisk" | "sgdisk" | "blockdev" | "hdparm" => {
             execute_safe_command(program, args)
         }
-        
+
         // Cat command (only for heredoc usage with sfdisk)
         "cat" => {
             // Only allow cat with heredoc and sfdisk - must use shell for pipe
-            if args.len() >= 3 && args.contains(&"<<EOF") && args.iter().any(|&arg| arg.contains("sfdisk")) {
+            if args.len() >= 3
+                && args.contains(&"<<EOF")
+                && args.iter().any(|&arg| arg.contains("sfdisk"))
+            {
                 // Reconstruct the full command and execute through shell
                 let full_command = format!("{} {}", program, args.join(" "));
                 execute_safe_shell_command(&full_command)
@@ -140,27 +159,22 @@ fn execute(command: &str) -> Result<String> {
                 bail!("Cat command not allowed in this context");
             }
         }
-        
+
         // Filesystem commands
-        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs" | "wipefs" | "file" | "lsof" | "sync" | "dd" | "ls" | "fdisk" | "dmsetup" => {
+        "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs"
+        | "wipefs" | "file" | "lsof" | "sync" | "dd" | "ls" | "fdisk" | "dmsetup" => {
             execute_safe_command(program, args)
         }
-        
+
         // Mount/unmount commands
-        "mount" | "umount" => {
-            execute_safe_command(program, args)
-        }
-        
+        "mount" | "umount" => execute_safe_command(program, args),
+
         // LUKS commands
-        "cryptsetup" => {
-            execute_safe_command(program, args)
-        }
-        
+        "cryptsetup" => execute_safe_command(program, args),
+
         // System commands
-        "systemctl" | "loginctl" => {
-            execute_safe_command(program, args)
-        }
-        
+        "systemctl" | "loginctl" => execute_safe_command(program, args),
+
         // Package managers (read-only operations only, except for gdisk installation)
         "which" | "dpkg" | "rpm" => {
             if program == "which" || args.iter().any(|&arg| arg == "-l" || arg == "-Q") {
@@ -169,48 +183,39 @@ fn execute(command: &str) -> Result<String> {
                 bail!("Package manager operation not allowed: {}", command)
             }
         }
-        
+
         "dnf" | "apt" | "pacman" => {
             // Allow gdisk installation for EFI boot support
-            if (program == "dnf" && args.contains(&"-y") && args.contains(&"gdisk")) ||
-               (program == "apt" && args.contains(&"gdisk")) ||
-               (program == "pacman" && args.contains(&"gdisk")) {
+            if (program == "dnf" && args.contains(&"-y") && args.contains(&"gdisk"))
+                || (program == "apt" && args.contains(&"gdisk"))
+                || (program == "pacman" && args.contains(&"gdisk"))
+            {
                 execute_safe_command(program, args)
             } else {
                 bail!("Package manager operation not allowed: {}", command)
             }
         }
-        
+
         // LVM commands (read-only only)
-        "vgs" | "vgchange" => {
-            execute_safe_command(program, args)
-        }
-        
+        "vgs" | "vgchange" => execute_safe_command(program, args),
+
         // User management (chroot only)
-        "useradd" | "usermod" | "passwd" => {
-            execute_safe_command(program, args)
-        }
-        
+        "useradd" | "usermod" | "passwd" => execute_safe_command(program, args),
+
         // GRUB commands (chroot only)
         "grub-install" | "grub2-install" | "grub-mkconfig" | "grub2-mkconfig" => {
             execute_safe_command(program, args)
         }
-        
+
         // EFI bootloader tools
-        "efibootmgr" | "efivar" => {
-            execute_safe_command(program, args)
-        }
-        
+        "efibootmgr" | "efivar" => execute_safe_command(program, args),
+
         // Service management (chroot only)
-        "rc-update" | "rc-service" => {
-            execute_safe_command(program, args)
-        }
-        
+        "rc-update" | "rc-service" => execute_safe_command(program, args),
+
         // Chroot for bootloader installation and system setup
-        "chroot" => {
-            execute_safe_command(program, args)
-        }
-        
+        "chroot" => execute_safe_command(program, args),
+
         // Allow safe shell builtins with strict validation
         "sh" => {
             if args.len() >= 2 && args[0] == "-c" {
@@ -225,7 +230,7 @@ fn execute(command: &str) -> Result<String> {
                 bail!("Invalid sh usage: {}", command)
             }
         }
-        
+
         _ => {
             bail!("Command not allowed: {}", program)
         }
@@ -240,7 +245,10 @@ fn execute_safe_command(program: &str, args: &[&str]) -> Result<String> {
         .with_context(|| format!("Failed to execute system command"))?;
 
     if !output.status.success() {
-        bail!("System command failed (exit code: {:?})", output.status.code());
+        bail!(
+            "System command failed (exit code: {:?})",
+            output.status.code()
+        );
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -255,7 +263,7 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
         r"umount -R [^[:space:]]+ 2>/dev/null",
         r"umount [^[:space:]]+ 2>/dev/null",
         r"mount --rbind /dev /mnt/root/dev",
-        r"mount --rbind /sys /mnt/root/sys", 
+        r"mount --rbind /sys /mnt/root/sys",
         r"mount --bind /run /mnt/root/run",
         r"mount --make-slave /mnt/root/run",
         r"cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+",
@@ -271,7 +279,7 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
         r"hdparm -z [^[:space:]]+",
         r"blockdev --rereadpt [^[:space:]]+",
     ];
-    
+
     for pattern in &allowed_patterns {
         if let Ok(regex) = regex::Regex::new(pattern) {
             if regex.is_match(shell_cmd) {
@@ -283,15 +291,20 @@ fn execute_safe_shell_command(shell_cmd: &str) -> Result<String> {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    bail!("Shell command failed: {} (exit code: {:?})\nSTDOUT: {}\nSTDERR: {}", 
-                          shell_cmd, output.status.code(), stdout, stderr);
+                    bail!(
+                        "Shell command failed: {} (exit code: {:?})\nSTDOUT: {}\nSTDERR: {}",
+                        shell_cmd,
+                        output.status.code(),
+                        stdout,
+                        stderr
+                    );
                 }
 
                 return Ok(String::from_utf8_lossy(&output.stdout).to_string());
             }
         }
     }
-    
+
     bail!("Shell command pattern not allowed: {}", shell_cmd)
 }
 
@@ -302,7 +315,7 @@ fn is_safe_shell_command(cmd: &str) -> bool {
         r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+[\s\S]*EOF$",
         r"vgs \| awk '\{ print \$1 \}' \| grep -vw VG$",
     ];
-    
+
     for pattern in &allowed_special_patterns {
         if let Ok(regex) = regex::Regex::new(pattern) {
             if regex.is_match(cmd) {
@@ -310,21 +323,19 @@ fn is_safe_shell_command(cmd: &str) -> bool {
             }
         }
     }
-    
+
     // Reject dangerous characters and patterns
     let dangerous_patterns = [
-        ";", "&&", "||", "|", "&", "$(", "`", 
-        "$", "${", ">", ">>", "<",
-        "rm ", "dd ", "chmod ", "chown ",
-        "sudo ", "su ", "eval ", "exec ",
+        ";", "&&", "||", "|", "&", "$(", "`", "$", "${", ">", ">>", "<", "rm ", "dd ", "chmod ",
+        "chown ", "sudo ", "su ", "eval ", "exec ",
     ];
-    
+
     for pattern in &dangerous_patterns {
         if cmd.contains(pattern) {
             return false;
         }
     }
-    
+
     // Only allow specific safe patterns
     let safe_patterns = [
         r"^umount -ql /[a-zA-Z0-9/]+[np]?[0-9]*\?\* 2>/dev/null \|\| true$",
@@ -333,7 +344,7 @@ fn is_safe_shell_command(cmd: &str) -> bool {
         r"^umount [^[:space:]]+ 2>/dev/null$",
         r"^mount --rbind /dev /mnt/root/dev$",
         r"^mount --rbind /sys /mnt/root/sys$",
-        r"^mount --bind /run /mnt/root/run$", 
+        r"^mount --bind /run /mnt/root/run$",
         r"^mount --make-slave /mnt/root/run$",
         r"^cat <<EOF \| sfdisk -q --wipe always --force [^[:space:]]+.*$",
         r"^mount -t overlay overlay -o [^[:space:]]+ [^[:space:]]+$",
@@ -342,7 +353,7 @@ fn is_safe_shell_command(cmd: &str) -> bool {
         r"^blkid -L [^[:space:]]+$",
         r"^vgs \| awk '\{ print \$1 \}' \| grep -vw VG$",
     ];
-    
+
     for pattern in &safe_patterns {
         if let Ok(regex) = regex::Regex::new(pattern) {
             if regex.is_match(cmd) {
@@ -350,7 +361,7 @@ fn is_safe_shell_command(cmd: &str) -> bool {
             }
         }
     }
-    
+
     false
 }
 
@@ -367,9 +378,7 @@ fn get_drive_size(drive: &str) -> Result<u64> {
                 Ok(first_line.parse::<u64>().unwrap_or(0))
             }
         }
-        Err(e) => {
-            Err(e)
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -383,7 +392,10 @@ fn check_drive_size(drive: &str) -> bool {
 fn get_drives() -> Result<Vec<String>> {
     let sys_block = Path::new("/sys/block");
     if !sys_block.exists() {
-        warn(&format!("Sys block directory not found: {}", sys_block.display()));
+        warn(&format!(
+            "Sys block directory not found: {}",
+            sys_block.display()
+        ));
         return Ok(vec![]);
     }
 
@@ -392,13 +404,16 @@ fn get_drives() -> Result<Vec<String>> {
         let entry = entry?;
         let drive_name = entry.file_name();
         let drive_path = format!("/dev/{}", drive_name.to_string_lossy());
-        
+
         // Skip loopback devices and other non-physical drives
         let name_str = drive_name.to_string_lossy();
-        if name_str.starts_with("loop") || name_str.starts_with("ram") || name_str.starts_with("dm-") {
+        if name_str.starts_with("loop")
+            || name_str.starts_with("ram")
+            || name_str.starts_with("dm-")
+        {
             continue;
         }
-        
+
         match check_drive_size(&drive_path) {
             true => {
                 info(&format!("Found valid drive: {} (size > 12GB)", drive_path));
@@ -406,21 +421,23 @@ fn get_drives() -> Result<Vec<String>> {
             }
             false => {
                 // Only show debug info for actual block devices, not every entry
-                if name_str.starts_with("sd") || name_str.starts_with("nvme") || name_str.starts_with("hd") || name_str.starts_with("vd") {
+                if name_str.starts_with("sd")
+                    || name_str.starts_with("nvme")
+                    || name_str.starts_with("hd")
+                    || name_str.starts_with("vd")
+                {
                     info(&format!("Drive {} too small or not accessible", drive_path));
                 }
             }
         }
     }
-    
+
     if drives.is_empty() {
         warn("No suitable drives found (drives must be > 12GB)");
     }
-    
+
     Ok(drives)
 }
-
-
 
 async fn check_url(url: &str) -> bool {
     let manifest_url = format!("{}Manifest.toml", url);
@@ -433,98 +450,24 @@ async fn check_url(url: &str) -> bool {
     }
 }
 
-
-
 fn get_layouts() -> HashMap<String, Vec<Partition>> {
     let mut layouts = HashMap::new();
-    
+
     if is_efi() {
-        layouts.insert("btrfs".to_string(), vec![
-            Partition {
-                size: "512M".to_string(),
-                label: Some("EFI".to_string()),
-                format: "vfat".to_string(),
-                partition_type: "uefi".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "rest".to_string(),
-                label: Some("ROOTS".to_string()),
-                format: "btrfs".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: Some(vec![
-                    "/home".to_string(),
-                    "/overlay".to_string(),
-                    "/overlay/etc".to_string(),
-                    "/overlay/var".to_string(),
-                    "/overlay/usr".to_string(),
-                ]),
-                inside: None,
-            },
-        ]);
-    } else {
-        layouts.insert("btrfs".to_string(), vec![
-            Partition {
-                size: "2M".to_string(),
-                label: None,
-                format: "".to_string(),
-                partition_type: "21686148-6449-6E6F-744E-656564454649".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "512M".to_string(),
-                label: Some("BOOT".to_string()),
-                format: "ext4".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "rest".to_string(),
-                label: Some("ROOTS".to_string()),
-                format: "btrfs".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: Some(vec![
-                    "/home".to_string(),
-                    "/overlay".to_string(),
-                    "/overlay/etc".to_string(),
-                    "/overlay/var".to_string(),
-                    "/overlay/usr".to_string(),
-                ]),
-                inside: None,
-            },
-        ]);
-    }
-    
-    if is_efi() {
-        layouts.insert("btrfs_encryption_dev".to_string(), vec![
-            Partition {
-                size: "512M".to_string(),
-                label: Some("EFI".to_string()),
-                format: "vfat".to_string(),
-                partition_type: "uefi".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "8G".to_string(),
-                label: Some("ROOTS".to_string()),
-                format: "ext4".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "rest".to_string(),
-                label: Some("REGICIDEOS".to_string()),
-                format: "luks".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: None,
-                inside: Some(Box::new(Partition {
+        layouts.insert(
+            "btrfs".to_string(),
+            vec![
+                Partition {
+                    size: "512M".to_string(),
+                    label: Some("EFI".to_string()),
+                    format: "vfat".to_string(),
+                    partition_type: "uefi".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
                     size: "rest".to_string(),
-                    label: None,
+                    label: Some("ROOTS".to_string()),
                     format: "btrfs".to_string(),
                     partition_type: "linux".to_string(),
                     subvolumes: Some(vec![
@@ -535,44 +478,32 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
                         "/overlay/usr".to_string(),
                     ]),
                     inside: None,
-                })),
-            },
-        ]);
+                },
+            ],
+        );
     } else {
-        layouts.insert("btrfs_encryption_dev".to_string(), vec![
-            Partition {
-                size: "2M".to_string(),
-                label: None,
-                format: "".to_string(),
-                partition_type: "21686148-6449-6E6F-744E-656564454649".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "512M".to_string(),
-                label: Some("BOOT".to_string()),
-                format: "ext4".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "8G".to_string(),
-                label: Some("ROOTS".to_string()),
-                format: "ext4".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: None,
-                inside: None,
-            },
-            Partition {
-                size: "rest".to_string(),
-                label: Some("REGICIDEOS".to_string()),
-                format: "luks".to_string(),
-                partition_type: "linux".to_string(),
-                subvolumes: None,
-                inside: Some(Box::new(Partition {
-                    size: "rest".to_string(),
+        layouts.insert(
+            "btrfs".to_string(),
+            vec![
+                Partition {
+                    size: "2M".to_string(),
                     label: None,
+                    format: "".to_string(),
+                    partition_type: "21686148-6449-6E6F-744E-656564454649".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
+                    size: "512M".to_string(),
+                    label: Some("BOOT".to_string()),
+                    format: "ext4".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
+                    size: "rest".to_string(),
+                    label: Some("ROOTS".to_string()),
                     format: "btrfs".to_string(),
                     partition_type: "linux".to_string(),
                     subvolumes: Some(vec![
@@ -583,25 +514,121 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
                         "/overlay/usr".to_string(),
                     ]),
                     inside: None,
-                })),
-            },
-        ]);
+                },
+            ],
+        );
     }
-    
+
+    if is_efi() {
+        layouts.insert(
+            "btrfs_encryption_dev".to_string(),
+            vec![
+                Partition {
+                    size: "512M".to_string(),
+                    label: Some("EFI".to_string()),
+                    format: "vfat".to_string(),
+                    partition_type: "uefi".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
+                    size: "8G".to_string(),
+                    label: Some("ROOTS".to_string()),
+                    format: "ext4".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
+                    size: "rest".to_string(),
+                    label: Some("REGICIDEOS".to_string()),
+                    format: "luks".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: None,
+                    inside: Some(Box::new(Partition {
+                        size: "rest".to_string(),
+                        label: None,
+                        format: "btrfs".to_string(),
+                        partition_type: "linux".to_string(),
+                        subvolumes: Some(vec![
+                            "/home".to_string(),
+                            "/overlay".to_string(),
+                            "/overlay/etc".to_string(),
+                            "/overlay/var".to_string(),
+                            "/overlay/usr".to_string(),
+                        ]),
+                        inside: None,
+                    })),
+                },
+            ],
+        );
+    } else {
+        layouts.insert(
+            "btrfs_encryption_dev".to_string(),
+            vec![
+                Partition {
+                    size: "2M".to_string(),
+                    label: None,
+                    format: "".to_string(),
+                    partition_type: "21686148-6449-6E6F-744E-656564454649".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
+                    size: "512M".to_string(),
+                    label: Some("BOOT".to_string()),
+                    format: "ext4".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
+                    size: "8G".to_string(),
+                    label: Some("ROOTS".to_string()),
+                    format: "ext4".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: None,
+                    inside: None,
+                },
+                Partition {
+                    size: "rest".to_string(),
+                    label: Some("REGICIDEOS".to_string()),
+                    format: "luks".to_string(),
+                    partition_type: "linux".to_string(),
+                    subvolumes: None,
+                    inside: Some(Box::new(Partition {
+                        size: "rest".to_string(),
+                        label: None,
+                        format: "btrfs".to_string(),
+                        partition_type: "linux".to_string(),
+                        subvolumes: Some(vec![
+                            "/home".to_string(),
+                            "/overlay".to_string(),
+                            "/overlay/etc".to_string(),
+                            "/overlay/var".to_string(),
+                            "/overlay/usr".to_string(),
+                        ]),
+                        inside: None,
+                    })),
+                },
+            ],
+        );
+    }
+
     layouts
 }
 
 fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>> {
     info("Waiting for kernel to recognize new partitions...");
-    
+
     let mut attempts = 0;
     let max_attempts = 30; // Increased from 10
     let drive_base = drive.split('/').last().unwrap_or("");
-    
+
     loop {
         // Try multiple detection methods
         let mut partition_names = Vec::new();
-        
+
         // Method 1: Use lsblk to detect partitions
         if let Ok(partitions_output) = execute(&format!("lsblk -ln -o NAME {}", drive)) {
             println!("DEBUG: lsblk output for {}: {}", drive, partitions_output);
@@ -611,7 +638,7 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
                 .filter(|line| line.trim() != drive_base)
                 .map(|line| format!("/dev/{}", line.trim()))
                 .collect();
-            
+
             // Sort partitions numerically to ensure correct order
             detected_partitions.sort_by(|a, b| {
                 let extract_num = |path: &str| {
@@ -628,14 +655,16 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
                 };
                 extract_num(a).cmp(&extract_num(b))
             });
-            
-            println!("DEBUG: sorted_detected_partitions = {:?}", detected_partitions);
-            
+
+            println!(
+                "DEBUG: sorted_detected_partitions = {:?}",
+                detected_partitions
+            );
+
             // Special handling for LUKS - check if we have a mapper device
             if expected_count == 1 && detected_partitions.is_empty() {
                 // For LUKS, we expect 1 mapper device instead of physical partitions
                 if Path::new("/dev/mapper/regicideos").exists() {
-
                     partition_names.push("/dev/mapper/regicideos".to_string());
                 }
             } else if detected_partitions.len() == expected_count {
@@ -652,18 +681,20 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
                 }
             }
         }
-        
+
         // Method 2: Try numbered approach if lsblk detection fails
         if partition_names.len() != expected_count {
             partition_names.clear();
             let mut all_exist = true;
             for i in 1..=expected_count {
-                let part_name = if drive.contains("nvme") || drive.chars().last().unwrap_or('a').is_ascii_digit() {
+                let part_name = if drive.contains("nvme")
+                    || drive.chars().last().unwrap_or('a').is_ascii_digit()
+                {
                     format!("{}p{}", drive, i)
                 } else {
                     format!("{}{}", drive, i)
                 };
-                
+
                 if Path::new(&part_name).exists() {
                     partition_names.push(part_name);
                 } else {
@@ -671,30 +702,35 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
                     break;
                 }
             }
-            
+
             if !all_exist {
                 partition_names.clear();
             }
         }
-        
 
-        
         if partition_names.len() == expected_count {
-            println!("DEBUG: Found {} partitions as expected: {:?}", expected_count, partition_names);
+            println!(
+                "DEBUG: Found {} partitions as expected: {:?}",
+                expected_count, partition_names
+            );
             info(&format!("Found {} partitions", expected_count));
             return Ok(partition_names);
         }
-        
+
         attempts += 1;
         if attempts >= max_attempts {
-            bail!("Partitions were not created properly after {} attempts. Expected {}, found {}", 
-                  max_attempts, expected_count, partition_names.len());
+            bail!(
+                "Partitions were not created properly after {} attempts. Expected {}, found {}",
+                max_attempts,
+                expected_count,
+                partition_names.len()
+            );
         }
-        
+
         // Exponential backoff with max delay
         let delay = std::cmp::min(1000, 100 * attempts);
         std::thread::sleep(std::time::Duration::from_millis(delay));
-        
+
         // Try to refresh partition table every few attempts
         if attempts % 5 == 0 {
             let _ = execute(&format!("partprobe {}", drive))
@@ -727,17 +763,24 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
 
     // Set EFI boot flag using sgdisk if available
     if execute("which sgdisk").is_ok() {
-        let partition_num = partition.chars().last()
+        let partition_num = partition
+            .chars()
+            .last()
             .and_then(|c| c.to_digit(10))
-            .ok_or_else(|| anyhow::anyhow!("Could not determine partition number from {}", partition))?;
-        
+            .ok_or_else(|| {
+                anyhow::anyhow!("Could not determine partition number from {}", partition)
+            })?;
+
         let drive = if partition.contains("nvme") && partition.contains("p") {
             partition.rsplit_once("p").unwrap().0
         } else {
             partition.trim_end_matches(char::is_numeric)
         };
-        
-        execute(&format!("sgdisk --set-flag={}:boot:on {}", partition_num, drive))?;
+
+        execute(&format!(
+            "sgdisk --set-flag={}:boot:on {}",
+            partition_num, drive
+        ))?;
         info(&format!("Set EFI boot flag on partition {}", partition_num));
     } else {
         warn("sgdisk not available, EFI boot flag not set. System may not boot properly.");
@@ -748,10 +791,10 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
 
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     info(&format!("Partitioning drive {}", drive));
-    
+
     // Step 1: Aggressive cleanup to ensure device is completely free
     info("Performing aggressive cleanup to ensure device is free...");
-    
+
     // Close LUKS containers and device-mapper tables
     let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
     let _ = execute("dmsetup remove_all 2>/dev/null || true");
@@ -774,58 +817,58 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
         let _ = execute(&format!("nvme reset {} 2>/dev/null || true", drive));
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
-    
+
     // Force kernel to reread partition table and wipe it
     info("Forcing kernel to reread partition table and wiping disk...");
     let _ = execute(&format!("sgdisk --zap-all {} 2>/dev/null || true", drive));
     let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", drive));
-    
+
     // Wait for the kernel to settle
     std::thread::sleep(std::time::Duration::from_secs(5));
-    
+
     // Step 2: Create new partition table
     info("Creating new partition table");
     if execute("which sgdisk").is_ok() {
         execute(&format!("sgdisk --clear {}", drive))?;
-        
+
         // Create partitions
         let mut part_num = 1u32;
         for partition in layout {
             let size = match partition.size.as_str() {
                 "512M" => "0:+512M",
-                "8G" => "0:+8G", 
+                "8G" => "0:+8G",
                 "2M" => "0:+2M",
                 "rest" => "0:0",
                 _ => bail!("Unsupported size: {}", partition.size),
             };
-            
+
             let typecode = match partition.partition_type.as_str() {
                 "uefi" => "ef00",
                 "linux" => "8300",
                 "21686148-6449-6E6F-744E-656564454649" => "ef02",
                 _ => "8300",
             };
-            
+
             let label = partition.label.as_deref().unwrap_or("");
-            
+
             execute(&format!(
                 "sgdisk --new={}:{} --typecode={}:{} --change-name={}:'{}' {}",
                 part_num, size, part_num, typecode, part_num, label, drive
             ))?;
-            
+
             part_num += 1;
         }
-        
+
         // Use --refresh flag to notify kernel
         execute(&format!("sgdisk --refresh {}", drive))?;
     } else {
         bail!("sgdisk not available");
     }
-    
+
     // Step 3: Wait for partitions to be recognized
     info("Waiting for partitions to be recognized");
     let partition_names = wait_for_partitions(drive, layout.len())?;
-    
+
     // Step 4: Show what partitions were created
     info("Verifying new partitions were created");
     println!("SUCCESS: Created {} partitions:", partition_names.len());
@@ -836,20 +879,27 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             println!("  Partition {}: {}", i + 1, partition);
         }
     }
-    
+
     Ok(())
 }
 
 fn format_partition(device: &str, partition: &Partition) -> Result<()> {
     info(&format!("Formatting {} as {}", device, partition.format));
-    
+
     match partition.format.as_str() {
         "btrfs" => {
             // Create BTRFS filesystem on the device (usually a LUKS mapper)
             if let Some(ref label) = partition.label {
-                info(&format!("Creating BTRFS filesystem with label '{}' on {}", label, device));
+                info(&format!(
+                    "Creating BTRFS filesystem with label '{}' on {}",
+                    label, device
+                ));
                 if let Err(e) = execute(&format!("mkfs.btrfs -L {} {}", label, device)) {
-                    bail!("Failed to create BTRFS filesystem with label '{}': {}", label, e);
+                    bail!(
+                        "Failed to create BTRFS filesystem with label '{}': {}",
+                        label,
+                        e
+                    );
                 }
             } else {
                 info(&format!("Creating BTRFS filesystem on {}", device));
@@ -857,22 +907,32 @@ fn format_partition(device: &str, partition: &Partition) -> Result<()> {
                     bail!("Failed to create BTRFS filesystem: {}", e);
                 }
             }
-            
+
             // Create subvolumes if specified
             if let Some(ref subvolumes) = partition.subvolumes {
                 let temp_mount = "/mnt/temp_btrfs";
-                
+
                 // Ensure mount directory exists
                 if let Err(e) = fs::create_dir_all(temp_mount) {
-                    bail!("Failed to create temporary mount directory '{}': {}", temp_mount, e);
+                    bail!(
+                        "Failed to create temporary mount directory '{}': {}",
+                        temp_mount,
+                        e
+                    );
                 }
-                
+
                 // Mount the BTRFS filesystem
-                info(&format!("Mounting BTRFS filesystem temporarily at {}", temp_mount));
+                info(&format!(
+                    "Mounting BTRFS filesystem temporarily at {}",
+                    temp_mount
+                ));
                 if let Err(e) = execute(&format!("mount {} {}", device, temp_mount)) {
-                    bail!("Failed to mount BTRFS filesystem for subvolume creation: {}", e);
+                    bail!(
+                        "Failed to mount BTRFS filesystem for subvolume creation: {}",
+                        e
+                    );
                 }
-                
+
                 // Create each subvolume with error handling
                 for subvolume in subvolumes {
                     let subvol_path = format!("{}{}", temp_mount, subvolume);
@@ -883,14 +943,17 @@ fn format_partition(device: &str, partition: &Partition) -> Result<()> {
                         bail!("Failed to create BTRFS subvolume '{}': {}", subvolume, e);
                     }
                 }
-                
+
                 // Unmount the temporary filesystem
                 info("Unmounting temporary BTRFS mount");
                 if let Err(e) = execute(&format!("umount {}", temp_mount)) {
-                    warn(&format!("Warning: Failed to unmount temporary BTRFS mount: {}", e));
+                    warn(&format!(
+                        "Warning: Failed to unmount temporary BTRFS mount: {}",
+                        e
+                    ));
                 }
             }
-            
+
             // Verify the filesystem
             if let Err(e) = verify_filesystem(device, "btrfs") {
                 warn(&format!("BTRFS filesystem verification failed: {}", e));
@@ -898,10 +961,13 @@ fn format_partition(device: &str, partition: &Partition) -> Result<()> {
             }
         }
         _ => {
-            bail!("Unsupported filesystem type for format_partition: {}", partition.format);
+            bail!(
+                "Unsupported filesystem type for format_partition: {}",
+                partition.format
+            );
         }
     }
-    
+
     Ok(())
 }
 
@@ -942,14 +1008,6 @@ fn verify_filesystem(partition: &str, fs_type: &str) -> Result<()> {
     Ok(())
 }
 
-
-
-
-
-
-
-
-
 // Add this function to check if a partition is actually in use
 fn is_partition_in_use(partition: &str) -> bool {
     // Check if partition is mounted
@@ -958,14 +1016,14 @@ fn is_partition_in_use(partition: &str) -> bool {
             return true;
         }
     }
-    
+
     // Check for processes using the partition
     if let Ok(fuser_info) = execute(&format!("fuser -v {}", partition)) {
         if !fuser_info.trim().is_empty() {
             return true;
         }
     }
-    
+
     // Check for LUKS mappings
     if partition.starts_with("/dev/mapper/") {
         if let Ok(ls_info) = execute(&format!("ls -la /dev/mapper")) {
@@ -976,14 +1034,14 @@ fn is_partition_in_use(partition: &str) -> bool {
             }
         }
     }
-    
+
     false
 }
 
 fn ensure_partition_ready(partition: &str) -> Result<()> {
     let mut attempts = 0;
     let max_attempts = 10;
-    
+
     while attempts < max_attempts {
         // Check if partition exists and is ready
         if Path::new(partition).exists() {
@@ -992,23 +1050,33 @@ fn ensure_partition_ready(partition: &str) -> Result<()> {
                 return Ok(());
             }
         }
-        
+
         attempts += 1;
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    
-    bail!("Partition {} is not ready after {} attempts", partition, max_attempts)
+
+    bail!(
+        "Partition {} is not ready after {} attempts",
+        partition,
+        max_attempts
+    )
 }
 
 fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     // Wait for kernel to recognize partitions and get reliable partition list
     std::thread::sleep(std::time::Duration::from_secs(2));
-    
-    println!("DEBUG: format_drive called with {} partitions", layout.len());
+
+    println!(
+        "DEBUG: format_drive called with {} partitions",
+        layout.len()
+    );
     for (i, part) in layout.iter().enumerate() {
-        println!("DEBUG: Layout[{}]: format={}, label={:?}", i, part.format, part.label);
+        println!(
+            "DEBUG: Layout[{}]: format={}, label={:?}",
+            i, part.format, part.label
+        );
     }
-    
+
     // Use the same reliable detection as partition_drive
     let partition_names = wait_for_partitions(drive, layout.len())?;
 
@@ -1019,7 +1087,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 
     for (i, partition) in layout.iter().enumerate() {
         let current_name = &partition_names[i];
-        
+
         // Double-check partition exists before formatting
         if !Path::new(current_name).exists() {
             bail!("Partition {} does not exist", current_name);
@@ -1027,40 +1095,55 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 
         // Check if partition is in use before formatting
         if is_partition_in_use(current_name) {
-            warn(&format!("Partition {} is in use, skipping formatting", current_name));
+            warn(&format!(
+                "Partition {} is in use, skipping formatting",
+                current_name
+            ));
             continue;
         }
 
         // Simple cleanup before formatting
-        info(&format!("Preparing partition {} for formatting", current_name));
-        
+        info(&format!(
+            "Preparing partition {} for formatting",
+            current_name
+        ));
+
         // Step 1: Unmount aggressively
         let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
         let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
-        
+
         // Step 2: Check for processes using partition
         let _ = execute(&format!("fuser -v {} 2>/dev/null || true", current_name));
         let _ = execute(&format!("fuser -k {} 2>/dev/null || true", current_name));
-        
+
         // Step 3: Remove any device mapper references
         let _ = execute("dmsetup remove_all 2>/dev/null || true");
-        
+
         // Step 4: Close any LUKS containers
-        let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
+        let _ = execute(&format!(
+            "cryptsetup close {} 2>/dev/null || true",
+            current_name
+        ));
         let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
-        
+
         // Step 5: Use a simple approach to clear partition
         info(&format!("Clearing partition {}", current_name));
-        
+
         // Use enhanced clearing for all drives to ensure partition is truly clean
-        info(&format!("Clearing partition metadata and data on {}", current_name));
-        
+        info(&format!(
+            "Clearing partition metadata and data on {}",
+            current_name
+        ));
+
         // Step 1: Clear filesystem signatures
         let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
-        
+
         // Step 2: Zero out the first 1MB to clear partition table and filesystem metadata
-        let _ = execute(&format!("dd if=/dev/zero of={} bs=1M count=1 2>/dev/null || true", current_name));
-        
+        let _ = execute(&format!(
+            "dd if=/dev/zero of={} bs=1M count=1 2>/dev/null || true",
+            current_name
+        ));
+
         // Step 3: For NVMe drives, also try nvme sanitize if available (safer than format)
         if current_name.contains("nvme") && execute("which nvme").is_ok() {
             // Extract the base NVMe device for sanitize operation
@@ -1069,19 +1152,28 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             } else {
                 current_name
             };
-            
+
             // Try nvme sanitize - this is safer than format and works on individual namespaces
             info(&format!("Attempting NVMe sanitize on {}", base_device));
-            let _ = execute(&format!("nvme sanitize --no-flush --force {} 2>/dev/null || true", base_device));
+            let _ = execute(&format!(
+                "nvme sanitize --no-flush --force {} 2>/dev/null || true",
+                base_device
+            ));
         }
-        
+
         // Step 6: Sync and wait
         let _ = std::process::Command::new("sync").status();
         std::thread::sleep(std::time::Duration::from_millis(3000));
 
-        info(&format!("Formatting {} as {}", current_name, partition.format));
-        println!("DEBUG: Partition {} format = '{}', label = {:?}", i, partition.format, partition.label);
-        
+        info(&format!(
+            "Formatting {} as {}",
+            current_name, partition.format
+        ));
+        println!(
+            "DEBUG: Partition {} format = '{}', label = {:?}",
+            i, partition.format, partition.label
+        );
+
         match partition.format.as_str() {
             "vfat" => {
                 // EFI partition formatting with validation
@@ -1090,29 +1182,31 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 } else {
                     execute(&format!("mkfs.vfat -F 32 {}", current_name))?;
                 }
-                
+
                 // Set EFI boot flag if this is likely an EFI partition
-                if is_efi() && (partition.partition_type == "uefi" || 
-                               partition.label.as_ref().map_or(false, |l| l == "EFI")) {
+                if is_efi()
+                    && (partition.partition_type == "uefi"
+                        || partition.label.as_ref().map_or(false, |l| l == "EFI"))
+                {
                     if let Err(e) = set_efi_boot_flag(current_name) {
                         warn(&format!("Failed to set EFI boot flag: {}", e));
                     }
                 }
-                
+
                 // Verify filesystem
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
                 println!("DEBUG: Entering ext4 case for partition {}", current_name);
                 info(&format!("Formatting {} as ext4", current_name));
-                
+
                 // Use a more robust approach for ext4 formatting
                 let cmd = if let Some(ref label) = partition.label {
                     format!("mkfs.ext4 -F -L {} {}", label, current_name)
                 } else {
                     format!("mkfs.ext4 -F {}", current_name)
                 };
-                
+
                 // Execute with full error output
                 match execute_with_output(&cmd) {
                     Ok(_) => {
@@ -1120,33 +1214,51 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                     Err(_) => {
                         // If formatting fails, try a more aggressive approach
-                        warn(&format!("Standard ext4 formatting failed, trying alternative approach..."));
-                        
+                        warn(&format!(
+                            "Standard ext4 formatting failed, trying alternative approach..."
+                        ));
+
                         // Try with different options
                         let alt_cmd = if let Some(ref label) = partition.label {
-                            format!("mkfs.ext4 -F -L {} -E lazy_itable_init {}", label, current_name)
+                            format!(
+                                "mkfs.ext4 -F -L {} -E lazy_itable_init {}",
+                                label, current_name
+                            )
                         } else {
                             format!("mkfs.ext4 -F -E lazy_itable_init {}", current_name)
                         };
-                        
+
                         if let Err(_) = execute_with_output(&alt_cmd) {
                             warn(&format!("Alternative ext4 formatting also failed. You may need to reboot and try again."));
-                            bail!("Failed to format {} as ext4 after multiple attempts", current_name);
+                            bail!(
+                                "Failed to format {} as ext4 after multiple attempts",
+                                current_name
+                            );
                         } else {
-                            info(&format!("Successfully formatted {} as ext4 with alternative method", current_name));
+                            info(&format!(
+                                "Successfully formatted {} as ext4 with alternative method",
+                                current_name
+                            ));
                         }
                     }
                 }
-                
+
                 // Verify filesystem
                 verify_filesystem(current_name, "ext4")?;
             }
             "btrfs" => {
                 // BTRFS formatting with enhanced error handling
                 if let Some(ref label) = partition.label {
-                    info(&format!("Creating BTRFS filesystem with label '{}' on {}", label, current_name));
+                    info(&format!(
+                        "Creating BTRFS filesystem with label '{}' on {}",
+                        label, current_name
+                    ));
                     if let Err(e) = execute(&format!("mkfs.btrfs -L {} {}", label, current_name)) {
-                        bail!("Failed to create BTRFS filesystem with label '{}': {}", label, e);
+                        bail!(
+                            "Failed to create BTRFS filesystem with label '{}': {}",
+                            label,
+                            e
+                        );
                     }
                 } else {
                     info(&format!("Creating BTRFS filesystem on {}", current_name));
@@ -1154,40 +1266,54 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         bail!("Failed to create BTRFS filesystem: {}", e);
                     }
                 }
-                
+
                 // Create subvolumes with better error handling
                 if let Some(ref subvolumes) = partition.subvolumes {
                     let temp_mount = "/mnt/temp_btrfs";
-                    
+
                     // Ensure mount directory exists
                     if let Err(e) = fs::create_dir_all(temp_mount) {
-                        bail!("Failed to create temporary mount directory '{}': {}", temp_mount, e);
+                        bail!(
+                            "Failed to create temporary mount directory '{}': {}",
+                            temp_mount,
+                            e
+                        );
                     }
-                    
+
                     // Mount the BTRFS filesystem
-                    info(&format!("Mounting BTRFS filesystem temporarily at {}", temp_mount));
+                    info(&format!(
+                        "Mounting BTRFS filesystem temporarily at {}",
+                        temp_mount
+                    ));
                     if let Err(e) = execute(&format!("mount {} {}", current_name, temp_mount)) {
-                        bail!("Failed to mount BTRFS filesystem for subvolume creation: {}", e);
+                        bail!(
+                            "Failed to mount BTRFS filesystem for subvolume creation: {}",
+                            e
+                        );
                     }
-                    
+
                     // Create each subvolume with error handling
                     for subvolume in subvolumes {
                         let subvol_path = format!("{}{}", temp_mount, subvolume);
                         info(&format!("Creating BTRFS subvolume: {}", subvolume));
-                        if let Err(e) = execute(&format!("btrfs subvolume create {}", subvol_path)) {
+                        if let Err(e) = execute(&format!("btrfs subvolume create {}", subvol_path))
+                        {
                             // Attempt cleanup on failure
                             let _ = execute(&format!("umount {}", temp_mount));
                             bail!("Failed to create BTRFS subvolume '{}': {}", subvolume, e);
                         }
                     }
-                    
+
                     // Unmount the temporary filesystem
                     info("Unmounting temporary BTRFS mount");
                     if let Err(e) = execute(&format!("umount {}", temp_mount)) {
-                        warn(&format!("Warning: Failed to unmount temporary BTRFS mount: {}", e));
+                        warn(&format!(
+                            "Warning: Failed to unmount temporary BTRFS mount: {}",
+                            e
+                        ));
                     }
                 }
-                
+
                 // Verify the filesystem
                 if let Err(e) = verify_filesystem(current_name, "btrfs") {
                     warn(&format!("BTRFS filesystem verification failed: {}", e));
@@ -1197,33 +1323,45 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             "luks" => {
                 println!("DEBUG: Entering LUKS case for partition {}", current_name);
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
-                
+
                 // Check if partition is in use before LUKS format
                 if is_partition_in_use(current_name) {
-                    warn(&format!("Partition {} is in use, skipping LUKS format", current_name));
+                    warn(&format!(
+                        "Partition {} is in use, skipping LUKS format",
+                        current_name
+                    ));
                     continue;
                 }
-                
+
                 // Unmount aggressively before LUKS format
                 let _ = execute(&format!("umount -f {} 2>/dev/null || true", current_name));
                 let _ = execute(&format!("umount -l {} 2>/dev/null || true", current_name));
-                
+
                 // Close any existing LUKS containers
-                let _ = execute(&format!("cryptsetup close {} 2>/dev/null || true", current_name));
+                let _ = execute(&format!(
+                    "cryptsetup close {} 2>/dev/null || true",
+                    current_name
+                ));
                 let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
-                
+
                 // Remove any device mapper references
                 let _ = execute("dmsetup remove_all 2>/dev/null || true");
-                
+
                 // Use enhanced clearing for LUKS partition preparation
-                info(&format!("Clearing partition metadata and data on {}", current_name));
-                
+                info(&format!(
+                    "Clearing partition metadata and data on {}",
+                    current_name
+                ));
+
                 // Step 1: Clear filesystem signatures
                 let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", current_name));
-                
+
                 // Step 2: Zero out the first 1MB to clear partition table and filesystem metadata
-                let _ = execute(&format!("dd if=/dev/zero of={} bs=1M count=1 2>/dev/null || true", current_name));
-                
+                let _ = execute(&format!(
+                    "dd if=/dev/zero of={} bs=1M count=1 2>/dev/null || true",
+                    current_name
+                ));
+
                 // Step 3: For NVMe drives, also try nvme sanitize if available (safer than format)
                 if current_name.contains("nvme") && execute("which nvme").is_ok() {
                     // Extract the base NVMe device for sanitize operation
@@ -1232,15 +1370,18 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     } else {
                         current_name
                     };
-                    
+
                     // Try nvme sanitize - this is safer than format and works on individual namespaces
                     info(&format!("Attempting NVMe sanitize on {}", base_device));
-                    let _ = execute(&format!("nvme sanitize --no-flush --force {} 2>/dev/null || true", base_device));
+                    let _ = execute(&format!(
+                        "nvme sanitize --no-flush --force {} 2>/dev/null || true",
+                        base_device
+                    ));
                 }
-                
+
                 // Wait longer for all operations to complete
                 std::thread::sleep(std::time::Duration::from_millis(5000));
-                
+
                 // Special handling for LUKS format (interactive password required)
                 let result = ProcessCommand::new("cryptsetup")
                     .args(&["luksFormat", current_name])
@@ -1248,54 +1389,60 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     .stdout(std::process::Stdio::inherit())
                     .stderr(std::process::Stdio::inherit())
                     .status();
-                    
+
                 match result {
                     Ok(status) => {
                         if status.success() {
                             println!("DEBUG: LUKS format successful for {}", current_name);
                         } else {
-                            bail!("Failed to format LUKS partition: exit code {:?}", status.code());
+                            bail!(
+                                "Failed to format LUKS partition: exit code {:?}",
+                                status.code()
+                            );
                         }
                     }
                     Err(e) => {
                         bail!("Failed to execute cryptsetup: {}", e);
                     }
                 }
-                
+
                 // Set LUKS label after formatting if specified
                 if let Some(ref label) = partition.label {
-                    execute(&format!("cryptsetup -q config {} --label {}", current_name, label))?;
+                    execute(&format!(
+                        "cryptsetup -q config {} --label {}",
+                        current_name, label
+                    ))?;
                 }
-                
+
                 // Always use "regicideos" as the mapper name for RegicideOS
                 let open_result = ProcessCommand::new("cryptsetup")
                     .args(["luksOpen", current_name, "regicideos"])
                     .status();
-                    
+
                 if !open_result.map(|s| s.success()).unwrap_or(false) {
                     bail!("Failed to open LUKS partition");
                 }
-                
+
                 // Verify the device was created with timeout
                 let mut attempts = 0;
                 while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                     attempts += 1;
                 }
-                
+
                 if !Path::new("/dev/mapper/regicideos").exists() {
                     bail!("LUKS device /dev/mapper/regicideos was not created after 5 seconds");
                 }
-                
+
                 let mapper_device = "/dev/mapper/regicideos".to_string();
                 println!("DEBUG: LUKS mapper created: {}", mapper_device);
-                
+
                 // Recursively format the inside partition (should be BTRFS)
                 if let Some(ref inside_partition) = partition.inside {
                     println!("DEBUG: Recursively formatting inside partition as BTRFS...");
                     format_partition(&mapper_device, inside_partition)?;
                 }
-                
+
                 // CRITICAL: Return early to prevent re-formatting the same partition
                 // The LUKS container and its BTRFS filesystem are now set up
                 return Ok(());
@@ -1305,14 +1452,14 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }
 
 fn chroot(command: &str) -> Result<()> {
     // Execute chroot with proper syntax: chroot /mnt/root /bin/bash -c "command"
     let full_command = format!("chroot /mnt/root /bin/bash -c \"{}\"", command);
-    
+
     let output = ProcessCommand::new("bash")
         .args(&["-c", &full_command])
         .output()
@@ -1323,14 +1470,17 @@ fn chroot(command: &str) -> Result<()> {
         bail!("Chroot command failed: {}\nError: {}", command, stderr);
     }
 
-    info(&format!("Successfully executed chroot command: {}", command));
+    info(&format!(
+        "Successfully executed chroot command: {}",
+        command
+    ));
     Ok(())
 }
 
 fn chroot_with_output(command: &str) -> Result<String> {
     // Execute chroot with proper syntax and return output
     let full_command = format!("chroot /mnt/root /bin/bash -c \"{}\"", command);
-    
+
     let output = ProcessCommand::new("bash")
         .args(&["-c", &full_command])
         .output()
@@ -1355,7 +1505,7 @@ async fn get_manifest(repository: &str) -> Result<toml::Value> {
 async fn get_flavours(repository: &str) -> Result<Vec<String>> {
     let manifest = get_manifest(repository).await?;
     let arch = "amd64"; // Assuming x86_64 architecture
-    
+
     let mut flavours = Vec::new();
     if let Some(table) = manifest.as_table() {
         for (key, value) in table {
@@ -1375,14 +1525,14 @@ async fn get_flavours(repository: &str) -> Result<Vec<String>> {
             }
         }
     }
-    
+
     Ok(flavours)
 }
 
 async fn get_releases(repository: &str, flavour: &str) -> Result<Vec<String>> {
     let manifest = get_manifest(repository).await?;
     let arch = "amd64";
-    
+
     let mut releases = Vec::new();
     if let Some(flavour_table) = manifest.get(flavour).and_then(|v| v.as_table()) {
         if let Some(versions_table) = flavour_table.get("versions").and_then(|v| v.as_table()) {
@@ -1404,14 +1554,14 @@ async fn get_releases(repository: &str, flavour: &str) -> Result<Vec<String>> {
             }
         }
     }
-    
+
     Ok(releases)
 }
 
 async fn get_url(config: &Config) -> Result<String> {
     let manifest = get_manifest(&config.repository).await?;
     let arch = "amd64";
-    
+
     if let Some(filename) = manifest
         .get(&config.flavour)
         .and_then(|f| f.as_table())
@@ -1422,7 +1572,10 @@ async fn get_url(config: &Config) -> Result<String> {
         .and_then(|r| r.get("filename"))
         .and_then(|f| f.as_str())
     {
-        Ok(format!("{}{}/{}/{}", config.repository, arch, config.release_branch, filename))
+        Ok(format!(
+            "{}{}/{}/{}",
+            config.repository, arch, config.release_branch, filename
+        ))
     } else {
         bail!("Could not find filename in manifest")
     }
@@ -1430,12 +1583,12 @@ async fn get_url(config: &Config) -> Result<String> {
 
 fn find_partition_by_label(label: &str) -> Result<String> {
     let label_path = format!("/dev/disk/by-label/{}", label);
-    
+
     // Method 1: Try by-label first
     if Path::new(&label_path).exists() {
         return Ok(format!("LABEL={}", label));
     }
-    
+
     // Method 2: Try to find via blkid
     if execute("which blkid").is_ok() {
         if let Ok(output) = execute(&format!("blkid -L {}", label)) {
@@ -1445,7 +1598,7 @@ fn find_partition_by_label(label: &str) -> Result<String> {
             }
         }
     }
-    
+
     // Method 3: Search through all block devices
     if let Ok(output) = execute("lsblk -fn -o NAME,LABEL") {
         for line in output.lines() {
@@ -1458,33 +1611,38 @@ fn find_partition_by_label(label: &str) -> Result<String> {
             }
         }
     }
-    
+
     bail!("Could not find partition with label: {}", label);
 }
 
-fn mount_with_retry(source: &str, target: &str, fs_type: Option<&str>, options: Option<&str>) -> Result<()> {
+fn mount_with_retry(
+    source: &str,
+    target: &str,
+    fs_type: Option<&str>,
+    options: Option<&str>,
+) -> Result<()> {
     // Only allow mounting under /mnt for security
     if !target.starts_with("/mnt/") {
         bail!("Mount target must be under /mnt directory: {}", target);
     }
     safe_create_dir_all(target, "/mnt").ok();
-    
+
     let mut mount_cmd = format!("mount");
-    
+
     if let Some(opts) = options {
         mount_cmd.push_str(&format!(" -o {}", opts));
     }
-    
+
     if let Some(fs) = fs_type {
         mount_cmd.push_str(&format!(" -t {}", fs));
     }
-    
+
     mount_cmd.push_str(&format!(" {} {}", source, target));
-    
+
     // Try mounting with retries
     let mut attempts = 0;
     let max_attempts = 5;
-    
+
     loop {
         match execute(&mount_cmd) {
             Ok(_) => {
@@ -1494,9 +1652,20 @@ fn mount_with_retry(source: &str, target: &str, fs_type: Option<&str>, options: 
             Err(e) => {
                 attempts += 1;
                 if attempts >= max_attempts {
-                    bail!("Failed to mount {} on {} after {} attempts: {}", source, target, max_attempts, e);
+                    bail!(
+                        "Failed to mount {} on {} after {} attempts: {}",
+                        source,
+                        target,
+                        max_attempts,
+                        e
+                    );
                 }
-                warn(&format!("Mount attempt {} failed, retrying in {}ms: {}", attempts, attempts * 500, e));
+                warn(&format!(
+                    "Mount attempt {} failed, retrying in {}ms: {}",
+                    attempts,
+                    attempts * 500,
+                    e
+                ));
                 std::thread::sleep(std::time::Duration::from_millis(attempts * 500));
             }
         }
@@ -1505,104 +1674,109 @@ fn mount_with_retry(source: &str, target: &str, fs_type: Option<&str>, options: 
 
 fn mount_roots() -> Result<()> {
     let mount_point = "/mnt/gentoo";
-    
+
     info("Finding ROOTS partition...");
     let roots_device = find_partition_by_label("ROOTS")?;
-    
+
     info("Mounting ROOTS partition on /mnt/gentoo");
     safe_create_dir_all(mount_point, "/mnt")?;
     mount_with_retry(&roots_device, mount_point, None, None)?;
-    
+
     Ok(())
 }
 
 fn mount() -> Result<()> {
     safe_create_dir_all("/mnt/root", "/mnt").ok();
-    
+
     info("Mounting root.img on /mnt/root");
-    mount_with_retry("/mnt/gentoo/root.img", "/mnt/root", Some("squashfs"), Some("ro,loop"))?;
-    
+    mount_with_retry(
+        "/mnt/gentoo/root.img",
+        "/mnt/root",
+        Some("squashfs"),
+        Some("ro,loop"),
+    )?;
+
     info("Mounting special filesystems first");
     mount_with_retry("/proc", "/mnt/root/proc", Some("proc"), None)?;
     execute("mount --rbind /dev /mnt/root/dev")?;
     execute("mount --rbind /sys /mnt/root/sys")?;
     execute("mount --bind /run /mnt/root/run")?;
     execute("mount --make-slave /mnt/root/run")?;
-    
+
     // Create writable /boot overlay since root.img is read-only squashfs
     info("Creating writable /boot overlay for GRUB configuration");
     safe_create_dir_all("/mnt/boot_overlay", "/mnt")?;
     execute("mount -t tmpfs boot_overlay /mnt/boot_overlay -o size=1G")?;
     execute("mount --bind /mnt/boot_overlay /mnt/root/boot")?;
-    
+
     // Mount EFI or BOOT partition based on system type
     if is_efi() {
         info("Finding EFI partition...");
         let efi_device = find_partition_by_label("EFI")?;
-        
+
         info("Mounting ESP on /mnt/root/boot/efi with write permissions");
         mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
     } else {
         info("Finding BOOT partition...");
         let boot_device = find_partition_by_label("BOOT")?;
-        
+
         info("Mounting BOOT on /mnt/root/boot with write permissions");
         mount_with_retry(&boot_device, "/mnt/root/boot", None, Some("rw"))?;
     }
-    
+
     Ok(())
 }
 
 async fn download_root(url: &str) -> Result<()> {
     let root_img_path = "/mnt/gentoo/root.img";
-    
+
     if Path::new(root_img_path).exists() {
         safe_remove_file(root_img_path, "/mnt/gentoo")?;
     }
-    
+
     info(&format!("Downloading root image from {}", url));
     let response = reqwest::get(url).await?;
-    
+
     if !response.status().is_success() {
         bail!("Failed to download root image: HTTP {}", response.status());
     }
-    
+
     let bytes = response.bytes().await?;
-    
+
     if bytes.is_empty() {
         bail!("Downloaded root image is empty");
     }
-    
+
     safe_write_file(root_img_path, &bytes, "/mnt/gentoo")?;
-    
+
     // Verify the file was written and has content
     let metadata = fs::metadata(root_img_path)?;
     if metadata.len() == 0 {
         bail!("Root image file is empty after download");
     }
-    
+
     info(&format!("Downloaded {} bytes", metadata.len()));
     Ok(())
 }
 
 fn verify_grub_environment() -> Result<()> {
     info("Verifying GRUB environment and dependencies...");
-    
+
     // Check 1: Verify GRUB binaries exist in chroot
     let grub_binaries = [
         ("/mnt/root/usr/sbin/grub-mkconfig", "grub-mkconfig"),
         ("/mnt/root/sbin/grub-mkconfig", "grub-mkconfig"),
-        ("/mnt/root/usr/sbin/grub2-mkconfig", "grub2-mkconfig"), 
+        ("/mnt/root/usr/sbin/grub2-mkconfig", "grub2-mkconfig"),
         ("/mnt/root/sbin/grub2-mkconfig", "grub2-mkconfig"),
         ("/mnt/root/usr/sbin/grub-probe", "grub-probe"),
         ("/mnt/root/sbin/grub-probe", "grub-probe"),
         ("/mnt/root/usr/sbin/grub2-probe", "grub2-probe"),
         ("/mnt/root/sbin/grub2-probe", "grub2-probe"),
     ];
-    
+
     let mut grub_mkconfig_found = false;
     let mut grub_probe_found = false;
-    
+
     for (path, name) in &grub_binaries {
         if Path::new(path).exists() {
             info(&format!("Found GRUB binary: {}", name));
@@ -1614,14 +1788,14 @@ fn verify_grub_environment() -> Result<()> {
             }
         }
     }
-    
+
     if !grub_mkconfig_found {
         bail!("GRUB mkconfig binary not found in chroot environment");
     }
     if !grub_probe_found {
         bail!("GRUB probe binary not found in chroot environment");
     }
-    
+
     // Check 2: Test grub-probe functionality directly
     info("Testing grub-probe functionality...");
     let probe_tests = [
@@ -1630,35 +1804,47 @@ fn verify_grub_environment() -> Result<()> {
         ("abstraction", "/boot/efi"),
         ("target", "/boot/efi"),
     ];
-    
+
     for (probe_arg, target) in &probe_tests {
         let probe_cmd = format!("grub-probe --{} {}", probe_arg, target);
         match chroot_with_output(&probe_cmd) {
             Ok(output) => {
-                info(&format!("grub-probe --{} {} => {}", probe_arg, target, output.trim()));
+                info(&format!(
+                    "grub-probe --{} {} => {}",
+                    probe_arg,
+                    target,
+                    output.trim()
+                ));
             }
             Err(e) => {
-                warn(&format!("grub-probe --{} {} failed: {}", probe_arg, target, e));
+                warn(&format!(
+                    "grub-probe --{} {} failed: {}",
+                    probe_arg, target, e
+                ));
                 // Don't fail immediately, but collect issues
             }
         }
     }
-    
+
     // Check 3: Verify boot directory is writable
     let boot_test_file = "/mnt/root/boot/.grub_test_write";
     if let Err(e) = safe_write_file(boot_test_file, b"test", "/mnt/root/boot") {
         bail!("Boot directory is not writable: {}", e);
     }
     let _ = safe_remove_file(boot_test_file, "/mnt/root/boot");
-    
+
     // Check 4: Verify EFI/BOOT partition is mounted and writable
-    let efi_dir = if is_efi() { "/mnt/root/boot/efi" } else { "/mnt/root/boot" };
+    let efi_dir = if is_efi() {
+        "/mnt/root/boot/efi"
+    } else {
+        "/mnt/root/boot"
+    };
     let efi_test_file = &format!("{}/.grub_test_write", efi_dir);
     if let Err(e) = safe_write_file(efi_test_file, b"test", efi_dir) {
         bail!("EFI/BOOT partition is not writable: {}", e);
     }
     let _ = safe_remove_file(efi_test_file, efi_dir);
-    
+
     // Check 5: Verify required directories exist
     let required_dirs = [
         "/mnt/root/boot",
@@ -1666,7 +1852,7 @@ fn verify_grub_environment() -> Result<()> {
         "/mnt/root/usr/share/grub", // GRUB modules
         "/mnt/root/etc/grub.d",     // GRUB configuration scripts
     ];
-    
+
     for dir in &required_dirs {
         if !Path::new(dir).exists() {
             warn(&format!("Required GRUB directory missing: {}", dir));
@@ -1676,28 +1862,24 @@ fn verify_grub_environment() -> Result<()> {
             }
         }
     }
-    
+
     // Check 6: Verify GRUB configuration scripts exist
     let grub_d_files = [
         "/mnt/root/etc/grub.d/00_header",
-        "/mnt/root/etc/grub.d/10_linux", 
+        "/mnt/root/etc/grub.d/10_linux",
         "/mnt/root/etc/grub.d/30_os-prober",
     ];
-    
+
     for file in &grub_d_files {
         if !Path::new(file).exists() {
             warn(&format!("GRUB configuration script missing: {}", file));
         }
     }
-    
+
     // Check 7: Test device access that grub-probe will need
     info("Testing device access for GRUB...");
-    let device_tests = [
-        "/dev/sda",
-        "/dev/nvme0n1", 
-        "/dev/mapper/regicideos",
-    ];
-    
+    let device_tests = ["/dev/sda", "/dev/nvme0n1", "/dev/mapper/regicideos"];
+
     for device in &device_tests {
         if Path::new(device).exists() {
             if let Ok(_) = execute(&format!("lsblk -n -o NAME,SIZE {}", device)) {
@@ -1707,7 +1889,7 @@ fn verify_grub_environment() -> Result<()> {
             }
         }
     }
-    
+
     // Check 8: Verify filesystem detection
     if is_efi() {
         if let Ok(efi_device) = find_partition_by_label("EFI") {
@@ -1719,7 +1901,7 @@ fn verify_grub_environment() -> Result<()> {
             }
         }
     }
-    
+
     // Check 9: Verify sufficient disk space (at least 50MB for GRUB)
     info("Checking disk space for GRUB configuration...");
     // This is a simplified check - you might want to use statvfs for accurate space checking
@@ -1728,32 +1910,57 @@ fn verify_grub_environment() -> Result<()> {
     } else {
         bail!("Boot overlay not available for GRUB configuration");
     }
-    
+
+    // Check 10: Verify GRUB crypto modules for encrypted boot support
+    info("Verifying GRUB crypto modules for encrypted boot support...");
+    let crypto_modules = [
+        "cryptodisk",
+        "luks", 
+        "gcry_rijndael",
+        "gcry_sha256",
+        "gcry_sha512",
+        "part_gpt",
+    ];
+
+    let grub_lib_path = "/mnt/root/usr/lib/grub";
+    for module in &crypto_modules {
+        let module_path = format!("{}/x86_64-efi/{}.mod", grub_lib_path, module);
+        if Path::new(&module_path).exists() {
+            info(&format!("✓ GRUB crypto module found: {}", module));
+        } else {
+            warn(&format!("✗ GRUB crypto module missing: {}", module));
+        }
+    }
+
+    // Check 11: Verify LUKS mapper device exists for encrypted boot
+    if Path::new("/dev/mapper/regicideos").exists() {
+        info("✓ LUKS mapper device /dev/mapper/regicideos found for encrypted boot");
+    } else {
+        info("ℹ LUKS mapper device not found - encrypted boot may not be configured");
+    }
+
     Ok(())
 }
 
 fn test_grub_probe_comprehensive() -> Result<()> {
     info("Running comprehensive grub-probe tests...");
-    
+
     let probe_commands = [
         // Test device probing
         "grub-probe --device /boot/efi",
-        "grub-probe --device-map", 
-        
-        // Test filesystem detection  
+        "grub-probe --device-map",
+        // Test filesystem detection
         "grub-probe --fs /boot/efi",
         "grub-probe --fs-uuid /boot/efi",
-        
         // Test abstraction layer
         "grub-probe --abstraction /boot/efi",
-        
         // Test target detection
         "grub-probe --target /boot/efi",
         "grub-probe --target --device /boot/efi",
     ];
-    
+
     let mut failed_probes = Vec::new();
-    
+
     for cmd in &probe_commands {
         match chroot_with_output(cmd) {
             Ok(output) => {
@@ -1765,32 +1972,37 @@ fn test_grub_probe_comprehensive() -> Result<()> {
             }
         }
     }
-    
+
     // Report critical failures
     for (cmd, error) in &failed_probes {
         if cmd.contains("--device") || cmd.contains("--fs") {
             bail!("Critical grub-probe failure: {} - {}", cmd, error);
         }
     }
-    
+
     if !failed_probes.is_empty() {
-        warn(&format!("{} grub-probe tests had non-critical failures", failed_probes.len()));
+        warn(&format!(
+            "{} grub-probe tests had non-critical failures",
+            failed_probes.len()
+        ));
     }
-    
+
     Ok(())
 }
 
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     // Check for grub binary in chroot environment like Python reference
-    let grub = if Path::new("/mnt/root/usr/sbin/grub-install").exists() || Path::new("/mnt/root/sbin/grub-install").exists() {
+    let grub = if Path::new("/mnt/root/usr/sbin/grub-install").exists()
+        || Path::new("/mnt/root/sbin/grub-install").exists()
+    {
         "grub"
-    } else if Path::new("/mnt/root/usr/sbin/grub2-install").exists() || Path::new("/mnt/root/sbin/grub2-install").exists() {
+    } else if Path::new("/mnt/root/usr/sbin/grub2-install").exists()
+        || Path::new("/mnt/root/sbin/grub2-install").exists()
+    {
         "grub2"
     } else {
         bail!("GRUB installer not found in chroot environment");
     };
-    
-
 
     if platform.contains("efi") {
         // Install GRUB for EFI systems - run INSIDE chroot like Python reference
@@ -1800,17 +2012,17 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             grub, platform
         );
         chroot(&grub_install_cmd)?;
-        
+
         // Generate GRUB config using exact same path as Python reference
         // Ensure EFI partition is writable and use explicit GRUB config
         info("Ensuring EFI partition is writable for GRUB config generation");
         chroot("mount -o remount,rw /boot/efi")?;
-        
+
         // Verify GRUB environment before running grub-mkconfig
         info("Verifying GRUB environment before config generation");
         verify_grub_environment()?;
         test_grub_probe_comprehensive()?;
-        
+
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         chroot(&grub_mkconfig_cmd)?;
@@ -1821,21 +2033,21 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             grub, platform, device
         );
         chroot(&grub_install_cmd)?;
-        
+
         // Ensure boot partition is writable for GRUB config generation
         info("Ensuring boot partition is writable for GRUB config generation");
         chroot("mount -o remount,rw /boot/efi")?;
-        
+
         // Verify GRUB environment before running grub-mkconfig
         info("Verifying GRUB environment before config generation");
         verify_grub_environment()?;
         test_grub_probe_comprehensive()?;
-        
+
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         chroot(&grub_mkconfig_cmd)?;
     }
-    
+
     Ok(())
 }
 
@@ -1849,7 +2061,11 @@ fn post_install(config: &Config) -> Result<()> {
             safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount -L ROOTS -o subvol=overlay /mnt/root/overlay")?;
             execute("mount -L ROOTS -o subvol=home /mnt/root/home")?;
-            ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
+            (
+                "/mnt/root/overlay/etc",
+                "/mnt/root/overlay/var",
+                "/mnt/root/overlay/usr",
+            )
         }
         "btrfs_encryption_dev" => {
             // ROOTS is ext4 root filesystem, already mounted as root.img
@@ -1861,7 +2077,11 @@ fn post_install(config: &Config) -> Result<()> {
             safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount /dev/mapper/regicideos -o subvol=overlay /mnt/root/overlay")?;
             execute("mount /dev/mapper/regicideos -o subvol=home /mnt/root/home")?;
-            ("/mnt/root/overlay/etc", "/mnt/root/overlay/var", "/mnt/root/overlay/usr")
+            (
+                "/mnt/root/overlay/etc",
+                "/mnt/root/overlay/var",
+                "/mnt/root/overlay/usr",
+            )
         }
         _ => {
             if !Path::new("/dev/disk/by-label/OVERLAY").exists() {
@@ -1874,7 +2094,11 @@ fn post_install(config: &Config) -> Result<()> {
             safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount -L OVERLAY /mnt/root/overlay")?;
             execute("mount -L HOME /mnt/root/home")?;
-            ("/mnt/root/overlay", "/mnt/root/overlay", "/mnt/root/overlay")
+            (
+                "/mnt/root/overlay",
+                "/mnt/root/overlay",
+                "/mnt/root/overlay",
+            )
         }
     };
 
@@ -1929,7 +2153,11 @@ fn post_install(config: &Config) -> Result<()> {
     let flatpaks = get_flatpak_packages(&config.applications);
     if !flatpaks.is_empty() {
         safe_create_dir_all("/mnt/root/etc/declare", "/mnt/root/etc")?;
-        safe_write_file("/mnt/root/etc/declare/flatpak", flatpaks.as_bytes(), "/mnt/root/etc")?;
+        safe_write_file(
+            "/mnt/root/etc/declare/flatpak",
+            flatpaks.as_bytes(),
+            "/mnt/root/etc",
+        )?;
 
         if !Path::new("/mnt/root/usr/bin/rc-service").exists() {
             chroot("systemctl enable declareflatpak")?;
@@ -1944,38 +2172,46 @@ fn post_install(config: &Config) -> Result<()> {
 // Input validation functions
 fn validate_device_path(path: &str) -> Result<()> {
     // Allow common block device patterns: /dev/sd*, /dev/nvme*, /dev/hd*, /dev/vd*, /dev/mmcblk*
-    let device_regex = regex::Regex::new(r"^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|hd[a-z]+|vd[a-z]+|mmcblk[0-9]+)(p[0-9]+)?$")?;
+    let device_regex = regex::Regex::new(
+        r"^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|hd[a-z]+|vd[a-z]+|mmcblk[0-9]+)(p[0-9]+)?$",
+    )?;
     if !device_regex.is_match(path) {
         bail!("Invalid device path");
     }
-    
+
     // Prevent dangerous device paths (but allow legitimate block devices)
     let dangerous_exact = [
-        "/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom",
-        "/dev/mem", "/dev/kmem", "/dev/port", "/dev/console", "/dev/initctl",
+        "/dev/null",
+        "/dev/zero",
+        "/dev/full",
+        "/dev/random",
+        "/dev/urandom",
+        "/dev/mem",
+        "/dev/kmem",
+        "/dev/port",
+        "/dev/console",
+        "/dev/initctl",
     ];
-    
-    let dangerous_prefixes = [
-        "/dev/shm/", "/dev/pts/", "/dev/mqueue/", "/dev/hugepages/",
-    ];
-    
+
+    let dangerous_prefixes = ["/dev/shm/", "/dev/pts/", "/dev/mqueue/", "/dev/hugepages/"];
+
     // Block exact matches to dangerous devices
     if dangerous_exact.contains(&path) {
         bail!("Device access denied");
     }
-    
+
     // Block dangerous prefixes
     for dangerous in &dangerous_prefixes {
         if path.starts_with(dangerous) {
             bail!("Device access denied");
         }
     }
-    
+
     // Allow whole disk devices but warn about partitions for user selection
     if path.contains("p") && path.chars().last().unwrap_or('a').is_ascii_digit() {
         // This is a partition, not a whole disk - still allow but could warn
     }
-    
+
     Ok(())
 }
 
@@ -1986,21 +2222,56 @@ fn validate_username(username: &str) -> Result<()> {
     if !username_regex.is_match(username) {
         bail!("Invalid username format");
     }
-    
+
     // Reserved usernames
     let reserved = [
-        "root", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail",
-        "news", "uucp", "proxy", "www-data", "backup", "list", "irc", "gnats",
-        "nobody", "systemd-network", "systemd-resolve", "syslog", "messagebus",
-        "uuidd", "dnsmasq", "usbmux", "rtkit", "pulse", "speech-dispatcher",
-        "avahi", "saned", "colord", "hplip", "geoclue", "gnome-initial-setup",
-        "gdm", "sshd", "ntp", "postgres", "mysql", "oracle", "tomcat",
+        "root",
+        "daemon",
+        "bin",
+        "sys",
+        "sync",
+        "games",
+        "man",
+        "lp",
+        "mail",
+        "news",
+        "uucp",
+        "proxy",
+        "www-data",
+        "backup",
+        "list",
+        "irc",
+        "gnats",
+        "nobody",
+        "systemd-network",
+        "systemd-resolve",
+        "syslog",
+        "messagebus",
+        "uuidd",
+        "dnsmasq",
+        "usbmux",
+        "rtkit",
+        "pulse",
+        "speech-dispatcher",
+        "avahi",
+        "saned",
+        "colord",
+        "hplip",
+        "geoclue",
+        "gnome-initial-setup",
+        "gdm",
+        "sshd",
+        "ntp",
+        "postgres",
+        "mysql",
+        "oracle",
+        "tomcat",
     ];
-    
+
     if reserved.contains(&username) {
         bail!("Username not available");
     }
-    
+
     Ok(())
 }
 
@@ -2010,7 +2281,7 @@ fn validate_url(url: &str) -> Result<()> {
     if !url_regex.is_match(url) {
         bail!("Invalid URL format");
     }
-    
+
     // Only allow official repositories
     let allowed_domains = [
         "repo.regicideoslinux.com",
@@ -2018,18 +2289,18 @@ fn validate_url(url: &str) -> Result<()> {
         "repo.xenialinux.com",
         "xenialinux.com",
     ];
-    
+
     let domain = regex::Regex::new(r"^https://([a-zA-Z0-9.-]+)")
         .unwrap()
         .captures(url)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str())
         .unwrap_or("");
-    
+
     if !allowed_domains.contains(&domain) {
         bail!("URL not authorized");
     }
-    
+
     Ok(())
 }
 
@@ -2059,7 +2330,8 @@ fn validate_package_set(applications: &str) -> Result<()> {
 
 fn sanitize_input(input: &str) -> String {
     // Remove null bytes and control characters
-    input.chars()
+    input
+        .chars()
         .filter(|c| *c != '\0' && !c.is_control() || *c == '\t' || *c == '\n' || *c == '\r')
         .collect()
 }
@@ -2067,93 +2339,96 @@ fn sanitize_input(input: &str) -> String {
 // Path traversal protection
 fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
     use std::path::{Path, PathBuf};
-    
+
     // Remove any dangerous characters
     let sanitized = sanitize_input(path);
-    
+
     // Convert to absolute path
     let absolute_path = if sanitized.starts_with('/') {
         PathBuf::from(&sanitized)
     } else {
         std::env::current_dir()?.join(&sanitized)
     };
-    
+
     // Get canonical path for allowed base (must exist)
-    let base_path = Path::new(allowed_base).canonicalize()
+    let base_path = Path::new(allowed_base)
+        .canonicalize()
         .with_context(|| format!("Base directory does not exist: {}", allowed_base))?;
-    
+
     // For validation, check if the path would be within base after creation
     // We need to handle the case where the path doesn't exist yet (for directory creation)
     let path_to_check = if absolute_path.exists() {
-        absolute_path.canonicalize()
+        absolute_path
+            .canonicalize()
             .unwrap_or_else(|_| absolute_path.clone())
     } else {
         // For non-existent paths, validate the parent directory exists and is within bounds
-        let parent = absolute_path.parent()
+        let parent = absolute_path
+            .parent()
             .ok_or_else(|| anyhow::anyhow!("Invalid path: no parent directory"))?;
-        
+
         if !parent.exists() {
             bail!("Parent directory does not exist: {}", parent.display());
         }
-        
-        parent.canonicalize()
+
+        parent
+            .canonicalize()
             .map(|p| p.join(absolute_path.file_name().unwrap_or_default()))
             .unwrap_or(absolute_path.clone())
     };
-    
+
     // Ensure the path is within the allowed base directory
     if !path_to_check.starts_with(&base_path) {
-        bail!("Path access denied: {} is outside allowed base {}", path_to_check.display(), base_path.display());
+        bail!(
+            "Path access denied: {} is outside allowed base {}",
+            path_to_check.display(),
+            base_path.display()
+        );
     }
-    
+
     // Additional checks for dangerous patterns
     let path_str = absolute_path.to_string_lossy();
     let dangerous_patterns = [
-        "..", "~", "$HOME", "/etc/", "/root/", "/var/", "/usr/",
-        "/bin/", "/sbin/", "/lib/", "/proc/", "/sys/", "/dev/",
+        "..", "~", "$HOME", "/etc/", "/root/", "/var/", "/usr/", "/bin/", "/sbin/", "/lib/",
+        "/proc/", "/sys/", "/dev/",
     ];
-    
+
     for pattern in &dangerous_patterns {
         if path_str.contains(pattern) && !path_str.starts_with(allowed_base) {
             bail!("Path access denied: dangerous pattern detected");
         }
     }
-    
+
     Ok(absolute_path)
 }
 
 // Safe file operations with path validation
 fn safe_create_dir_all(path: &str, allowed_base: &str) -> Result<()> {
     let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::create_dir_all(validated_path)
-        .with_context(|| "Failed to create directory")?;
+    fs::create_dir_all(validated_path).with_context(|| "Failed to create directory")?;
     Ok(())
 }
 
 fn safe_write_file(path: &str, content: &[u8], allowed_base: &str) -> Result<()> {
     let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::write(validated_path, content)
-        .with_context(|| "Failed to write file")?;
+    fs::write(validated_path, content).with_context(|| "Failed to write file")?;
     Ok(())
 }
 
 fn safe_read_file(path: &str, allowed_base: &str) -> Result<String> {
     let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::read_to_string(&validated_path)
-        .with_context(|| "Failed to read file")
+    fs::read_to_string(&validated_path).with_context(|| "Failed to read file")
 }
 
 fn safe_remove_file(path: &str, allowed_base: &str) -> Result<()> {
     let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::remove_file(validated_path)
-        .with_context(|| "Failed to remove file")?;
+    fs::remove_file(validated_path).with_context(|| "Failed to remove file")?;
     Ok(())
 }
 
 fn safe_remove_dir_all(path: &str, allowed_base: &str) -> Result<()> {
     let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::remove_dir_all(validated_path)
-        .with_context(|| "Failed to remove directory")?;
+    fs::remove_dir_all(validated_path).with_context(|| "Failed to remove directory")?;
     Ok(())
 }
 
@@ -2165,10 +2440,10 @@ mod tests_main {
     fn test_validate_safe_path_nonexistent() -> Result<()> {
         // Test that validate_safe_path works for non-existent paths (for directory creation)
         std::fs::create_dir_all("/tmp/test_base")?;
-        
+
         let result = validate_safe_path("/tmp/test_base/new_dir", "/tmp/test_base");
         assert!(result.is_ok());
-        
+
         // Cleanup
         std::fs::remove_dir_all("/tmp/test_base")?;
         Ok(())
@@ -2178,10 +2453,10 @@ mod tests_main {
     fn test_validate_safe_path_exists() -> Result<()> {
         // Test that validate_safe_path works for existing paths
         std::fs::create_dir_all("/tmp/test_base/existing_dir")?;
-        
+
         let result = validate_safe_path("/tmp/test_base/existing_dir", "/tmp/test_base");
         assert!(result.is_ok());
-        
+
         // Cleanup
         std::fs::remove_dir_all("/tmp/test_base")?;
         Ok(())
@@ -2191,10 +2466,10 @@ mod tests_main {
     fn test_validate_safe_path_outside_base() -> Result<()> {
         // Test that validate_safe_path rejects paths outside base
         std::fs::create_dir_all("/tmp/test_base")?;
-        
+
         let result = validate_safe_path("/tmp/other_dir", "/tmp/test_base");
         assert!(result.is_err());
-        
+
         // Cleanup
         std::fs::remove_dir_all("/tmp/test_base")?;
         Ok(())
@@ -2210,56 +2485,68 @@ mod boot_overlay_tests {
     fn test_boot_overlay_creation_scenario() -> Result<()> {
         // Create test environment exactly like installer does
         fs::create_dir_all("/tmp/test_mnt")?;
-        
+
         // This is the exact call that was failing in the installer
         println!("Testing exact installer scenario: safe_create_dir_all(\"/tmp/test_mnt/boot_overlay\", \"/tmp/test_mnt\")");
-        
+
         let result = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
-        
+
         // Verify it succeeds
-        assert!(result.is_ok(), "boot_overlay creation should succeed: {:?}", result);
-        
+        assert!(
+            result.is_ok(),
+            "boot_overlay creation should succeed: {:?}",
+            result
+        );
+
         // Verify directory was actually created
-        assert!(std::path::Path::new("/tmp/test_mnt/boot_overlay").exists(), 
-                "boot_overlay directory should exist after creation");
-        
+        assert!(
+            std::path::Path::new("/tmp/test_mnt/boot_overlay").exists(),
+            "boot_overlay directory should exist after creation"
+        );
+
         // Cleanup
         fs::remove_dir_all("/tmp/test_mnt")?;
-        
+
         println!("✅ boot_overlay creation test passed!");
         Ok(())
     }
-    
-    #[test] 
+
+    #[test]
     fn test_multiple_boot_overlay_calls() -> Result<()> {
         // Test multiple calls like installer does
         fs::create_dir_all("/tmp/test_mnt")?;
-        
+
         // First call
         let result1 = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
         assert!(result1.is_ok(), "First call should succeed");
-        
+
         // Second call (should not fail even though directory exists)
         let result2 = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
         assert!(result2.is_ok(), "Second call should succeed");
-        
+
         // Cleanup
         fs::remove_dir_all("/tmp/test_mnt")?;
-        
+
         println!("✅ Multiple boot_overlay calls test passed!");
         Ok(())
     }
 }
 
 fn get_input(prompt: &str, default: &str) -> String {
-    print!("{}. Valid options are {}\n{}[{}]{}: ", 
-           prompt, "", Colours::BLUE, default, Colours::ENDC);
+    print!(
+        "{}. Valid options are {}\n{}[{}]{}: ",
+        prompt,
+        "",
+        Colours::BLUE,
+        default,
+        Colours::ENDC
+    );
     io::stdout().flush().unwrap();
-    
+
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
     let input = sanitize_input(input.trim());
-    
+
     if input.is_empty() {
         default.to_string()
     } else {
@@ -2278,7 +2565,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             die("Invalid or missing drive in config");
         }
     }
-    
+
     // Validate drive path security
     validate_device_path(&config.drive)?;
 
@@ -2288,10 +2575,16 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
         config.repository = REGICIDE_REPOSITORY.to_string();
     } else if config.repository != REGICIDE_REPOSITORY {
         if interactive {
-            warn(&format!("RegicideOS only supports the official Xenia repository. Using: {}", REGICIDE_REPOSITORY));
+            warn(&format!(
+                "RegicideOS only supports the official Xenia repository. Using: {}",
+                REGICIDE_REPOSITORY
+            ));
             config.repository = REGICIDE_REPOSITORY.to_string();
         } else {
-            die(&format!("RegicideOS only supports the official Xenia repository: {}", REGICIDE_REPOSITORY));
+            die(&format!(
+                "RegicideOS only supports the official Xenia repository: {}",
+                REGICIDE_REPOSITORY
+            ));
         }
     }
 
@@ -2309,10 +2602,16 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
         config.flavour = REGICIDE_FLAVOUR.to_string();
     } else if config.flavour != REGICIDE_FLAVOUR {
         if interactive {
-            warn(&format!("RegicideOS only supports the cosmic-fedora flavour. Using: {}", REGICIDE_FLAVOUR));
+            warn(&format!(
+                "RegicideOS only supports the cosmic-fedora flavour. Using: {}",
+                REGICIDE_FLAVOUR
+            ));
             config.flavour = REGICIDE_FLAVOUR.to_string();
         } else {
-            die(&format!("RegicideOS only supports the cosmic-fedora flavour: {}", REGICIDE_FLAVOUR));
+            die(&format!(
+                "RegicideOS only supports the cosmic-fedora flavour: {}",
+                REGICIDE_FLAVOUR
+            ));
         }
     }
 
@@ -2322,7 +2621,10 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     // Verify the cosmic-desktop flavour is available in the repository
     let flavours = get_flavours(&config.repository).await?;
     if !flavours.contains(&config.flavour) {
-        die(&format!("The {} flavour is not available in the repository", config.flavour));
+        die(&format!(
+            "The {} flavour is not available in the repository",
+            config.flavour
+        ));
     }
 
     // Validate release branch
@@ -2330,7 +2632,10 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     if config.release_branch.is_empty() || !releases.contains(&config.release_branch) {
         if interactive {
             println!("Available releases: {:?}", releases);
-            config.release_branch = get_input("Enter release branch", releases.first().unwrap_or(&"main".to_string()));
+            config.release_branch = get_input(
+                "Enter release branch",
+                releases.first().unwrap_or(&"main".to_string()),
+            );
         } else {
             die("Invalid or missing release branch in config");
         }
@@ -2346,7 +2651,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             die("Invalid or missing filesystem in config");
         }
     }
-    
+
     // Validate filesystem type security
     validate_filesystem_type(&config.filesystem)?;
 
@@ -2359,7 +2664,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
                 die("Invalid username in config");
             }
         }
-        
+
         // Additional username security validation
         if !config.username.is_empty() {
             validate_username(&config.username)?;
@@ -2376,7 +2681,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             die("Invalid or missing applications in config");
         }
     }
-    
+
     // Validate package set security
     validate_package_set(&config.applications)?;
 
@@ -2385,20 +2690,20 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
 
 fn cleanup_on_failure() {
     warn("Cleaning up due to installation failure...");
-    
+
     // Unmount filesystems
     let _ = execute("umount -R /mnt/root 2>/dev/null");
     let _ = execute("umount /mnt/gentoo 2>/dev/null");
     let _ = execute("umount /mnt/temp_btrfs 2>/dev/null");
-    
+
     // Close LUKS devices
     let _ = execute("cryptsetup close regicideos 2>/dev/null");
-    
+
     // Remove temporary directories safely
     let _ = safe_remove_dir_all("/mnt/temp_btrfs", "/mnt");
     let _ = safe_remove_dir_all("/mnt/gentoo", "/mnt");
     let _ = safe_remove_dir_all("/mnt/root", "/mnt");
-    
+
     info("Cleanup completed");
 }
 
@@ -2407,14 +2712,15 @@ async fn main() -> Result<()> {
     // Set up cleanup handler
     let cleanup_flag = Arc::new(AtomicBool::new(false));
     let cleanup_flag_clone = cleanup_flag.clone();
-    
+
     ctrlc::set_handler(move || {
         if !cleanup_flag_clone.load(Ordering::Relaxed) {
             cleanup_flag_clone.store(true, Ordering::Relaxed);
             cleanup_on_failure();
             std::process::exit(1);
         }
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
     let matches = Command::new("RegicideOS Installer")
         .about("Program to install RegicideOS")
         .arg(
@@ -2422,7 +2728,7 @@ async fn main() -> Result<()> {
                 .short('c')
                 .long("config")
                 .value_name("FILE")
-                .help("Run the installer automated from a toml config file")
+                .help("Run the installer automated from a toml config file"),
         )
         .get_matches();
 
@@ -2431,7 +2737,10 @@ async fn main() -> Result<()> {
 
     print_banner();
 
-    info(&format!("{} detected.", if is_efi() { "EFI" } else { "BIOS" }));
+    info(&format!(
+        "{} detected.",
+        if is_efi() { "EFI" } else { "BIOS" }
+    ));
 
     let mut config = Config {
         drive: String::new(),
@@ -2451,13 +2760,41 @@ async fn main() -> Result<()> {
         let config_content = safe_read_file(config_path, ".")?;
         let config_toml: toml::Value = toml::from_str(&config_content)?;
 
-        config.drive = config_toml.get("drive").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        config.repository = config_toml.get("repository").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        config.flavour = config_toml.get("flavour").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        config.release_branch = config_toml.get("release_branch").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        config.filesystem = config_toml.get("filesystem").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        config.username = config_toml.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        config.applications = config_toml.get("applications").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        config.drive = config_toml
+            .get("drive")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        config.repository = config_toml
+            .get("repository")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        config.flavour = config_toml
+            .get("flavour")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        config.release_branch = config_toml
+            .get("release_branch")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        config.filesystem = config_toml
+            .get("filesystem")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        config.username = config_toml
+            .get("username")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        config.applications = config_toml
+            .get("applications")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
     }
 
     if interactive {
@@ -2506,7 +2843,7 @@ async fn main() -> Result<()> {
     post_install(&config_parsed)?;
 
     info("Installation completed successfully!");
-    
+
     // Display completion message
     let separator = "=".repeat(60);
     println!();
