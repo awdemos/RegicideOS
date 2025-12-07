@@ -1458,7 +1458,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 
 fn chroot(command: &str) -> Result<()> {
     // Execute chroot with proper PATH: chroot /mnt/root /bin/bash -c "export PATH=... && command"
-    let full_command = format!("chroot /mnt/root /bin/bash -c \"export PATH=/usr/sbin:/usr/bin:/sbin:/bin && {}\"", command);
+    let full_command = format!("chroot /mnt/root /bin/bash -c \"export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && {}\"", command);
 
     let output = ProcessCommand::new("bash")
         .args(&["-c", &full_command])
@@ -1484,7 +1484,7 @@ fn chroot(command: &str) -> Result<()> {
 
 fn chroot_with_output(command: &str) -> Result<String> {
     // Execute chroot with proper PATH and return output
-    let full_command = format!("chroot /mnt/root /bin/bash -c \"export PATH=/usr/sbin:/usr/bin:/sbin:/bin && {}\"", command);
+    let full_command = format!("chroot /mnt/root /bin/bash -c \"export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && {}\"", command);
 
     let output = ProcessCommand::new("bash")
         .args(&["-c", &full_command])
@@ -1778,7 +1778,7 @@ fn verify_grub_environment() -> Result<()> {
     // Check 1: Verify GRUB binaries are accessible in chroot environment
     info("Checking GRUB binary availability in chroot...");
     
-    // Check for GRUB mkconfig binary in chroot
+    // Check for GRUB mkconfig binary in chroot (prioritize sbin)
     let grub_mkconfig_check = match chroot_with_output("which grub-mkconfig 2>/dev/null || which grub2-mkconfig 2>/dev/null || echo 'not found'") {
         Ok(output) => {
             let result = output.trim();
@@ -1786,7 +1786,19 @@ fn verify_grub_environment() -> Result<()> {
                 info(&format!("✓ GRUB mkconfig found: {}", result));
                 true
             } else {
-                false
+                // Try direct path check if which fails
+                match chroot_with_output("ls /usr/sbin/grub-mkconfig /usr/sbin/grub2-mkconfig 2>/dev/null || echo 'not found'") {
+                    Ok(direct_output) => {
+                        let direct_result = direct_output.trim();
+                        if direct_result != "not found" && !direct_result.is_empty() {
+                            info(&format!("✓ GRUB mkconfig found in /usr/sbin: {}", direct_result));
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Err(_) => false
+                }
             }
         }
         Err(e) => {
@@ -1795,7 +1807,7 @@ fn verify_grub_environment() -> Result<()> {
         }
     };
     
-    // Check for GRUB probe binary in chroot
+    // Check for GRUB probe binary in chroot (prioritize sbin)
     let grub_probe_check = match chroot_with_output("which grub-probe 2>/dev/null || which grub2-probe 2>/dev/null || echo 'not found'") {
         Ok(output) => {
             let result = output.trim();
@@ -1803,7 +1815,19 @@ fn verify_grub_environment() -> Result<()> {
                 info(&format!("✓ GRUB probe found: {}", result));
                 true
             } else {
-                false
+                // Try direct path check if which fails
+                match chroot_with_output("ls /usr/sbin/grub-probe /usr/sbin/grub2-probe 2>/dev/null || echo 'not found'") {
+                    Ok(direct_output) => {
+                        let direct_result = direct_output.trim();
+                        if direct_result != "not found" && !direct_result.is_empty() {
+                            info(&format!("✓ GRUB probe found in /usr/sbin: {}", direct_result));
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Err(_) => false
+                }
             }
         }
         Err(e) => {
@@ -1982,8 +2006,26 @@ fn test_grub_probe_comprehensive() -> Result<()> {
                     "grub-probe"
                 }
             } else {
-                warn("GRUB probe binary not found in chroot environment - skipping probe tests");
-                return Ok(()); // Don't fail, just skip tests
+                // Try direct path check if which fails
+                match chroot_with_output("ls /usr/sbin/grub-probe /usr/sbin/grub2-probe 2>/dev/null || echo 'not found'") {
+                    Ok(direct_output) => {
+                        let direct_result = direct_output.trim();
+                        if direct_result != "not found" && !direct_result.is_empty() {
+                            if direct_result.contains("grub2-probe") {
+                                "grub2-probe"
+                            } else {
+                                "grub-probe"
+                            }
+                        } else {
+                            warn("GRUB probe binary not found in chroot environment - skipping probe tests");
+                            return Ok(()); // Don't fail, just skip tests
+                        }
+                    }
+                    Err(_) => {
+                        warn("GRUB probe binary not found in chroot environment - skipping probe tests");
+                        return Ok(());
+                    }
+                }
             }
         }
         Err(e) => {
@@ -2059,7 +2101,24 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                     "grub"
                 }
             } else {
-                bail!("GRUB installer not found in chroot environment");
+                // Try direct path check if which fails
+                match chroot_with_output("ls /usr/sbin/grub-install /usr/sbin/grub2-install 2>/dev/null || echo 'not found'") {
+                    Ok(direct_output) => {
+                        let direct_result = direct_output.trim();
+                        if direct_result != "not found" && !direct_result.is_empty() {
+                            if direct_result.contains("grub2-install") {
+                                "grub2"
+                            } else {
+                                "grub"
+                            }
+                        } else {
+                            bail!("GRUB installer not found in chroot environment");
+                        }
+                    }
+                    Err(e) => {
+                        bail!("Failed to check for GRUB installer: {}", e);
+                    }
+                }
             }
         }
         Err(e) => {
