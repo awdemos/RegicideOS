@@ -1940,7 +1940,7 @@ fn verify_grub_environment() -> Result<()> {
 
     // Check 7: Test device access that grub-probe will need
     info("Testing device access for GRUB...");
-    let device_tests = ["/dev/sda", "/dev/nvme0n1", "/dev/mapper/regicideos"];
+    let device_tests = ["/dev/sda", "/dev/mapper/regicideos"];
 
     for device in &device_tests {
         if Path::new(device).exists() {
