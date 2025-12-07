@@ -1681,13 +1681,8 @@ fn mount() -> Result<()> {
     execute("mount --bind /run /mnt/root/run")?;
     execute("mount --make-slave /mnt/root/run")?;
 
-    // Create writable /boot overlay since root.img is read-only squashfs
-    info("Creating writable /boot overlay for GRUB configuration");
-    safe_create_dir_all("/mnt/boot_overlay", "/mnt")?;
-    execute("mount -t tmpfs boot_overlay /mnt/boot_overlay -o size=1G")?;
-    execute("mount --bind /mnt/boot_overlay /mnt/root/boot")?;
-    
-    // Ensure proper boot directory structure for GRUB
+    // Ensure proper boot directory structure for GRUB on actual boot partition
+    info("Creating boot directory structure for GRUB");
     safe_create_dir_all("/mnt/root/boot/grub", "/mnt/root/boot")?;
     
     // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
@@ -1967,10 +1962,10 @@ fn verify_grub_environment() -> Result<()> {
     // Check 9: Verify sufficient disk space (at least 50MB for GRUB)
     info("Checking disk space for GRUB configuration...");
     // This is a simplified check - you might want to use statvfs for accurate space checking
-    if Path::new("/mnt/boot_overlay").exists() {
-        info("Boot overlay exists for GRUB configuration");
+    if Path::new("/mnt/root/boot").exists() {
+        info("Boot directory exists for GRUB configuration");
     } else {
-        bail!("Boot overlay not available for GRUB configuration");
+        bail!("Boot directory not available for GRUB configuration");
     }
 
     // Check 10: Verify GRUB crypto modules for encrypted boot support
@@ -2513,62 +2508,6 @@ mod tests_main {
 
         // Cleanup
         std::fs::remove_dir_all("/tmp/test_base")?;
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod boot_overlay_tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_boot_overlay_creation_scenario() -> Result<()> {
-        // Create test environment exactly like installer does
-        fs::create_dir_all("/tmp/test_mnt")?;
-
-        // This is the exact call that was failing in the installer
-        println!("Testing exact installer scenario: safe_create_dir_all(\"/tmp/test_mnt/boot_overlay\", \"/tmp/test_mnt\")");
-
-        let result = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
-
-        // Verify it succeeds
-        assert!(
-            result.is_ok(),
-            "boot_overlay creation should succeed: {:?}",
-            result
-        );
-
-        // Verify directory was actually created
-        assert!(
-            std::path::Path::new("/tmp/test_mnt/boot_overlay").exists(),
-            "boot_overlay directory should exist after creation"
-        );
-
-        // Cleanup
-        fs::remove_dir_all("/tmp/test_mnt")?;
-
-        println!("✅ boot_overlay creation test passed!");
-        Ok(())
-    }
-
-    #[test]
-    fn test_multiple_boot_overlay_calls() -> Result<()> {
-        // Test multiple calls like installer does
-        fs::create_dir_all("/tmp/test_mnt")?;
-
-        // First call
-        let result1 = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
-        assert!(result1.is_ok(), "First call should succeed");
-
-        // Second call (should not fail even though directory exists)
-        let result2 = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
-        assert!(result2.is_ok(), "Second call should succeed");
-
-        // Cleanup
-        fs::remove_dir_all("/tmp/test_mnt")?;
-
-        println!("✅ Multiple boot_overlay calls test passed!");
         Ok(())
     }
 }
