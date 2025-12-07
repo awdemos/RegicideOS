@@ -1686,12 +1686,8 @@ fn post_install(config: &Config) -> Result<()> {
 
         let mut attempts = 0;
         loop {
-            let result = ProcessCommand::new("chroot")
-                .args(["/mnt/root", "/bin/bash", "-c", &format!("passwd {}", config.username)])
-                .status();
-                
-            match result {
-                Ok(status) if status.success() => break,
+            match chroot(&format!("passwd {}", config.username)) {
+                Ok(_) => break,
                 _ => {
                     attempts += 1;
                     if attempts >= 3 {
