@@ -1891,35 +1891,7 @@ fn verify_grub_environment() -> Result<()> {
         // Don't fail the installation for missing probe binary
     }
 
-    // Check 2: Test grub-probe functionality directly
-    info("Testing grub-probe functionality...");
-    let probe_tests = [
-        ("device", "/boot/efi"),
-        ("fs", "/boot/efi"),
-        ("abstraction", "/boot/efi"),
-        ("target", "/boot/efi"),
-    ];
 
-    for (probe_arg, target) in &probe_tests {
-        let probe_cmd = format!("grub-probe --{} {}", probe_arg, target);
-        match chroot_with_output(&probe_cmd) {
-            Ok(output) => {
-                info(&format!(
-                    "grub-probe --{} {} => {}",
-                    probe_arg,
-                    target,
-                    output.trim()
-                ));
-            }
-            Err(e) => {
-                warn(&format!(
-                    "grub-probe --{} {} failed: {}",
-                    probe_arg, target, e
-                ));
-                // Don't fail immediately, but collect issues
-            }
-        }
-    }
 
     // Check 3: Verify boot directory is writable
     let boot_test_file = "/mnt/root/boot/.grub_test_write";
@@ -1989,11 +1961,6 @@ fn verify_grub_environment() -> Result<()> {
     if is_efi() {
         if let Ok(efi_device) = find_partition_by_label("EFI") {
             info(&format!("EFI partition found: {}", efi_device));
-            // Test if grub-probe can detect the filesystem
-            let fs_probe_cmd = format!("grub-probe --fs {}", efi_device);
-            if let Err(e) = chroot_with_output(&fs_probe_cmd) {
-                warn(&format!("grub-probe cannot detect EFI filesystem: {}", e));
-            }
         }
     }
 
