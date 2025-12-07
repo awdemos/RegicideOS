@@ -150,7 +150,7 @@ If you need to build from source or use a custom configuration:
 ```bash
 # Install required packages in live environment
 # For Fedora:
-sudo dnf install git curl gcc btrfs-progs sgdisk
+sudo dnf -y install git curl gcc btrfs-progs sgdisk
 
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
