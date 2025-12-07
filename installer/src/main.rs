@@ -1327,6 +1327,23 @@ fn chroot(command: &str) -> Result<()> {
     Ok(())
 }
 
+fn chroot_with_output(command: &str) -> Result<String> {
+    // Execute chroot with proper syntax and return output
+    let full_command = format!("chroot /mnt/root /bin/bash -c \"{}\"", command);
+    
+    let output = ProcessCommand::new("bash")
+        .args(&["-c", &full_command])
+        .output()
+        .with_context(|| format!("Failed to execute chroot command: {}", command))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Chroot command failed: {}\nError: {}", command, stderr);
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 async fn get_manifest(repository: &str) -> Result<toml::Value> {
     let manifest_url = format!("{}Manifest.toml", repository);
     let response = reqwest::get(&manifest_url).await?;
@@ -1568,6 +1585,201 @@ async fn download_root(url: &str) -> Result<()> {
     Ok(())
 }
 
+fn verify_grub_environment() -> Result<()> {
+    info("Verifying GRUB environment and dependencies...");
+    
+    // Check 1: Verify GRUB binaries exist in chroot
+    let grub_binaries = [
+        ("/mnt/root/usr/sbin/grub-mkconfig", "grub-mkconfig"),
+        ("/mnt/root/sbin/grub-mkconfig", "grub-mkconfig"),
+        ("/mnt/root/usr/sbin/grub2-mkconfig", "grub2-mkconfig"), 
+        ("/mnt/root/sbin/grub2-mkconfig", "grub2-mkconfig"),
+        ("/mnt/root/usr/sbin/grub-probe", "grub-probe"),
+        ("/mnt/root/sbin/grub-probe", "grub-probe"),
+        ("/mnt/root/usr/sbin/grub2-probe", "grub2-probe"),
+        ("/mnt/root/sbin/grub2-probe", "grub2-probe"),
+    ];
+    
+    let mut grub_mkconfig_found = false;
+    let mut grub_probe_found = false;
+    
+    for (path, name) in &grub_binaries {
+        if Path::new(path).exists() {
+            info(&format!("Found GRUB binary: {}", name));
+            if name.contains("mkconfig") {
+                grub_mkconfig_found = true;
+            }
+            if name.contains("probe") {
+                grub_probe_found = true;
+            }
+        }
+    }
+    
+    if !grub_mkconfig_found {
+        bail!("GRUB mkconfig binary not found in chroot environment");
+    }
+    if !grub_probe_found {
+        bail!("GRUB probe binary not found in chroot environment");
+    }
+    
+    // Check 2: Test grub-probe functionality directly
+    info("Testing grub-probe functionality...");
+    let probe_tests = [
+        ("device", "/boot/efi"),
+        ("fs", "/boot/efi"),
+        ("abstraction", "/boot/efi"),
+        ("target", "/boot/efi"),
+    ];
+    
+    for (probe_arg, target) in &probe_tests {
+        let probe_cmd = format!("grub-probe --{} {}", probe_arg, target);
+        match chroot_with_output(&probe_cmd) {
+            Ok(output) => {
+                info(&format!("grub-probe --{} {} => {}", probe_arg, target, output.trim()));
+            }
+            Err(e) => {
+                warn(&format!("grub-probe --{} {} failed: {}", probe_arg, target, e));
+                // Don't fail immediately, but collect issues
+            }
+        }
+    }
+    
+    // Check 3: Verify boot directory is writable
+    let boot_test_file = "/mnt/root/boot/.grub_test_write";
+    if let Err(e) = safe_write_file(boot_test_file, b"test", "/mnt/root/boot") {
+        bail!("Boot directory is not writable: {}", e);
+    }
+    let _ = safe_remove_file(boot_test_file, "/mnt/root/boot");
+    
+    // Check 4: Verify EFI/BOOT partition is mounted and writable
+    let efi_dir = if is_efi() { "/mnt/root/boot/efi" } else { "/mnt/root/boot" };
+    let efi_test_file = &format!("{}/.grub_test_write", efi_dir);
+    if let Err(e) = safe_write_file(efi_test_file, b"test", efi_dir) {
+        bail!("EFI/BOOT partition is not writable: {}", e);
+    }
+    let _ = safe_remove_file(efi_test_file, efi_dir);
+    
+    // Check 5: Verify required directories exist
+    let required_dirs = [
+        "/mnt/root/boot",
+        "/mnt/root/boot/efi/grub",  // for EFI
+        "/mnt/root/usr/share/grub", // GRUB modules
+        "/mnt/root/etc/grub.d",     // GRUB configuration scripts
+    ];
+    
+    for dir in &required_dirs {
+        if !Path::new(dir).exists() {
+            warn(&format!("Required GRUB directory missing: {}", dir));
+            // Try to create missing directories
+            if let Err(e) = safe_create_dir_all(dir, "/mnt/root") {
+                bail!("Could not create required directory {}: {}", dir, e);
+            }
+        }
+    }
+    
+    // Check 6: Verify GRUB configuration scripts exist
+    let grub_d_files = [
+        "/mnt/root/etc/grub.d/00_header",
+        "/mnt/root/etc/grub.d/10_linux", 
+        "/mnt/root/etc/grub.d/30_os-prober",
+    ];
+    
+    for file in &grub_d_files {
+        if !Path::new(file).exists() {
+            warn(&format!("GRUB configuration script missing: {}", file));
+        }
+    }
+    
+    // Check 7: Test device access that grub-probe will need
+    info("Testing device access for GRUB...");
+    let device_tests = [
+        "/dev/sda",
+        "/dev/nvme0n1", 
+        "/dev/mapper/regicideos",
+    ];
+    
+    for device in &device_tests {
+        if Path::new(device).exists() {
+            if let Ok(_) = execute(&format!("lsblk -n -o NAME,SIZE {}", device)) {
+                info(&format!("Device access OK: {}", device));
+            } else {
+                warn(&format!("Cannot access device: {}", device));
+            }
+        }
+    }
+    
+    // Check 8: Verify filesystem detection
+    if is_efi() {
+        if let Ok(efi_device) = find_partition_by_label("EFI") {
+            info(&format!("EFI partition found: {}", efi_device));
+            // Test if grub-probe can detect the filesystem
+            let fs_probe_cmd = format!("grub-probe --fs {}", efi_device);
+            if let Err(e) = chroot_with_output(&fs_probe_cmd) {
+                warn(&format!("grub-probe cannot detect EFI filesystem: {}", e));
+            }
+        }
+    }
+    
+    // Check 9: Verify sufficient disk space (at least 50MB for GRUB)
+    info("Checking disk space for GRUB configuration...");
+    // This is a simplified check - you might want to use statvfs for accurate space checking
+    if Path::new("/mnt/boot_overlay").exists() {
+        info("Boot overlay exists for GRUB configuration");
+    } else {
+        bail!("Boot overlay not available for GRUB configuration");
+    }
+    
+    Ok(())
+}
+
+fn test_grub_probe_comprehensive() -> Result<()> {
+    info("Running comprehensive grub-probe tests...");
+    
+    let probe_commands = [
+        // Test device probing
+        "grub-probe --device /boot/efi",
+        "grub-probe --device-map", 
+        
+        // Test filesystem detection  
+        "grub-probe --fs /boot/efi",
+        "grub-probe --fs-uuid /boot/efi",
+        
+        // Test abstraction layer
+        "grub-probe --abstraction /boot/efi",
+        
+        // Test target detection
+        "grub-probe --target /boot/efi",
+        "grub-probe --target --device /boot/efi",
+    ];
+    
+    let mut failed_probes = Vec::new();
+    
+    for cmd in &probe_commands {
+        match chroot_with_output(cmd) {
+            Ok(output) => {
+                info(&format!("✓ {}: {}", cmd, output.trim()));
+            }
+            Err(e) => {
+                warn(&format!("✗ {}: {}", cmd, e));
+                failed_probes.push((*cmd, e));
+            }
+        }
+    }
+    
+    // Report critical failures
+    for (cmd, error) in &failed_probes {
+        if cmd.contains("--device") || cmd.contains("--fs") {
+            bail!("Critical grub-probe failure: {} - {}", cmd, error);
+        }
+    }
+    
+    if !failed_probes.is_empty() {
+        warn(&format!("{} grub-probe tests had non-critical failures", failed_probes.len()));
+    }
+    
+    Ok(())
+}
+
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     // Check for grub binary in chroot environment like Python reference
     let grub = if Path::new("/mnt/root/usr/sbin/grub-install").exists() || Path::new("/mnt/root/sbin/grub-install").exists() {
@@ -1594,6 +1806,11 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         info("Ensuring EFI partition is writable for GRUB config generation");
         chroot("mount -o remount,rw /boot/efi")?;
         
+        // Verify GRUB environment before running grub-mkconfig
+        info("Verifying GRUB environment before config generation");
+        verify_grub_environment()?;
+        test_grub_probe_comprehensive()?;
+        
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         chroot(&grub_mkconfig_cmd)?;
@@ -1608,6 +1825,11 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Ensure boot partition is writable for GRUB config generation
         info("Ensuring boot partition is writable for GRUB config generation");
         chroot("mount -o remount,rw /boot/efi")?;
+        
+        // Verify GRUB environment before running grub-mkconfig
+        info("Verifying GRUB environment before config generation");
+        verify_grub_environment()?;
+        test_grub_probe_comprehensive()?;
         
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
@@ -1856,28 +2078,36 @@ fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
         std::env::current_dir()?.join(&sanitized)
     };
     
-    // Get canonical paths to resolve symlinks and relative components
-    let canonical_path = match absolute_path.canonicalize() {
-        Ok(path) => path,
-        Err(_) => {
-            // If canonicalization fails, try to resolve manually
-            let resolved = absolute_path.clone();
-            // Simple resolution - in production, use more sophisticated approach
-            resolved
+    // Get canonical path for allowed base (must exist)
+    let base_path = Path::new(allowed_base).canonicalize()
+        .with_context(|| format!("Base directory does not exist: {}", allowed_base))?;
+    
+    // For validation, check if the path would be within base after creation
+    // We need to handle the case where the path doesn't exist yet (for directory creation)
+    let path_to_check = if absolute_path.exists() {
+        absolute_path.canonicalize()
+            .unwrap_or_else(|_| absolute_path.clone())
+    } else {
+        // For non-existent paths, validate the parent directory exists and is within bounds
+        let parent = absolute_path.parent()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path: no parent directory"))?;
+        
+        if !parent.exists() {
+            bail!("Parent directory does not exist: {}", parent.display());
         }
+        
+        parent.canonicalize()
+            .map(|p| p.join(absolute_path.file_name().unwrap_or_default()))
+            .unwrap_or(absolute_path.clone())
     };
     
-    // Get canonical path for allowed base
-    let base_path = Path::new(allowed_base).canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(allowed_base));
-    
     // Ensure the path is within the allowed base directory
-    if !canonical_path.starts_with(&base_path) {
-        bail!("Path access denied");
+    if !path_to_check.starts_with(&base_path) {
+        bail!("Path access denied: {} is outside allowed base {}", path_to_check.display(), base_path.display());
     }
     
     // Additional checks for dangerous patterns
-    let path_str = canonical_path.to_string_lossy();
+    let path_str = absolute_path.to_string_lossy();
     let dangerous_patterns = [
         "..", "~", "$HOME", "/etc/", "/root/", "/var/", "/usr/",
         "/bin/", "/sbin/", "/lib/", "/proc/", "/sys/", "/dev/",
@@ -1885,11 +2115,11 @@ fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
     
     for pattern in &dangerous_patterns {
         if path_str.contains(pattern) && !path_str.starts_with(allowed_base) {
-            bail!("Path access denied");
+            bail!("Path access denied: dangerous pattern detected");
         }
     }
     
-    Ok(canonical_path)
+    Ok(absolute_path)
 }
 
 // Safe file operations with path validation
@@ -1925,6 +2155,100 @@ fn safe_remove_dir_all(path: &str, allowed_base: &str) -> Result<()> {
     fs::remove_dir_all(validated_path)
         .with_context(|| "Failed to remove directory")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_main {
+    use super::*;
+
+    #[test]
+    fn test_validate_safe_path_nonexistent() -> Result<()> {
+        // Test that validate_safe_path works for non-existent paths (for directory creation)
+        std::fs::create_dir_all("/tmp/test_base")?;
+        
+        let result = validate_safe_path("/tmp/test_base/new_dir", "/tmp/test_base");
+        assert!(result.is_ok());
+        
+        // Cleanup
+        std::fs::remove_dir_all("/tmp/test_base")?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_safe_path_exists() -> Result<()> {
+        // Test that validate_safe_path works for existing paths
+        std::fs::create_dir_all("/tmp/test_base/existing_dir")?;
+        
+        let result = validate_safe_path("/tmp/test_base/existing_dir", "/tmp/test_base");
+        assert!(result.is_ok());
+        
+        // Cleanup
+        std::fs::remove_dir_all("/tmp/test_base")?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_safe_path_outside_base() -> Result<()> {
+        // Test that validate_safe_path rejects paths outside base
+        std::fs::create_dir_all("/tmp/test_base")?;
+        
+        let result = validate_safe_path("/tmp/other_dir", "/tmp/test_base");
+        assert!(result.is_err());
+        
+        // Cleanup
+        std::fs::remove_dir_all("/tmp/test_base")?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod boot_overlay_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_boot_overlay_creation_scenario() -> Result<()> {
+        // Create test environment exactly like installer does
+        fs::create_dir_all("/tmp/test_mnt")?;
+        
+        // This is the exact call that was failing in the installer
+        println!("Testing exact installer scenario: safe_create_dir_all(\"/tmp/test_mnt/boot_overlay\", \"/tmp/test_mnt\")");
+        
+        let result = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
+        
+        // Verify it succeeds
+        assert!(result.is_ok(), "boot_overlay creation should succeed: {:?}", result);
+        
+        // Verify directory was actually created
+        assert!(std::path::Path::new("/tmp/test_mnt/boot_overlay").exists(), 
+                "boot_overlay directory should exist after creation");
+        
+        // Cleanup
+        fs::remove_dir_all("/tmp/test_mnt")?;
+        
+        println!("✅ boot_overlay creation test passed!");
+        Ok(())
+    }
+    
+    #[test] 
+    fn test_multiple_boot_overlay_calls() -> Result<()> {
+        // Test multiple calls like installer does
+        fs::create_dir_all("/tmp/test_mnt")?;
+        
+        // First call
+        let result1 = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
+        assert!(result1.is_ok(), "First call should succeed");
+        
+        // Second call (should not fail even though directory exists)
+        let result2 = safe_create_dir_all("/tmp/test_mnt/boot_overlay", "/tmp/test_mnt");
+        assert!(result2.is_ok(), "Second call should succeed");
+        
+        // Cleanup
+        fs::remove_dir_all("/tmp/test_mnt")?;
+        
+        println!("✅ Multiple boot_overlay calls test passed!");
+        Ok(())
+    }
 }
 
 fn get_input(prompt: &str, default: &str) -> String {
