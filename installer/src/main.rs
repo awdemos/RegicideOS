@@ -792,39 +792,7 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     info(&format!("Partitioning drive {}", drive));
 
-    // Step 1: Aggressive cleanup to ensure device is completely free
-    info("Performing aggressive cleanup to ensure device is free...");
 
-    // Close LUKS containers and device-mapper tables
-    let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
-    let _ = execute("dmsetup remove_all 2>/dev/null || true");
-
-    // Unmount any existing partitions
-    let base_drive = drive.trim_end_matches('/');
-    for i in 1..=4 {
-        let part = if drive.contains("nvme") {
-            format!("{}p{}", base_drive, i)
-        } else {
-            format!("{}{}", base_drive, i)
-        };
-        let _ = execute(&format!("umount -f {} 2>/dev/null || true", part));
-        let _ = execute(&format!("umount -l {} 2>/dev/null || true", part));
-    }
-
-    // For NVMe drives, try a hardware reset if available
-    if drive.contains("nvme") && execute("which nvme").is_ok() {
-        info("Attempting NVMe hardware reset...");
-        let _ = execute(&format!("nvme reset {} 2>/dev/null || true", drive));
-        std::thread::sleep(std::time::Duration::from_secs(3));
-    }
-
-    // Force kernel to reread partition table and wipe it
-    info("Forcing kernel to reread partition table and wiping disk...");
-    let _ = execute(&format!("sgdisk --zap-all {} 2>/dev/null || true", drive));
-    let _ = execute(&format!("wipefs -af {} 2>/dev/null || true", drive));
-
-    // Wait for the kernel to settle
-    std::thread::sleep(std::time::Duration::from_secs(5));
 
     // Step 2: Create new partition table
     info("Creating new partition table");
