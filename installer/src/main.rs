@@ -1721,6 +1721,54 @@ fn mount() -> Result<()> {
     
     // Ensure proper boot directory structure for GRUB
     safe_create_dir_all("/mnt/root/boot/grub", "/mnt/root/boot")?;
+    
+    // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
+    // This fixes grub2-mkconfig calling grub2-probe from wrong location
+    info("Creating GRUB tool symlinks to fix hardcoded paths...");
+    let grub_links = [
+        ("grub-probe", "grub-probe"),
+        ("grub2-probe", "grub2-probe"),
+        ("grub-mkconfig", "grub-mkconfig"), 
+        ("grub2-mkconfig", "grub2-mkconfig"),
+    ];
+    
+    for (target, link_name) in &grub_links {
+        let target_path = format!("/mnt/root/usr/sbin/{}", target);
+        let link_path = format!("/mnt/root/usr/bin/{}", link_name);
+        
+        if Path::new(&target_path).exists() && !Path::new(&link_path).exists() {
+            // Use chroot to create symlink to ensure proper paths
+            let symlink_cmd = format!("ln -sf /usr/sbin/{} /usr/bin/{}", target, link_name);
+            if let Err(e) = chroot(&symlink_cmd) {
+                warn(&format!("Failed to create symlink {} -> {}: {}", link_name, target, e));
+            } else {
+                info(&format!("Created symlink: /usr/bin/{} -> /usr/sbin/{}", link_name, target));
+            }
+        }
+    }
+    
+    // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
+    // This fixes grub2-mkconfig calling grub2-probe from wrong location
+    info("Creating GRUB tool symlinks to fix hardcoded paths...");
+    let grub_links = [
+        ("grub-probe", "grub-probe"),
+        ("grub2-probe", "grub2-probe"),
+        ("grub-mkconfig", "grub-mkconfig"), 
+        ("grub2-mkconfig", "grub2-mkconfig"),
+    ];
+    
+    for (target, link_name) in &grub_links {
+        let target_path = format!("/mnt/root/usr/sbin/{}", target);
+        let link_path = format!("/mnt/root/usr/bin/{}", link_name);
+        
+        if Path::new(&target_path).exists() && !Path::new(&link_path).exists() {
+            if let Err(e) = std::os::unix::fs::symlink(&format!("/usr/sbin/{}", target), &link_path) {
+                warn(&format!("Failed to create symlink {} -> {}: {}", link_name, target, e));
+            } else {
+                info(&format!("Created symlink: /usr/bin/{} -> /usr/sbin/{}", link_name, target));
+            }
+        }
+    }
 
     // Mount EFI or BOOT partition based on system type
     if is_efi() {
@@ -2145,7 +2193,8 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         verify_grub_environment()?;
         test_grub_probe_comprehensive()?;
 
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
+        // Set environment variables to avoid boot_overlay path issues
+        let grub_mkconfig_cmd = format!("export GRUB_DEVICE_MAP=/boot/grub/device.map && export GRUB_DISABLE_OS_PROBER=true && {}-mkconfig -o /boot/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         chroot(&grub_mkconfig_cmd)?;
     } else {
@@ -2165,7 +2214,8 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         verify_grub_environment()?;
         test_grub_probe_comprehensive()?;
 
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
+        // Set environment variables to avoid boot_overlay path issues
+        let grub_mkconfig_cmd = format!("export GRUB_DEVICE_MAP=/boot/grub/device.map && export GRUB_DISABLE_OS_PROBER=true && {}-mkconfig -o /boot/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         chroot(&grub_mkconfig_cmd)?;
     }
