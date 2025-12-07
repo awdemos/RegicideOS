@@ -185,7 +185,7 @@ mod tests {
         let config = Config {
             drive: "/dev/sda".to_string(),
             repository: "https://repo.xenialinux.com/releases/".to_string(),
-            flavour: "cosmic-fedora".to_string(),
+            flavour: "cosmic-desktop".to_string(),
             release_branch: "main".to_string(),
             filesystem: "btrfs".to_string(),
             username: "testuser".to_string(),
@@ -213,7 +213,7 @@ mod integration_tests {
         let valid_config = Config {
             drive: "/dev/sda".to_string(),
             repository: "https://repo.xenialinux.com/releases/".to_string(),
-            flavour: "cosmic-fedora".to_string(),
+            flavour: "cosmic-desktop".to_string(),
             release_branch: "main".to_string(),
             filesystem: "btrfs".to_string(),
             username: "user".to_string(),
