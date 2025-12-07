@@ -90,10 +90,10 @@ fn print_banner() {
     println!("{}", Colours::ENDC);
 }
 
-// Execute commands with error output
+// Execute commands with full error output
 fn execute_with_output(command: &str) -> Result<String> {
     let output = ProcessCommand::new("sh")
-        .args(&["-c", &format!("{} 2>&1", command)])
+        .args(&["-c", command])
         .output()
         .with_context(|| format!("Failed to execute command: {}", command))?;
 
@@ -1103,6 +1103,10 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 verify_filesystem(current_name, "vfat")?;
             }
             "ext4" => {
+                println!("DEBUG: Entering ext4 case for partition {}", current_name);
+                info(&format!("Formatting {} as ext4", current_name));
+                
+                // Use a more robust approach for ext4 formatting
                 let cmd = if let Some(ref label) = partition.label {
                     format!("mkfs.ext4 -F -L {} {}", label, current_name)
                 } else {
@@ -1110,7 +1114,29 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 };
                 
                 // Execute with full error output
-                execute_with_output(&cmd)?;
+                match execute_with_output(&cmd) {
+                    Ok(_) => {
+                        info(&format!("Successfully formatted {} as ext4", current_name));
+                    }
+                    Err(_) => {
+                        // If formatting fails, try a more aggressive approach
+                        warn(&format!("Standard ext4 formatting failed, trying alternative approach..."));
+                        
+                        // Try with different options
+                        let alt_cmd = if let Some(ref label) = partition.label {
+                            format!("mkfs.ext4 -F -L {} -E lazy_itable_init {}", label, current_name)
+                        } else {
+                            format!("mkfs.ext4 -F -E lazy_itable_init {}", current_name)
+                        };
+                        
+                        if let Err(_) = execute_with_output(&alt_cmd) {
+                            warn(&format!("Alternative ext4 formatting also failed. You may need to reboot and try again."));
+                            bail!("Failed to format {} as ext4 after multiple attempts", current_name);
+                        } else {
+                            info(&format!("Successfully formatted {} as ext4 with alternative method", current_name));
+                        }
+                    }
+                }
                 
                 // Verify filesystem
                 verify_filesystem(current_name, "ext4")?;
