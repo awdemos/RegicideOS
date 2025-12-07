@@ -1505,6 +1505,13 @@ fn mount() -> Result<()> {
     info("Mounting root.img on /mnt/root");
     mount_with_retry("/mnt/gentoo/root.img", "/mnt/root", Some("squashfs"), Some("ro,loop"))?;
     
+    info("Mounting special filesystems first");
+    mount_with_retry("/proc", "/mnt/root/proc", Some("proc"), None)?;
+    execute("mount --rbind /dev /mnt/root/dev")?;
+    execute("mount --rbind /sys /mnt/root/sys")?;
+    execute("mount --bind /run /mnt/root/run")?;
+    execute("mount --make-slave /mnt/root/run")?;
+    
     // Mount EFI or BOOT partition based on system type
     if is_efi() {
         info("Finding EFI partition...");
@@ -1519,13 +1526,6 @@ fn mount() -> Result<()> {
         info("Mounting BOOT on /mnt/root/boot");
         mount_with_retry(&boot_device, "/mnt/root/boot", None, None)?;
     }
-    
-    info("Mounting special filesystems");
-    mount_with_retry("/proc", "/mnt/root/proc", Some("proc"), None)?;
-    execute("mount --rbind /dev /mnt/root/dev")?;
-    execute("mount --rbind /sys /mnt/root/sys")?;
-    execute("mount --bind /run /mnt/root/run")?;
-    execute("mount --make-slave /mnt/root/run")?;
     
     Ok(())
 }
@@ -1563,52 +1563,53 @@ async fn download_root(url: &str) -> Result<()> {
 }
 
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
-    // Check for grub binary in correct locations with more robust detection
-    let grub = if Path::new("/mnt/root/usr/sbin/grub-install").exists() || Path::new("/mnt/root/sbin/grub-install").exists() {
+    // Check for grub binary in host system since we're running outside chroot
+    let grub = if Path::new("/usr/sbin/grub-install").exists() || Path::new("/sbin/grub-install").exists() {
         "grub"
-    } else if Path::new("/mnt/root/usr/sbin/grub2-install").exists() || Path::new("/mnt/root/sbin/grub2-install").exists() {
+    } else if Path::new("/usr/sbin/grub2-install").exists() || Path::new("/sbin/grub2-install").exists() {
         "grub2"
     } else {
-        bail!("GRUB installer not found in chroot environment");
+        bail!("GRUB installer not found in host system");
     };
     
 
 
     if platform.contains("efi") {
-        // Install GRUB for EFI systems - run INSIDE chroot for correct path resolution
+        // Install GRUB for EFI systems - run OUTSIDE chroot with explicit paths
+        // This ensures proper access to EFI variables and device access
         // The --force flag is needed for some EFI systems that complain about Secure Boot
         let grub_install_cmd = format!(
-            "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --bootloader-id=RegicideOS --recheck --force",
+            "{}-install --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --bootloader-id=RegicideOS --recheck --force --root-directory=/mnt/root",
             grub, platform
         );
-        match chroot(&grub_install_cmd) {
+        match execute(&grub_install_cmd) {
             Ok(_) => {},
             Err(_e) => {
                 // Try alternative approach with --removable flag
                 let alt_cmd = format!(
-                    "{}-install --target=\"{}\" --efi-directory=\"/boot/efi\" --removable --recheck --force",
+                    "{}-install --target=\"{}\" --efi-directory=\"/mnt/root/boot/efi\" --removable --recheck --force --root-directory=/mnt/root",
                     grub, platform
                 );
-                chroot(&alt_cmd)?;
+                execute(&alt_cmd)?;
             }
         }
         
-        // Generate GRUB config using the chroot environment
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        // Generate GRUB config using explicit paths outside chroot
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /mnt/root/boot/efi/{}/grub.cfg", grub, grub);
 
-        chroot(&grub_mkconfig_cmd)?;
+        execute(&grub_mkconfig_cmd)?;
     } else {
         // For BIOS, we need to install to the device directly
-        // The device path should work inside chroot since /dev is mounted
+        // Run outside chroot with explicit paths for better device access
         let grub_install_cmd = format!(
-            "{}-install --target=\"{}\" --boot-directory=\"/boot\" {}",
+            "{}-install --target=\"{}\" --boot-directory=\"/mnt/root/boot\" {}",
             grub, platform, device
         );
 
-        chroot(&grub_install_cmd)?;
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
+        execute(&grub_install_cmd)?;
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /mnt/root/boot/grub/grub.cfg", grub);
 
-        chroot(&grub_mkconfig_cmd)?;
+        execute(&grub_mkconfig_cmd)?;
     }
     
     Ok(())
