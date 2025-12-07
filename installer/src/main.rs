@@ -1584,7 +1584,12 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         chroot(&grub_install_cmd)?;
         
         // Generate GRUB config using exact same path as Python reference
+        // Ensure EFI partition is writable and use explicit GRUB config
+        info("Ensuring EFI partition is writable for GRUB config generation");
+        chroot("mount -o remount,rw /boot/efi")?;
+        
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         chroot(&grub_mkconfig_cmd)?;
     } else {
         // For BIOS, use exact same commands as Python reference
@@ -1594,7 +1599,12 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         );
         chroot(&grub_install_cmd)?;
         
+        // Ensure boot partition is writable for GRUB config generation
+        info("Ensuring boot partition is writable for GRUB config generation");
+        chroot("mount -o remount,rw /boot/efi")?;
+        
         let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         chroot(&grub_mkconfig_cmd)?;
     }
     
