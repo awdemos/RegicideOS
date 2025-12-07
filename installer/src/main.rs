@@ -1515,7 +1515,7 @@ fn mount() -> Result<()> {
     // Create writable /boot overlay since root.img is read-only squashfs
     info("Creating writable /boot overlay for GRUB configuration");
     safe_create_dir_all("/mnt/boot_overlay", "/mnt")?;
-    execute("mount -t tmpfs none /mnt/boot_overlay -o size=1G")?;
+    execute("mount -t tmpfs boot_overlay /mnt/boot_overlay -o size=1G")?;
     execute("mount --bind /mnt/boot_overlay /mnt/root/boot")?;
     
     // Mount EFI or BOOT partition based on system type
