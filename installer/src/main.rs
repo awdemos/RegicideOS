@@ -2069,103 +2069,7 @@ fn verify_grub_environment() -> Result<()> {
     Ok(())
 }
 
-fn test_grub_probe_comprehensive() -> Result<()> {
-    info("Running comprehensive grub-probe tests...");
 
-    // Determine which GRUB probe binary is available in chroot
-    let grub_probe_binary = match chroot_with_output("which grub-probe 2>/dev/null || which grub2-probe 2>/dev/null || echo 'not found'") {
-        Ok(output) => {
-            let result = output.trim();
-            if result != "not found" && !result.is_empty() {
-                // Extract just the binary name from full path
-                if result.contains("grub2-probe") {
-                    "grub2-probe"
-                } else {
-                    "grub-probe"
-                }
-            } else {
-                // Try direct path check if which fails
-                match chroot_with_output("ls /usr/sbin/grub-probe /usr/sbin/grub2-probe 2>/dev/null || echo 'not found'") {
-                    Ok(direct_output) => {
-                        let direct_result = direct_output.trim();
-                        if direct_result != "not found" && !direct_result.is_empty() {
-                            if direct_result.contains("grub2-probe") {
-                                "grub2-probe"
-                            } else {
-                                "grub-probe"
-                            }
-                        } else {
-                            warn("GRUB probe binary not found in chroot environment - skipping probe tests");
-                            return Ok(()); // Don't fail, just skip tests
-                        }
-                    }
-                    Err(_) => {
-                        warn("GRUB probe binary not found in chroot environment - skipping probe tests");
-                        return Ok(());
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            warn(&format!("Failed to check for GRUB probe: {}", e));
-            return Ok(());
-        }
-    };
-
-    info(&format!("Using GRUB probe binary: {}", grub_probe_binary));
-
-    let probe_commands = [
-        // Test basic version and device map
-        &format!("{} --version", grub_probe_binary),
-        &format!("{} --device-map /boot/grub/device.map", grub_probe_binary),
-        // Test with actual mounted EFI partition device
-        &format!("{} --target=device /boot/efi", grub_probe_binary),
-        // Test with device directly if EFI partition is mounted
-        &format!("blkid -L EFI 2>/dev/null | xargs -r {} --target=fs", grub_probe_binary),
-        // Test basic functionality without problematic options
-        &format!("{} --help", grub_probe_binary),
-    ];
-
-    let mut failed_probes = Vec::new();
-
-    for cmd in &probe_commands {
-        match chroot_with_output(cmd) {
-            Ok(output) => {
-                info(&format!("✓ {}: {}", cmd, output.trim()));
-            }
-            Err(e) => {
-                // Check for boot_overlay related errors and provide better context
-                let error_str = e.to_string();
-                if error_str.contains("boot_overlay") {
-                    warn(&format!("✗ {}: boot_overlay path issue (this is expected with tmpfs mounts)", cmd));
-                } else if error_str.contains("unrecognized option") {
-                    warn(&format!("✗ {}: unsupported GRUB probe option", cmd));
-                } else {
-                    warn(&format!("✗ {}: {}", cmd, e));
-                }
-                failed_probes.push((cmd.to_string(), e));
-            }
-        }
-    }
-
-    // Report critical failures
-    for (cmd, error) in &failed_probes {
-        if cmd.contains("--device") || cmd.contains("--fs") {
-            warn(&format!("GRUB probe test failed: {} - {}", cmd, error));
-            // Don't fail the entire installation for probe failures
-            // Just warn and continue - many systems work without perfect probe support
-        }
-    }
-
-    if !failed_probes.is_empty() {
-        warn(&format!(
-            "{} grub-probe tests had failures (may be normal for some systems)",
-            failed_probes.len()
-        ));
-    }
-
-    Ok(())
-}
 
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     // Check for grub binary in chroot environment using chroot commands
@@ -2221,18 +2125,10 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Verify GRUB environment before running grub-mkconfig
         info("Verifying GRUB environment before config generation");
         verify_grub_environment()?;
-        test_grub_probe_comprehensive()?;
 
-        // Set environment variables to avoid boot_overlay path issues
-        let grub_mkconfig_cmd = format!("export GRUB_DEVICE_MAP=/boot/grub/device.map && export GRUB_DISABLE_OS_PROBER=true && {}-mkconfig -o /boot/grub/grub.cfg", grub);
+        // Run GRUB mkconfig to generate configuration
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
-        
-        // Debug: Let's see what GRUB probe is actually being called
-        info("Debugging GRUB probe calls during mkconfig...");
-        match chroot_with_output("which grub2-probe") {
-            Ok(output) => info(&format!("grub2-probe location: {}", output.trim())),
-            Err(e) => warn(&format!("Failed to find grub2-probe: {}", e)),
-        }
         
         chroot(&grub_mkconfig_cmd)?;
     } else {
@@ -2250,18 +2146,10 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Verify GRUB environment before running grub-mkconfig
         info("Verifying GRUB environment before config generation");
         verify_grub_environment()?;
-        test_grub_probe_comprehensive()?;
 
-        // Set environment variables to avoid boot_overlay path issues
-        let grub_mkconfig_cmd = format!("export GRUB_DEVICE_MAP=/boot/grub/device.map && export GRUB_DISABLE_OS_PROBER=true && {}-mkconfig -o /boot/grub/grub.cfg", grub);
+        // Run GRUB mkconfig to generate configuration
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
-        
-        // Debug: Let's see what GRUB probe is actually being called
-        info("Debugging GRUB probe calls during mkconfig...");
-        match chroot_with_output("which grub2-probe") {
-            Ok(output) => info(&format!("grub2-probe location: {}", output.trim())),
-            Err(e) => warn(&format!("Failed to find grub2-probe: {}", e)),
-        }
         
         chroot(&grub_mkconfig_cmd)?;
     }
