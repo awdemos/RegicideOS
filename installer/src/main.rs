@@ -1517,14 +1517,14 @@ fn mount() -> Result<()> {
         info("Finding EFI partition...");
         let efi_device = find_partition_by_label("EFI")?;
         
-        info("Mounting ESP on /mnt/root/boot/efi");
-        mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, None)?;
+        info("Mounting ESP on /mnt/root/boot/efi with write permissions");
+        mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
     } else {
         info("Finding BOOT partition...");
         let boot_device = find_partition_by_label("BOOT")?;
         
-        info("Mounting BOOT on /mnt/root/boot");
-        mount_with_retry(&boot_device, "/mnt/root/boot", None, None)?;
+        info("Mounting BOOT on /mnt/root/boot with write permissions");
+        mount_with_retry(&boot_device, "/mnt/root/boot", None, Some("rw"))?;
     }
     
     Ok(())
