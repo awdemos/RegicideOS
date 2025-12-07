@@ -1725,48 +1725,78 @@ fn mount() -> Result<()> {
     // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
     // This fixes grub2-mkconfig calling grub2-probe from wrong location
     info("Creating GRUB tool symlinks to fix hardcoded paths...");
-    let grub_links = [
+    let _grub_links = [
         ("grub-probe", "grub-probe"),
         ("grub2-probe", "grub2-probe"),
         ("grub-mkconfig", "grub-mkconfig"), 
         ("grub2-mkconfig", "grub2-mkconfig"),
     ];
-    
-    for (target, link_name) in &grub_links {
-        let target_path = format!("/mnt/root/usr/sbin/{}", target);
-        let link_path = format!("/mnt/root/usr/bin/{}", link_name);
-        
-        if Path::new(&target_path).exists() && !Path::new(&link_path).exists() {
-            // Use chroot to create symlink to ensure proper paths
-            let symlink_cmd = format!("ln -sf /usr/sbin/{} /usr/bin/{}", target, link_name);
-            if let Err(e) = chroot(&symlink_cmd) {
-                warn(&format!("Failed to create symlink {} -> {}: {}", link_name, target, e));
-            } else {
-                info(&format!("Created symlink: /usr/bin/{} -> /usr/sbin/{}", link_name, target));
-            }
-        }
-    }
     
     // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
     // This fixes grub2-mkconfig calling grub2-probe from wrong location
     info("Creating GRUB tool symlinks to fix hardcoded paths...");
-    let grub_links = [
+    
+    // First, let's debug what actually exists
+    info("Debugging GRUB tool locations...");
+    match chroot_with_output("ls -la /usr/sbin/grub* 2>/dev/null || echo 'not found'") {
+        Ok(output) => info(&format!("GRUB tools in /usr/sbin: {}", output.trim())),
+        Err(e) => warn(&format!("Failed to list /usr/sbin/grub*: {}", e)),
+    }
+    
+    match chroot_with_output("ls -la /usr/bin/grub* 2>/dev/null || echo 'not found'") {
+        Ok(output) => info(&format!("GRUB tools in /usr/bin: {}", output.trim())),
+        Err(e) => warn(&format!("Failed to list /usr/bin/grub*: {}", e)),
+    }
+    
+    let _grub_links = [
         ("grub-probe", "grub-probe"),
         ("grub2-probe", "grub2-probe"),
         ("grub-mkconfig", "grub-mkconfig"), 
         ("grub2-mkconfig", "grub2-mkconfig"),
     ];
     
-    for (target, link_name) in &grub_links {
+    for (target, link_name) in &_grub_links {
         let target_path = format!("/mnt/root/usr/sbin/{}", target);
         let link_path = format!("/mnt/root/usr/bin/{}", link_name);
         
+        info(&format!("Checking symlink: target={}, link={}", target_path, link_path));
+        info(&format!("Target exists: {}, Link exists: {}", 
+            Path::new(&target_path).exists(), 
+            Path::new(&link_path).exists()
+        ));
+        
         if Path::new(&target_path).exists() && !Path::new(&link_path).exists() {
-            if let Err(e) = std::os::unix::fs::symlink(&format!("/usr/sbin/{}", target), &link_path) {
-                warn(&format!("Failed to create symlink {} -> {}: {}", link_name, target, e));
-            } else {
-                info(&format!("Created symlink: /usr/bin/{} -> /usr/sbin/{}", link_name, target));
+            // Try copying instead of symlinking to avoid mount issues
+            let copy_cmd = format!("cp /usr/sbin/{} /usr/bin/{}", target, link_name);
+            info(&format!("Running copy command: {}", copy_cmd));
+            
+            match chroot(&copy_cmd) {
+                Ok(()) => {
+                    info(&format!("✓ Copied: /usr/bin/{} <- /usr/sbin/{}", link_name, target));
+                    
+                    // Verify the copy was created and is executable
+                    match chroot_with_output(&format!("ls -la /usr/bin/{}", link_name)) {
+                        Ok(verify_output) => {
+                            info(&format!("Copy verification: {}", verify_output.trim()));
+                            // Make sure it's executable
+                            let chmod_cmd = format!("chmod +x /usr/bin/{}", link_name);
+                            if let Err(e) = chroot(&chmod_cmd) {
+                                warn(&format!("Failed to make {} executable: {}", link_name, e));
+                            } else {
+                                info(&format!("Made {} executable", link_name));
+                            }
+                        }
+                        Err(e) => warn(&format!("Failed to verify copy: {}", e)),
+                    }
+                }
+                Err(e) => warn(&format!("Failed to copy {} -> {}: {}", link_name, target, e)),
             }
+        } else {
+            info(&format!("Skipping copy {} (target exists: {}, link exists: {})", 
+                link_name, 
+                Path::new(&target_path).exists(), 
+                Path::new(&link_path).exists()
+            ));
         }
     }
 
@@ -2087,7 +2117,7 @@ fn test_grub_probe_comprehensive() -> Result<()> {
     let probe_commands = [
         // Test basic version and device map
         &format!("{} --version", grub_probe_binary),
-        &format!("{} --device-map", grub_probe_binary),
+        &format!("{} --device-map /boot/grub/device.map", grub_probe_binary),
         // Test with actual mounted EFI partition device
         &format!("{} --target=device /boot/efi", grub_probe_binary),
         // Test with device directly if EFI partition is mounted
@@ -2196,6 +2226,14 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Set environment variables to avoid boot_overlay path issues
         let grub_mkconfig_cmd = format!("export GRUB_DEVICE_MAP=/boot/grub/device.map && export GRUB_DISABLE_OS_PROBER=true && {}-mkconfig -o /boot/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
+        
+        // Debug: Let's see what GRUB probe is actually being called
+        info("Debugging GRUB probe calls during mkconfig...");
+        match chroot_with_output("which grub2-probe") {
+            Ok(output) => info(&format!("grub2-probe location: {}", output.trim())),
+            Err(e) => warn(&format!("Failed to find grub2-probe: {}", e)),
+        }
+        
         chroot(&grub_mkconfig_cmd)?;
     } else {
         // For BIOS, use exact same commands as Python reference
@@ -2217,6 +2255,14 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Set environment variables to avoid boot_overlay path issues
         let grub_mkconfig_cmd = format!("export GRUB_DEVICE_MAP=/boot/grub/device.map && export GRUB_DISABLE_OS_PROBER=true && {}-mkconfig -o /boot/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
+        
+        // Debug: Let's see what GRUB probe is actually being called
+        info("Debugging GRUB probe calls during mkconfig...");
+        match chroot_with_output("which grub2-probe") {
+            Ok(output) => info(&format!("grub2-probe location: {}", output.trim())),
+            Err(e) => warn(&format!("Failed to find grub2-probe: {}", e)),
+        }
+        
         chroot(&grub_mkconfig_cmd)?;
     }
 
