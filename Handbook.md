@@ -114,7 +114,7 @@ Once booted into the live environment:
 
 ```bash
 # Install dependencies (including gdisk for EFI support)
-sudo dnf install git curl gcc gdisk
+sudo dnf install -y git curl gcc gdisk
 
 # Install Rust toolchain
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -1192,7 +1192,7 @@ distrobox create --name dev --image fedora:39
 distrobox enter dev
 
 # Install applications in container
-sudo dnf install code brave-browser thunderbird
+sudo dnf install -y code brave-browser thunderbird
 
 # Applications appear in desktop menu automatically
 ```
@@ -1591,7 +1591,7 @@ sudo loginctl disable-lid-switch
 **Solution**: Fixed in newer installer with automatic gdisk installation. Manual fix:
 ```bash
 # Install gdisk package
-sudo dnf install gdisk  # Fedora
+sudo dnf install -y gdisk  # Fedora
 # or
 sudo apt install gdisk  # Ubuntu
 ```
