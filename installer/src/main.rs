@@ -1944,8 +1944,18 @@ fn verify_grub_environment() -> Result<()> {
     for dir in &required_dirs {
         if !Path::new(dir).exists() {
             warn(&format!("Required GRUB directory missing: {}", dir));
-            // Try to create missing directories
-            if let Err(e) = safe_create_dir_all(dir, "/mnt/root") {
+            // Try to create missing directories in appropriate writable locations
+            let writable_base = if dir.starts_with("/mnt/root/boot") {
+                "/mnt/root/boot"
+            } else if dir.starts_with("/mnt/root/etc") {
+                "/mnt/root/etc" 
+            } else if dir.starts_with("/mnt/root/usr") {
+                "/mnt/root/usr"
+            } else {
+                "/mnt/root"
+            };
+            
+            if let Err(e) = safe_create_dir_all(dir, writable_base) {
                 bail!("Could not create required directory {}: {}", dir, e);
             }
         }
@@ -2119,8 +2129,6 @@ fn post_install(config: &Config) -> Result<()> {
 
     let (etc_path, var_path, usr_path) = match layout_name.as_str() {
         "btrfs" => {
-            safe_create_dir_all("/mnt/root/overlay", "/mnt/root")?;
-            safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount -L ROOTS -o subvol=overlay /mnt/root/overlay")?;
             execute("mount -L ROOTS -o subvol=home /mnt/root/home")?;
             (
@@ -2135,8 +2143,6 @@ fn post_install(config: &Config) -> Result<()> {
             if !Path::new("/dev/mapper/regicideos").exists() {
                 bail!("LUKS device /dev/mapper/regicideos not found");
             }
-            safe_create_dir_all("/mnt/root/overlay", "/mnt/root")?;
-            safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
             execute("mount /dev/mapper/regicideos -o subvol=overlay /mnt/root/overlay")?;
             execute("mount /dev/mapper/regicideos -o subvol=home /mnt/root/home")?;
             (
@@ -2174,7 +2180,13 @@ fn post_install(config: &Config) -> Result<()> {
     ];
 
     for path in &paths {
-        safe_create_dir_all(path, "/mnt/root")?;
+        // Use the parent directory as base since these are in writable overlay areas
+        if let Some(parent) = Path::new(path).parent() {
+            let parent_str = parent.to_string_lossy();
+            safe_create_dir_all(path, &parent_str)?;
+        } else {
+            safe_create_dir_all(path, "/mnt/root")?;
+        }
     }
 
     execute(&format!(
