@@ -114,11 +114,7 @@ Once booted into the live environment:
 
 ```bash
 # Install dependencies (including gdisk for EFI support)
-sudo dnf install -y git curl gcc gdisk
-
-# Install Rust toolchain
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
+sudo dnf install -y git curl gcc gdisk rust cargo
 
 # Clone RegicideOS repository
 git clone https://github.com/awdemos/RegicideOS.git
@@ -1154,19 +1150,13 @@ RegicideOS provides comprehensive Rust development support:
 
 ```bash
 # Install Rust toolchain (if not present)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Update to latest stable
-rustup update stable
+sudo dnf install -y rust cargo rustfmt clippy
 
 # Install additional targets
-rustup target add thumbv6m-none-eabi  # ARM Cortex-M
-rustup target add riscv32imc-unknown-none-elf  # RISC-V
-rustup target add wasm32-unknown-unknown  # WebAssembly
+rustc target add thumbv6m-none-eabi  # ARM Cortex-M
+rustc target add riscv32imc-unknown-none-elf  # RISC-V
+rustc target add wasm32-unknown-unknown  # WebAssembly
 ```
-
-#### 7.4.2 Embedded Development
-
 RegicideOS includes special support for embedded development:
 
 ```bash
