@@ -2295,6 +2295,15 @@ menuentry "RegicideOS (Recovery)" {{
             grub_config.as_bytes(),
             "/mnt/root/boot/efi",
         )?;
+        
+        // Also copy GRUB config to EFI/fedora directory for EFI compatibility
+        chroot("mkdir -p /boot/efi/EFI/fedora")?;
+        safe_write_file(
+            "/mnt/root/boot/efi/EFI/fedora/grub.cfg",
+            grub_config.as_bytes(),
+            "/mnt/root/boot/efi/EFI/fedora",
+        )?;
+        
         info("✓ GRUB configuration created successfully");
 
         // Debug: Show what was actually written
@@ -2332,6 +2341,46 @@ menuentry "RegicideOS (Recovery)" {{
         
         // Our manual GRUB config was already written above
         // grub-mkconfig would overwrite it with broken LUKS parameters
+    }
+    
+    // Create EFI boot entry for automatic booting
+    if is_efi() {
+        info("Creating EFI boot entry for automatic booting...");
+        
+        // Extract device name without partition for efibootmgr
+        let efi_device = if device.contains("nvme") {
+            device.rsplit_once('p').map(|(d, _)| d).unwrap_or(device)
+        } else {
+            device.trim_end_matches(char::is_numeric)
+        };
+        
+        // Try to create EFI boot entry using efibootmgr
+        match chroot(&format!("efibootmgr --create --disk {} --part 1 --label \"RegicideOS\" --loader \"\\EFI\\fedora\\grubx64.efi\"", efi_device)) {
+            Ok(_) => {
+                info("✓ EFI boot entry created successfully");
+            }
+            Err(e) => {
+                warn(&format!("Failed to create EFI boot entry: {}", e));
+                info("Trying alternative EFI boot entry creation...");
+                
+                // Alternative approach - try different loader path
+                match chroot(&format!("efibootmgr --create --disk {} --part 1 --label \"RegicideOS\" --loader \"\\EFI\\BOOT\\BOOTX64.EFI\"", efi_device)) {
+                    Ok(_) => {
+                        info("✓ Alternative EFI boot entry created successfully");
+                    }
+                    Err(e2) => {
+                        warn(&format!("Alternative EFI boot entry creation failed: {}", e2));
+                        info("You may need to manually add boot entry in your BIOS/UEFI settings");
+                    }
+                }
+            }
+        }
+        
+        // Set boot order to prioritize RegicideOS
+        match chroot("efibootmgr --bootorder 0000,0001,0002") {
+            Ok(_) => info("✓ Boot order configured"),
+            Err(_) => warn("Failed to set boot order"),
+        }
     }
 
     Ok(())
@@ -2443,11 +2492,17 @@ fn post_install(config: &Config) -> Result<()> {
     if !flatpaks.is_empty() {
         info("Installing flatpak applications...");
 
+        // Ensure flatpak directories exist in writable overlay areas
+        info("Setting up flatpak directories in overlay...");
+        chroot("mkdir -p /var/lib/flatpak")?;
+        chroot("mkdir -p /var/cache/flatpak")?;
+        
         // Create /etc/declare directory and flatpak file (for declareflatpak service compatibility)
         chroot("mkdir -p /etc/declare")?;
         chroot(&format!("echo '{}' > /etc/declare/flatpak", flatpaks))?;
         
         // Initialize flatpak and add Flathub repository
+        info("Adding Flathub repository...");
         chroot("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")?;
 
         // Install each flatpak package
