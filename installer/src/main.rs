@@ -2076,7 +2076,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Install GRUB for EFI systems - run INSIDE chroot like Python reference
         // Use exact same commands as Python reference for compatibility
         let grub_install_cmd = format!(
-            "{}-install --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\"",
+            "{}-install --modules=lvm --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\"",
             grub, platform
         );
         chroot(&grub_install_cmd)?;
@@ -2091,7 +2091,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         verify_grub_environment()?;
 
         // Run GRUB mkconfig to generate configuration
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         
         chroot(&grub_mkconfig_cmd)?;
@@ -2112,7 +2112,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         verify_grub_environment()?;
 
         // Run GRUB mkconfig to generate configuration
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/{}/grub.cfg", grub, grub);
+        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/grub/grub.cfg", grub);
         info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
         
         chroot(&grub_mkconfig_cmd)?;
