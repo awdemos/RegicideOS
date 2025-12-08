@@ -119,8 +119,6 @@ fn execute_with_output(command: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-
-
 // Safe command execution with strict allowlist
 fn execute(command: &str) -> Result<String> {
     // Check for heredoc patterns that need special handling
@@ -678,13 +676,12 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
     if partition_names.len() != expected_count {
         partition_names.clear();
         for i in 1..=expected_count {
-            let part_name = if drive.contains("nvme")
-                || drive.chars().last().unwrap_or('a').is_ascii_digit()
-            {
-                format!("{}p{}", drive, i)
-            } else {
-                format!("{}{}", drive, i)
-            };
+            let part_name =
+                if drive.contains("nvme") || drive.chars().last().unwrap_or('a').is_ascii_digit() {
+                    format!("{}p{}", drive, i)
+                } else {
+                    format!("{}{}", drive, i)
+                };
 
             if Path::new(&part_name).exists() {
                 partition_names.push(part_name);
@@ -711,13 +708,12 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
     // Try detection again after refresh
     partition_names.clear();
     for i in 1..=expected_count {
-        let part_name = if drive.contains("nvme")
-            || drive.chars().last().unwrap_or('a').is_ascii_digit()
-        {
-            format!("{}p{}", drive, i)
-        } else {
-            format!("{}{}", drive, i)
-        };
+        let part_name =
+            if drive.contains("nvme") || drive.chars().last().unwrap_or('a').is_ascii_digit() {
+                format!("{}p{}", drive, i)
+            } else {
+                format!("{}{}", drive, i)
+            };
 
         if Path::new(&part_name).exists() {
             partition_names.push(part_name);
@@ -728,7 +724,10 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
     }
 
     if partition_names.len() == expected_count {
-        info(&format!("Found {} partitions after refresh", expected_count));
+        info(&format!(
+            "Found {} partitions after refresh",
+            expected_count
+        ));
         return Ok(partition_names);
     }
 
@@ -1008,7 +1007,7 @@ fn ensure_partition_ready(partition: &str) -> Result<()> {
     if Path::new(partition).exists() {
         return Ok(());
     }
-    
+
     bail!("Partition {} does not exist", partition)
 }
 
@@ -2091,23 +2090,31 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         let kernel_files = {
             let mut kernel_path = "/boot/vmlinuz".to_string();
             let mut found = false;
-            
+
             // First ensure /boot is accessible and not locked
             for boot_check in 1..=3 {
                 if chroot_with_output("ls /boot 2>/dev/null").is_ok() {
                     break;
                 }
                 if boot_check < 3 {
-                    info(&format!("Boot directory not ready, waiting... (attempt {}/3)", boot_check));
+                    info(&format!(
+                        "Boot directory not ready, waiting... (attempt {}/3)",
+                        boot_check
+                    ));
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
-            
+
             for attempt in 1..=5 {
-                match chroot_with_output("find /boot -name 'vmlinuz-*' -type f 2>/dev/null | head -1") {
+                match chroot_with_output(
+                    "find /boot -name 'vmlinuz-*' -type f 2>/dev/null | head -1",
+                ) {
                     Ok(files) if !files.trim().is_empty() => {
                         kernel_path = files.trim().to_string();
-                        info(&format!("Found kernel on attempt {}: {}", attempt, kernel_path));
+                        info(&format!(
+                            "Found kernel on attempt {}: {}",
+                            attempt, kernel_path
+                        ));
                         found = true;
                         break;
                     }
@@ -2118,13 +2125,16 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                         warn(&format!("Kernel search attempt {} failed: {}", attempt, e));
                     }
                 }
-                
+
                 if attempt < 5 {
-                    info(&format!("Retrying kernel detection in 1 second... (attempt {}/5)", attempt));
+                    info(&format!(
+                        "Retrying kernel detection in 1 second... (attempt {}/5)",
+                        attempt
+                    ));
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
-            
+
             if !found {
                 warn("Could not find kernel files after 5 attempts, using fallback");
                 // Try alternative kernel names
@@ -2140,15 +2150,35 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             kernel_path
         };
 
+        // Also check for System.map file for better debugging
+        let system_map = {
+            match chroot_with_output(
+                "find /boot -name 'System.map-*' -type f 2>/dev/null | head -1",
+            ) {
+                Ok(map_file) if !map_file.trim().is_empty() => Some(map_file.trim().to_string()),
+                _ => match chroot_with_output("ls /boot/System.map* 2>/dev/null | head -1") {
+                    Ok(map_file) if !map_file.trim().is_empty() => {
+                        Some(map_file.trim().to_string())
+                    }
+                    _ => None,
+                },
+            }
+        };
+
         let initrd_files = {
             let mut initrd_path = "/boot/initrd".to_string();
             let mut found = false;
-            
+
             for attempt in 1..=5 {
-                match chroot_with_output("find /boot -name 'initrd-*' -type f 2>/dev/null | head -1") {
+                match chroot_with_output(
+                    "find /boot -name 'initrd-*' -type f 2>/dev/null | head -1",
+                ) {
                     Ok(files) if !files.trim().is_empty() => {
                         initrd_path = files.trim().to_string();
-                        info(&format!("Found initrd on attempt {}: {}", attempt, initrd_path));
+                        info(&format!(
+                            "Found initrd on attempt {}: {}",
+                            attempt, initrd_path
+                        ));
                         found = true;
                         break;
                     }
@@ -2159,13 +2189,16 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                         warn(&format!("Initrd search attempt {} failed: {}", attempt, e));
                     }
                 }
-                
+
                 if attempt < 5 {
-                    info(&format!("Retrying initrd detection in 1 second... (attempt {}/5)", attempt));
+                    info(&format!(
+                        "Retrying initrd detection in 1 second... (attempt {}/5)",
+                        attempt
+                    ));
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
-            
+
             if !found {
                 warn("Could not find initrd files after 5 attempts, using fallback");
                 // Try alternative initrd names with better detection
@@ -2183,10 +2216,15 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                             }
                             _ => {
                                 // Try to find any initramfs/initrd with different patterns
-                                match chroot_with_output("find /boot -name '*init*' -type f 2>/dev/null | head -1") {
+                                match chroot_with_output(
+                                    "find /boot -name '*init*' -type f 2>/dev/null | head -1",
+                                ) {
                                     Ok(files) if !files.trim().is_empty() => {
                                         initrd_path = files.trim().to_string();
-                                        info(&format!("Using generic init fallback: {}", initrd_path));
+                                        info(&format!(
+                                            "Using generic init fallback: {}",
+                                            initrd_path
+                                        ));
                                     }
                                     _ => {
                                         warn("No initrd found - boot will fail!");
@@ -2204,32 +2242,44 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         info(&format!("Using kernel: {}", kernel_files));
         info(&format!("Using initrd: {}", initrd_files));
 
+        // Log System.map file if found
+        if let Some(ref map_file) = system_map {
+            info(&format!("Using System.map: {}", map_file));
+        } else {
+            warn("No System.map file found - debugging may be limited");
+        }
+
         // Check if LUKS encryption is being used and adjust boot parameters
         let is_encrypted = Path::new("/dev/mapper/regicideos").exists();
         let (root_param, boot_options) = if is_encrypted {
             info("Detected LUKS encryption - using encrypted boot parameters");
-            
+
             // Ensure initramfs has LUKS support
             info("Configuring LUKS boot support...");
-            
+
             // Add cryptsetup to initramfs if needed
             if chroot_with_output("which cryptsetup").is_ok() {
                 info("✓ cryptsetup found in chroot");
             } else {
                 warn("cryptsetup not found in chroot, LUKS boot may fail");
             }
-            
+
             // Get the actual LUKS partition UUID
-            let luks_uuid = match execute("blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'") {
+            let luks_uuid = match execute(
+                "blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'",
+            ) {
                 Ok(uuid) => uuid.trim().to_string(),
                 Err(_) => "regicideos".to_string(),
             };
-            
+
             info(&format!("Using LUKS UUID: {}", luks_uuid));
-            
+
             (
                 "/dev/mapper/regicideos".to_string(),
-                format!("cryptdevice=UUID={}:regicideos root=/dev/mapper/regicideos quiet splash rw", luks_uuid),
+                format!(
+                    "cryptdevice=UUID={}:regicideos root=/dev/mapper/regicideos quiet splash rw",
+                    luks_uuid
+                ),
             )
         } else {
             info("Using unencrypted boot parameters");
@@ -2240,6 +2290,15 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             format!(
                 r#"set default="RegicideOS"
 set timeout=5
+set color_normal=light-gray/black
+set color_highlight=green/black
+
+# LUKS encryption configuration
+insmod luks
+insmod cryptodisk
+insmod gcry_rijndael
+insmod gcry_sha256
+insmod gcry_sha512
 
 menuentry "RegicideOS (Encrypted)" {{
     linux {}
@@ -2252,7 +2311,17 @@ menuentry "RegicideOS (Encrypted Recovery)" {{
     initrd {}
     options "root={} {} single"
 }}
+
+menuentry "RegicideOS (Encrypted Verbose)" {{
+    linux {}
+    initrd {}
+    options "root={} {} verbose"
+}}
 "#,
+                kernel_files,
+                initrd_files,
+                root_param,
+                boot_options,
                 kernel_files,
                 initrd_files,
                 root_param,
@@ -2266,6 +2335,8 @@ menuentry "RegicideOS (Encrypted Recovery)" {{
             format!(
                 r#"set default="RegicideOS"
 set timeout=5
+set color_normal=light-gray/black
+set color_highlight=green/black
 
 menuentry "RegicideOS" {{
     linux {}
@@ -2278,7 +2349,17 @@ menuentry "RegicideOS (Recovery)" {{
     initrd {}
     options "root={} {} single"
 }}
+
+menuentry "RegicideOS (Verbose)" {{
+    linux {}
+    initrd {}
+    options "root={} {} verbose"
+}}
 "#,
+                kernel_files,
+                initrd_files,
+                root_param,
+                boot_options,
                 kernel_files,
                 initrd_files,
                 root_param,
@@ -2295,7 +2376,7 @@ menuentry "RegicideOS (Recovery)" {{
             grub_config.as_bytes(),
             "/mnt/root/boot/efi",
         )?;
-        
+
         // Also copy GRUB config to EFI/fedora directory for EFI compatibility
         chroot("mkdir -p /boot/efi/EFI/fedora")?;
         safe_write_file(
@@ -2303,7 +2384,7 @@ menuentry "RegicideOS (Recovery)" {{
             grub_config.as_bytes(),
             "/mnt/root/boot/efi/EFI/fedora",
         )?;
-        
+
         info("✓ GRUB configuration created successfully");
 
         // Debug: Show what was actually written
@@ -2338,22 +2419,22 @@ menuentry "RegicideOS (Recovery)" {{
 
         // Skip GRUB mkconfig since we created manual configuration
         info("Skipping grub-mkconfig - using manual LUKS-compatible configuration");
-        
+
         // Our manual GRUB config was already written above
         // grub-mkconfig would overwrite it with broken LUKS parameters
     }
-    
+
     // Create EFI boot entry for automatic booting
     if is_efi() {
         info("Creating EFI boot entry for automatic booting...");
-        
+
         // Extract device name without partition for efibootmgr
         let efi_device = if device.contains("nvme") {
             device.rsplit_once('p').map(|(d, _)| d).unwrap_or(device)
         } else {
             device.trim_end_matches(char::is_numeric)
         };
-        
+
         // Try to create EFI boot entry using efibootmgr
         match chroot(&format!("efibootmgr --create --disk {} --part 1 --label \"RegicideOS\" --loader \"\\EFI\\fedora\\grubx64.efi\"", efi_device)) {
             Ok(_) => {
@@ -2362,7 +2443,7 @@ menuentry "RegicideOS (Recovery)" {{
             Err(e) => {
                 warn(&format!("Failed to create EFI boot entry: {}", e));
                 info("Trying alternative EFI boot entry creation...");
-                
+
                 // Alternative approach - try different loader path
                 match chroot(&format!("efibootmgr --create --disk {} --part 1 --label \"RegicideOS\" --loader \"\\EFI\\BOOT\\BOOTX64.EFI\"", efi_device)) {
                     Ok(_) => {
@@ -2375,7 +2456,7 @@ menuentry "RegicideOS (Recovery)" {{
                 }
             }
         }
-        
+
         // Set boot order to prioritize RegicideOS
         match chroot("efibootmgr --bootorder 0000,0001,0002") {
             Ok(_) => info("✓ Boot order configured"),
@@ -2485,7 +2566,10 @@ fn post_install(config: &Config) -> Result<()> {
         }
 
         chroot(&format!("usermod -aG wheel,video {}", config.username))?;
-        info(&format!("User {} created and added to wheel,video groups", config.username));
+        info(&format!(
+            "User {} created and added to wheel,video groups",
+            config.username
+        ));
     }
 
     let flatpaks = get_flatpak_packages(&config.applications);
@@ -2496,11 +2580,11 @@ fn post_install(config: &Config) -> Result<()> {
         info("Setting up flatpak directories in overlay...");
         chroot("mkdir -p /var/lib/flatpak")?;
         chroot("mkdir -p /var/cache/flatpak")?;
-        
+
         // Create /etc/declare directory and flatpak file (for declareflatpak service compatibility)
         chroot("mkdir -p /etc/declare")?;
         chroot(&format!("echo '{}' > /etc/declare/flatpak", flatpaks))?;
-        
+
         // Initialize flatpak and add Flathub repository
         info("Adding Flathub repository...");
         chroot("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")?;
@@ -2517,22 +2601,25 @@ fn post_install(config: &Config) -> Result<()> {
 
         // Update flatpak metadata
         chroot("flatpak update --noninteractive")?;
-        
+
         // Configure LUKS initramfs support if this is encrypted installation
         if config.filesystem == "btrfs_encryption_dev" {
             info("Configuring LUKS initramfs support...");
-            
+
             // Get actual LUKS partition UUID
-            let luks_uuid = match execute("blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'") {
+            let luks_uuid = match execute(
+                "blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'",
+            ) {
                 Ok(uuid) => uuid.trim().to_string(),
                 Err(_) => "regicideos".to_string(),
             };
-            
+
             info(&format!("Using LUKS UUID for initramfs: {}", luks_uuid));
-            
+
             // Now /etc is writable as overlay, so we can create initramfs configuration
             chroot("mkdir -p /etc/initramfs-tools/scripts/init-premount")?;
-            chroot(&format!(r#"cat > /etc/initramfs-tools/scripts/init-premount/luks-unlock << 'EOF'
+            chroot(&format!(
+                r#"cat > /etc/initramfs-tools/scripts/init-premount/luks-unlock << 'EOF'
 #!/bin/sh
 # LUKS unlock script for initramfs
 PREREQ=""
@@ -2565,13 +2652,18 @@ else
     /lib/cryptsetup/cryptsetup luksOpen /dev/sda3 regicideos
     log_end_msg $?
 fi
-EOF"#, luks_uuid, luks_uuid, luks_uuid))?;
-            
+EOF"#,
+                luks_uuid, luks_uuid, luks_uuid
+            ))?;
+
             chroot("chmod +x /etc/initramfs-tools/scripts/init-premount/luks-unlock")?;
-            
+
             // Add crypttab entry for LUKS device
-            chroot(&format!("echo 'regicideos UUID={} none luks' >> /etc/crypttab", luks_uuid))?;
-            
+            chroot(&format!(
+                "echo 'regicideos UUID={} none luks' >> /etc/crypttab",
+                luks_uuid
+            ))?;
+
             // Update initramfs to include LUKS support
             if chroot_with_output("which update-initramfs").is_ok() {
                 chroot("update-initramfs -u -k all")?;
