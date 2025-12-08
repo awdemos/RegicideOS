@@ -30,7 +30,7 @@ pub fn check_username(username: &str) -> bool {
     if username.is_empty() {
         return true;
     }
-    
+
     let regex = Regex::new(r"^[a-z_][a-z0-9_]{0,30}$").unwrap();
     regex.is_match(username)
 }
@@ -39,10 +39,12 @@ pub fn human_to_bytes(size: &str) -> Result<u64> {
     if size.is_empty() {
         return Ok(0);
     }
-    
+
     let (number, unit) = size.split_at(size.len() - 1);
-    let number: u64 = number.parse().map_err(|_| anyhow::anyhow!("Invalid size number"))?;
-    
+    let number: u64 = number
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid size number"))?;
+
     let multiplier = match unit.to_uppercase().as_str() {
         "B" => 1,
         "K" => 1024,
@@ -52,7 +54,7 @@ pub fn human_to_bytes(size: &str) -> Result<u64> {
         "P" => 1024_u64.pow(5),
         _ => bail!("Invalid size unit: {}", unit),
     };
-    
+
     Ok(number * multiplier)
 }
 
@@ -70,22 +72,26 @@ pub fn get_package_sets() -> Vec<String> {
 
 pub fn get_flatpak_packages(applications_set: &str) -> String {
     let package_sets: HashMap<&str, Vec<&str>> = [
-        ("recommended", vec![
-            "io.gitlab.librewolf-community",
-            "org.mozilla.Thunderbird",
-            "org.gnome.TextEditor",
-            "org.gnome.Rhythmbox3",
-            "org.gnome.Calculator",
-            "org.gnome.Totem",
-            "org.gnome.Loupe",
-            "org.libreoffice.LibreOffice"
-        ]),
-        ("minimal", vec![
-            "dev.zed.Zed"
-        ])
-    ].into_iter().collect();
-    
-    package_sets.get(applications_set)
+        (
+            "recommended",
+            vec![
+                "io.gitlab.librewolf-community",
+                "org.mozilla.Thunderbird",
+                "org.gnome.TextEditor",
+                "org.gnome.Rhythmbox3",
+                "org.gnome.Calculator",
+                "org.gnome.Totem",
+                "org.gnome.Loupe",
+                "org.libreoffice.LibreOffice",
+            ],
+        ),
+        ("minimal", vec!["dev.zed.Zed"]),
+    ]
+    .into_iter()
+    .collect();
+
+    package_sets
+        .get(applications_set)
         .map(|packages| packages.join(" "))
         .unwrap_or_default()
 }
@@ -96,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_check_username_valid() {
-        assert!(check_username(""));  // Empty username is allowed
+        assert!(check_username("")); // Empty username is allowed
         assert!(check_username("user"));
         assert!(check_username("_user"));
         assert!(check_username("user123"));
@@ -106,11 +112,13 @@ mod tests {
 
     #[test]
     fn test_check_username_invalid() {
-        assert!(!check_username("User"));  // Capital letters not allowed
-        assert!(!check_username("123user"));  // Can't start with number
-        assert!(!check_username("user-name"));  // Dashes not allowed
-        assert!(!check_username("user@domain"));  // Special chars not allowed
-        assert!(!check_username("thisusernameistoolongtobevalidbecauseitisover30characters"));  // Too long (>30 chars)
+        assert!(!check_username("User")); // Capital letters not allowed
+        assert!(!check_username("123user")); // Can't start with number
+        assert!(!check_username("user-name")); // Dashes not allowed
+        assert!(!check_username("user@domain")); // Special chars not allowed
+        assert!(!check_username(
+            "thisusernameistoolongtobevalidbecauseitisover30characters"
+        )); // Too long (>30 chars)
     }
 
     #[test]
@@ -121,14 +129,14 @@ mod tests {
         assert_eq!(human_to_bytes("3G")?, 3 * 1024_u64.pow(3));
         assert_eq!(human_to_bytes("1T")?, 1024_u64.pow(4));
         assert_eq!(human_to_bytes("1P")?, 1024_u64.pow(5));
-        
+
         // Test edge cases - empty string returns 0
         assert_eq!(human_to_bytes("")?, 0);
-        
+
         // Test error cases
         assert!(human_to_bytes("invalid").is_err());
         assert!(human_to_bytes("512X").is_err());
-        
+
         Ok(())
     }
 
@@ -173,7 +181,7 @@ mod tests {
             subvolumes: None,
             inside: None,
         };
-        
+
         assert_eq!(partition.size, "512M");
         assert_eq!(partition.label.unwrap(), "EFI");
         assert_eq!(partition.format, "vfat");
@@ -191,7 +199,7 @@ mod tests {
             username: "testuser".to_string(),
             applications: "recommended".to_string(),
         };
-        
+
         assert_eq!(config.drive, "/dev/sda");
         assert_eq!(config.repository, "https://repo.xenialinux.com/releases/");
         assert_eq!(config.flavour, "cosmic-desktop");
@@ -206,7 +214,7 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    
+
     #[test]
     fn test_regicide_restrictions() {
         // Test that RegicideOS enforces cosmic-desktop and Xenia repository
@@ -221,18 +229,21 @@ mod integration_tests {
         };
 
         // This would be the ideal config for RegicideOS
-        assert_eq!(valid_config.repository, "https://repo.xenialinux.com/releases/");
+        assert_eq!(
+            valid_config.repository,
+            "https://repo.xenialinux.com/releases/"
+        );
         assert_eq!(valid_config.flavour, "cosmic-desktop");
     }
-    
+
     #[test]
     fn test_filesystem_options() {
         let filesystems = get_fs();
-        
+
         // RegicideOS should support both regular and encrypted BTRFS
         assert!(filesystems.contains(&"btrfs".to_string()));
         assert!(filesystems.contains(&"btrfs_encryption_dev".to_string()));
-        
+
         // Should not contain any other filesystem types
         for fs in &filesystems {
             assert!(fs.contains("btrfs"));
