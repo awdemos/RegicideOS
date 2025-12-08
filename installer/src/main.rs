@@ -2103,21 +2103,31 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         info(&format!("Using kernel: {}", kernel_files));
         info(&format!("Using initrd: {}", initrd_files));
         
+        // Check if LUKS encryption is being used and adjust boot parameters
+        let is_encrypted = Path::new("/dev/mapper/regicideos").exists();
+        let (root_param, boot_options) = if is_encrypted {
+            info("Detected LUKS encryption - using encrypted boot parameters");
+            ("/dev/mapper/regicideos", "cryptroot=UUID=regicideos quiet splash rw")
+        } else {
+            info("Using unencrypted boot parameters");
+            ("LABEL=ROOTS", "quiet splash rw")
+        };
+        
         let grub_config = format!(r#"set default="RegicideOS"
 set timeout=5
 
 menuentry "RegicideOS" {{
     linux {}
     initrd {}
-    options "root=LABEL=ROOTS quiet splash rw"
+    options "root={} {}"
 }}
 
 menuentry "RegicideOS (Fallback)" {{
     linux {}
     initrd {}
-    options "root=LABEL=ROOTS quiet splash rw"
+    options "root={} {}"
 }}
-"#, kernel_files, initrd_files, kernel_files, initrd_files);
+"#, kernel_files, initrd_files, root_param, boot_options, kernel_files, initrd_files, root_param, boot_options);
         
         safe_write_file("/mnt/root/boot/efi/grub/grub.cfg", grub_config.as_bytes(), "/mnt/root/boot/efi")?;
         info("✓ GRUB configuration created successfully");
