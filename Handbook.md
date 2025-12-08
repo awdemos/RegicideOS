@@ -114,19 +114,17 @@ Once booted into the live environment:
 
 ```bash
 # Install dependencies (including gdisk for EFI support)
-sudo dnf install -y git curl gcc gdisk
-
-# Install Rust toolchain
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# Clone RegicideOS repository
-git clone https://github.com/awdemos/RegicideOS.git
-cd RegicideOS/installer
+sudo dnf install -y git curl gcc sgdisk rust cargo
 
 # Prevent system suspend during installation (critical for LUKS setups)
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 sudo loginctl disable-lid-switch
+
+# Clone RegicideOS repository
+git clone https://github.com/awdemos/RegicideOS.git
+cd RegicideOS/installer
+cargo build --release
+sudo ./target/release/installer
 ```
 
 > **⚠️ IMPORTANT**: Prevent system suspend during installation to avoid state corruption, especially when using LUKS encryption. The installer now handles this automatically, but manual prevention is recommended for reliability.
