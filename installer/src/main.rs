@@ -2258,9 +2258,9 @@ fn post_install(config: &Config) -> Result<()> {
         )?;
 
         if !Path::new("/mnt/root/usr/bin/rc-service").exists() {
-            chroot("systemctl enable flatpak")?;
+            chroot("systemctl enable declareflatpak")?;
         } else {
-            chroot("rc-update add flatpak")?;
+            chroot("rc-update add declareflatpak")?;
         }
     }
 
