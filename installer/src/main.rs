@@ -2083,21 +2083,41 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Create GRUB configuration manually to avoid systemd-boot conflicts
         info("Creating GRUB configuration manually...");
         
+        // First, find actual kernel and initrd files in squashfs
+        let kernel_files = match chroot_with_output("find /boot -name 'vmlinuz-*' -type f | head -1") {
+            Ok(files) => files.trim().to_string(),
+            Err(_) => {
+                warn("Could not find kernel files, using fallback");
+                "/boot/vmlinuz".to_string()
+            }
+        };
+        
+        let initrd_files = match chroot_with_output("find /boot -name 'initrd-*' -type f | head -1") {
+            Ok(files) => files.trim().to_string(),
+            Err(_) => {
+                warn("Could not find initrd files, using fallback");
+                "/boot/initrd".to_string()
+            }
+        };
+        
+        info(&format!("Using kernel: {}", kernel_files));
+        info(&format!("Using initrd: {}", initrd_files));
+        
         let grub_config = format!(r#"set default=0
 set timeout=5
 
 menuentry "RegicideOS" {{
-    linux /boot/vmlinuz-*
-    initrd /boot/initrd-*
+    linux {}
+    initrd {}
     options "root=LABEL=ROOTS quiet splash rw"
 }}
 
 menuentry "RegicideOS (Fallback)" {{
-    linux /boot/vmlinuz-*
-    initrd /boot/initrd-*
+    linux {}
+    initrd {}
     options "root=LABEL=ROOTS quiet splash rw"
 }}
-"#);
+"#, kernel_files, initrd_files, kernel_files, initrd_files);
         
         safe_write_file("/mnt/root/boot/efi/grub/grub.cfg", grub_config.as_bytes(), "/mnt/root/boot/efi")?;
         info("✓ GRUB configuration created successfully");
