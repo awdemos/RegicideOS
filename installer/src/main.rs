@@ -2227,57 +2227,6 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             
             info(&format!("Using LUKS UUID: {}", luks_uuid));
             
-            // Create LUKS unlock script for initramfs
-            chroot("mkdir -p /etc/initramfs-tools/scripts/init-premount")?;
-            chroot(&format!(r#"cat > /etc/initramfs-tools/scripts/init-premount/luks-unlock << 'EOF'
-#!/bin/sh
-# LUKS unlock script for initramfs
-PREREQ=""
-
-prereqs()
-{{
-    echo "\$PREREQ"
-}}
-
-case $1 in
-    prereqs)
-        prereqs
-        exit 0
-        ;;
-esac
-
-. /scripts/functions
-
-# Wait for devices to settle
-sleep 2
-
-# Try to unlock LUKS partition by UUID
-if [ -e /dev/disk/by-uuid/{} ]; then
-    log_begin_msg "Unlocking LUKS encrypted partition (UUID: {})"
-    /lib/cryptsetup/cryptsetup luksOpen /dev/disk/by-uuid/{} regicideos
-    log_end_msg $?
-else
-    # Fallback to device name
-    log_begin_msg "Unlocking LUKS encrypted partition (fallback to /dev/sda3)"
-    /lib/cryptsetup/cryptsetup luksOpen /dev/sda3 regicideos
-    log_end_msg $?
-fi
-EOF"#, luks_uuid, luks_uuid, luks_uuid))?;
-            
-            chroot("chmod +x /etc/initramfs-tools/scripts/init-premount/luks-unlock")?;
-            
-            // Add crypttab entry for LUKS device
-            chroot(&format!("echo 'regicideos UUID={} none luks' >> /etc/crypttab", luks_uuid))?;
-            
-            // Update initramfs to include LUKS support
-            if chroot_with_output("which update-initramfs").is_ok() {
-                chroot("update-initramfs -u -k all")?;
-            } else if chroot_with_output("which mkinitcpio").is_ok() {
-                // For Arch-based systems
-                chroot("sed -i 's/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/HOOKS=(base udev autodetect modconf block encrypt filesystems keyboard fsck)/' /etc/mkinitcpio.conf")?;
-                chroot("mkinitcpio -P")?;
-            }
-            
             (
                 "/dev/mapper/regicideos".to_string(),
                 format!("cryptdevice=UUID={}:regicideos root=/dev/mapper/regicideos quiet splash rw", luks_uuid),
@@ -2514,6 +2463,74 @@ fn post_install(config: &Config) -> Result<()> {
         // Update flatpak metadata
         chroot("flatpak update --noninteractive")?;
         
+        // Configure LUKS initramfs support if this is encrypted installation
+        if config.filesystem == "btrfs_encryption_dev" {
+            info("Configuring LUKS initramfs support...");
+            
+            // Get actual LUKS partition UUID
+            let luks_uuid = match execute("blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'") {
+                Ok(uuid) => uuid.trim().to_string(),
+                Err(_) => "regicideos".to_string(),
+            };
+            
+            info(&format!("Using LUKS UUID for initramfs: {}", luks_uuid));
+            
+            // Now /etc is writable as overlay, so we can create initramfs configuration
+            chroot("mkdir -p /etc/initramfs-tools/scripts/init-premount")?;
+            chroot(&format!(r#"cat > /etc/initramfs-tools/scripts/init-premount/luks-unlock << 'EOF'
+#!/bin/sh
+# LUKS unlock script for initramfs
+PREREQ=""
+
+prereqs()
+{{
+    echo "\$PREREQ"
+}}
+
+case $1 in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+. /scripts/functions
+
+# Wait for devices to settle
+sleep 2
+
+# Try to unlock LUKS partition by UUID
+if [ -e /dev/disk/by-uuid/{} ]; then
+    log_begin_msg "Unlocking LUKS encrypted partition (UUID: {})"
+    /lib/cryptsetup/cryptsetup luksOpen /dev/disk/by-uuid/{} regicideos
+    log_end_msg $?
+else
+    # Fallback to device name
+    log_begin_msg "Unlocking LUKS encrypted partition (fallback to /dev/sda3)"
+    /lib/cryptsetup/cryptsetup luksOpen /dev/sda3 regicideos
+    log_end_msg $?
+fi
+EOF"#, luks_uuid, luks_uuid, luks_uuid))?;
+            
+            chroot("chmod +x /etc/initramfs-tools/scripts/init-premount/luks-unlock")?;
+            
+            // Add crypttab entry for LUKS device
+            chroot(&format!("echo 'regicideos UUID={} none luks' >> /etc/crypttab", luks_uuid))?;
+            
+            // Update initramfs to include LUKS support
+            if chroot_with_output("which update-initramfs").is_ok() {
+                chroot("update-initramfs -u -k all")?;
+                info("✓ Updated initramfs with LUKS support");
+            } else if chroot_with_output("which mkinitcpio").is_ok() {
+                // For Arch-based systems
+                chroot("sed -i 's/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/HOOKS=(base udev autodetect modconf block encrypt filesystems keyboard fsck)/' /etc/mkinitcpio.conf")?;
+                chroot("mkinitcpio -P")?;
+                info("✓ Updated mkinitcpio with LUKS support");
+            } else {
+                warn("Neither update-initramfs nor mkinitcpio found - LUKS initramfs support may be incomplete");
+            }
+        }
+
         // Enable declareflatpak service if available (matches Xenia reference behavior)
         if chroot_with_output("which systemctl").is_ok() {
             info("Enabling declareflatpak service (systemd)");
