@@ -115,16 +115,6 @@ Once booted into the live environment:
 ```bash
 # Install dependencies (including gdisk for EFI support)
 sudo dnf install -y git curl gcc sgdisk rust cargo
-sudo dnf install -y git curl gcc gdisk
-
-# Install Rust toolchain
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# Clone RegicideOS repository
-git clone https://github.com/awdemos/RegicideOS.git
-cd RegicideOS/installer
-sudo dnf install -y git curl gcc gdisk rust cargo
 
 # Clone RegicideOS repository
 git clone https://github.com/awdemos/RegicideOS.git
@@ -134,9 +124,7 @@ cd RegicideOS/installer
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 sudo loginctl disable-lid-switch
 
-# Clone RegicideOS repository
-git clone https://github.com/awdemos/RegicideOS.git
-cd RegicideOS/installer
+# Build RegicideOS repository
 cargo build --release
 sudo ./target/release/installer
 ```
