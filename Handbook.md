@@ -115,6 +115,20 @@ Once booted into the live environment:
 ```bash
 # Install dependencies (including gdisk for EFI support)
 sudo dnf install -y git curl gcc sgdisk rust cargo
+sudo dnf install -y git curl gcc gdisk
+
+# Install Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Clone RegicideOS repository
+git clone https://github.com/awdemos/RegicideOS.git
+cd RegicideOS/installer
+sudo dnf install -y git curl gcc gdisk rust cargo
+
+# Clone RegicideOS repository
+git clone https://github.com/awdemos/RegicideOS.git
+cd RegicideOS/installer
 
 # Prevent system suspend during installation (critical for LUKS setups)
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
@@ -192,6 +206,174 @@ sudo ./binaries/regicide-installer -c regicide-config.toml
 # Or run with source-built installer
 sudo ./target/release/installer -c regicide-config.toml
 ```
+
+### 3.4 Manual Installation with OverlayFS ⚠️ **DEPRECATED**
+
+> **⚠️ DEPRECATION NOTICE**: This 4-partition overlayfs layout is deprecated. RegicideOS now recommends BTRFS-native architecture described in Section 4.1 for better performance, snapshots, and simpler management. This section is provided for reference only and should not be used for new installations.
+
+Below is the legacy walk-through showing how the old 4-partition overlayfs system works. This should only be used for understanding existing systems or migration purposes.
+
+Run the commands on a live ISO (or read them only for the concept—either way you will see the whole picture).
+
+-------------------------------------------------
+**0. Start with empty disk (assume `/dev/sda`)**
+-------------------------------------------------
+
+```bash
+# Wipe existing disk
+sgdisk --zap-all /dev/sda
+sgdisk --clear /dev/sda
+
+# Create 4 partitions
+sgdisk --new=1:0:+512M --typecode=1:EF00 --change-name=1:EFI /dev/sda
+sgdisk --new=2:0:+8G --typecode=2:8300 --change-name=2:ROOTS /dev/sda
+sgdisk --new=3:0:+8G --typecode=3:8300 --change-name=3:OVERLAY /dev/sda
+sgdisk --new=4:0:0 --typecode=4:8300 --change-name=4:HOME /dev/sda
+
+# Inform kernel of partition table changes
+partprobe /dev/sda
+```
+
+-------------------------------------------------
+**1. Format partitions**
+-------------------------------------------------
+
+```bash
+# EFI System Partition (bootloader)
+mkfs.vfat -F32 /dev/sda1
+
+# ROOTS partition (holds immutable system images)
+mkfs.btrfs -L ROOTS /dev/sda2
+
+# OVERLAY partition (holds writable layers)
+mkfs.btrfs -L OVERLAY /dev/sda3
+
+# HOME partition (user data)
+mkfs.btrfs -L HOME /dev/sda4
+```
+
+-------------------------------------------------
+**2. Mount and prepare overlay structure**
+-------------------------------------------------
+
+```bash
+# Create mount points
+mkdir /mnt/roots /mnt/overlay /mnt/home
+
+# Mount partitions
+mount /dev/sda2 /mnt/roots
+mount /dev/sda3 /mnt/overlay
+mount /dev/sda4 /mnt/home
+
+# Create BTRFS subvolumes on OVERLAY
+btrfs subvolume create /mnt/overlay/etc
+btrfs subvolume create /mnt/overlay/var
+btrfs subvolume create /mnt/overlay/usr
+
+# Create BTRFS subvolume on HOME
+btrfs subvolume create /mnt/home/home
+```
+
+-------------------------------------------------
+**3. Turn that tree into a SquashFS file**
+-------------------------------------------------
+
+```bash
+mksquashfs /tmp/rootfs  /tmp/root.img  -comp zstd -Xcompression-level 19
+```
+
+`root.img` is now the immutable "golden master".
+
+-------------------------------------------------
+**4. Populate partitions**
+-------------------------------------------------
+
+```bash
+# Copy system image to ROOTS partition
+cp /tmp/root.img /mnt/roots/
+
+# Mount EFI partition for bootloader
+mkdir -p /mnt/efi
+mount /dev/sda1 /mnt/efi
+
+# Install GRUB (adapt for EFI/BIOS as needed)
+grub-install --target=x86_64-efi --efi-directory=/mnt/efi --boot-directory=/mnt/efi --removable
+
+# Create GRUB config that loopsquash-mounts newest root*.img
+mkdir -p /mnt/efi/grub
+cat > /mnt/efi/grub/grub.cfg << 'EOF'
+set timeout=5
+set default=0
+
+menuentry "RegicideOS" {
+    loopback loop /root.img
+    linux (loop)/boot/vmlinuz-* root=loop:/root.img overlay=LABEL=OVERLAY home=LABEL=HOME quiet splash
+    initrd (loop)/boot/initrd-*
+}
+EOF
+```
+
+-------------------------------------------------
+**5. Final mount structure for runtime**
+-------------------------------------------------
+
+When system boots, the initramfs does:
+
+```bash
+# Mount EFI partition (read-only for bootloader)
+mount -L EFI /boot/efi
+
+# Mount ROOTS partition (read-only)
+mount -L ROOTS /mnt/roots -o ro
+
+# Loop-mount system image from ROOTS
+mount -t squashfs -o loop /mnt/roots/root.img /sysroot
+
+# Mount OVERLAY partition
+mount -L OVERLAY /mnt/overlay
+
+# Mount HOME partition  
+mount -L HOME /mnt/home
+
+# Create overlay mounts for writable directories
+mount -t overlay overlay -o lowerdir=/sysroot/etc,upperdir=/mnt/overlay/etc,workdir=/mnt/overlay/etc-work /sysroot/etc
+mount -t overlay overlay -o lowerdir=/sysroot/var,upperdir=/mnt/overlay/var,workdir=/mnt/overlay/var-work /sysroot/var
+mount -t overlay overlay -o lowerdir=/sysroot/usr,upperdir=/mnt/overlay/usr,workdir=/mnt/overlay/usr-work /sysroot/usr
+
+# Mount home subvolume
+mount -t btrfs -o subvol=home /mnt/home /sysroot/home
+
+# Switch-root into /sysroot → systemd starts
+```
+
+Once you see the commands above, the phrase "single system image" just means "every machine can share the same SquashFS and only keep its *local* differences in a thin writable layer."
+
+#### 3.4.1 Architecture Benefits
+
+1. **System Integrity**: Base system cannot be accidentally modified
+2. **Easy Updates**: Just drop in a new SquashFS image
+3. **Fast Rollback**: Boot without overlay to return to clean state
+4. **Storage Efficiency**: Single system image shared across multiple machines
+5. **Snapshot Support**: Overlay state can be snapshotted and restored
+6. **Security**: Immutable root reduces attack surface
+
+### 3.5 Post-Installation
+
+After successful installation:
+
+1. **Remove installation media** and reboot
+2. **Complete initial setup** through Cosmic Desktop
+3. **Verify system integrity**:
+   ```bash
+   # Check all mounts are working
+   mount | grep -E "(overlay|btrfs)"
+   
+   # Verify AI services status
+   systemctl status portcl btrmind
+   
+   # Check for installation errors
+   sudo journalctl -u installer.service --since "5 minutes ago"
+   ```
 
 ### 3.3 Installation Process
 
@@ -1152,19 +1334,13 @@ RegicideOS provides comprehensive Rust development support:
 
 ```bash
 # Install Rust toolchain (if not present)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Update to latest stable
-rustup update stable
+sudo dnf install -y rust cargo rustfmt clippy
 
 # Install additional targets
-rustup target add thumbv6m-none-eabi  # ARM Cortex-M
-rustup target add riscv32imc-unknown-none-elf  # RISC-V
-rustup target add wasm32-unknown-unknown  # WebAssembly
+rustc target add thumbv6m-none-eabi  # ARM Cortex-M
+rustc target add riscv32imc-unknown-none-elf  # RISC-V
+rustc target add wasm32-unknown-unknown  # WebAssembly
 ```
-
-#### 7.4.2 Embedded Development
-
 RegicideOS includes special support for embedded development:
 
 ```bash
