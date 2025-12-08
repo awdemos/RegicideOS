@@ -1789,13 +1789,7 @@ async fn download_root(url: &str) -> Result<()> {
         safe_remove_file(root_img_path, "/mnt/gentoo")?;
     }
 
-    info(&format!("Downloading root image from {}", url));
-    let response = reqwest::get(url).await?;
-    
-    if Path::new(root_img_path).exists() {
-        safe_remove_file(root_img_path, "/mnt/gentoo")?;
-    }
-
+    info(&format!("Downloading RegicideOS root image from {}", url));
     let response = reqwest::get(url).await?;
 
     if !response.status().is_success() {
