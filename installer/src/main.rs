@@ -119,42 +119,7 @@ fn execute_with_output(command: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-// Check if partition is accessible (not locked)
-fn is_partition_accessible(partition: &str) -> bool {
-    // Try to read the first block of the partition
-    if let Ok(_) = execute(&format!("dd if={} of=/dev/null bs=512 count=1 2>/dev/null", partition)) {
-        true
-    } else {
-        false
-    }
-}
 
-// Execute command with retry for locked resources
-fn execute_with_retry(command: &str, max_retries: u32) -> Result<String> {
-    let mut attempts = 0;
-    loop {
-        match execute(command) {
-            Ok(output) => return Ok(output),
-            Err(e) => {
-                attempts += 1;
-                if attempts >= max_retries {
-                    return Err(e);
-                }
-                
-                // Check if error might be due to locked resources
-                let error_msg = e.to_string().to_lowercase();
-                if error_msg.contains("resource busy") || 
-                   error_msg.contains("device or resource busy") ||
-                   error_msg.contains("no such file or directory") && command.contains("lsblk") {
-                    info(&format!("Partition detection blocked, retrying in 500ms (attempt {}/{})", attempts, max_retries));
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                } else {
-                    return Err(e);
-                }
-            }
-        }
-    }
-}
 
 // Safe command execution with strict allowlist
 fn execute(command: &str) -> Result<String> {
@@ -656,123 +621,122 @@ fn get_layouts() -> HashMap<String, Vec<Partition>> {
 fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>> {
     info("Waiting for kernel to recognize new partitions...");
 
-    let mut attempts = 0;
-    let max_attempts = 30; // Increased from 10
+    // Give the kernel a moment to recognize partitions
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
     let drive_base = drive.split('/').last().unwrap_or("");
+    let mut partition_names = Vec::new();
 
-    loop {
-        // Try multiple detection methods
-        let mut partition_names = Vec::new();
+    // Method 1: Use lsblk to detect partitions
+    if let Ok(partitions_output) = execute(&format!("lsblk -ln -o NAME {}", drive)) {
+        let mut detected_partitions: Vec<String> = partitions_output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter(|line| line.trim() != drive_base)
+            .map(|line| format!("/dev/{}", line.trim()))
+            .collect();
 
-        // Method 1: Use lsblk to detect partitions with retry for locked partitions
-        if let Ok(partitions_output) = execute_with_retry(&format!("lsblk -ln -o NAME {}", drive), 3) {
-            println!("DEBUG: lsblk output for {}: {}", drive, partitions_output);
-            let mut detected_partitions: Vec<String> = partitions_output
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .filter(|line| line.trim() != drive_base)
-                .map(|line| format!("/dev/{}", line.trim()))
-                .collect();
+        // Sort partitions numerically to ensure correct order
+        detected_partitions.sort_by(|a, b| {
+            let extract_num = |path: &str| {
+                path.rsplit_once('p')
+                    .and_then(|(_, num)| num.parse::<u32>().ok())
+                    .or_else(|| {
+                        path.chars()
+                            .skip_while(|c| !c.is_ascii_digit())
+                            .collect::<String>()
+                            .parse::<u32>()
+                            .ok()
+                    })
+                    .unwrap_or(0)
+            };
+            extract_num(a).cmp(&extract_num(b))
+        });
 
-            // Sort partitions numerically to ensure correct order
-            detected_partitions.sort_by(|a, b| {
-                let extract_num = |path: &str| {
-                    path.rsplit_once('p')
-                        .and_then(|(_, num)| num.parse::<u32>().ok())
-                        .or_else(|| {
-                            path.chars()
-                                .skip_while(|c| !c.is_ascii_digit())
-                                .collect::<String>()
-                                .parse::<u32>()
-                                .ok()
-                        })
-                        .unwrap_or(0)
-                };
-                extract_num(a).cmp(&extract_num(b))
-            });
-
-            println!(
-                "DEBUG: sorted_detected_partitions = {:?}",
-                detected_partitions
-            );
-
-            // Special handling for LUKS - check if we have a mapper device
-            if expected_count == 1 && detected_partitions.is_empty() {
-                // For LUKS, we expect 1 mapper device instead of physical partitions
-                if Path::new("/dev/mapper/regicideos").exists() {
-                    partition_names.push("/dev/mapper/regicideos".to_string());
-                }
-            } else if detected_partitions.len() == expected_count {
-                // Verify all partitions actually exist as device files
-                let mut all_exist = true;
-                for part in &detected_partitions {
-                    if !Path::new(part).exists() {
-                        all_exist = false;
-                        break;
-                    }
-                }
-                if all_exist {
-                    partition_names = detected_partitions;
-                }
+        // Special handling for LUKS - check if we have a mapper device
+        if expected_count == 1 && detected_partitions.is_empty() {
+            // For LUKS, we expect 1 mapper device instead of physical partitions
+            if Path::new("/dev/mapper/regicideos").exists() {
+                partition_names.push("/dev/mapper/regicideos".to_string());
             }
-        }
-
-        // Method 2: Try numbered approach if lsblk detection fails
-        if partition_names.len() != expected_count {
-            partition_names.clear();
+        } else if detected_partitions.len() == expected_count {
+            // Verify all partitions actually exist as device files
             let mut all_exist = true;
-            for i in 1..=expected_count {
-                let part_name = if drive.contains("nvme")
-                    || drive.chars().last().unwrap_or('a').is_ascii_digit()
-                {
-                    format!("{}p{}", drive, i)
-                } else {
-                    format!("{}{}", drive, i)
-                };
-
-                if Path::new(&part_name).exists() {
-                    partition_names.push(part_name);
-                } else {
+            for part in &detected_partitions {
+                if !Path::new(part).exists() {
                     all_exist = false;
                     break;
                 }
             }
-
-            if !all_exist {
-                partition_names.clear();
+            if all_exist {
+                partition_names = detected_partitions;
             }
         }
+    }
 
-        if partition_names.len() == expected_count {
-            println!(
-                "DEBUG: Found {} partitions as expected: {:?}",
-                expected_count, partition_names
-            );
-            info(&format!("Found {} partitions", expected_count));
-            return Ok(partition_names);
-        }
+    // Method 2: Try numbered approach if lsblk detection fails
+    if partition_names.len() != expected_count {
+        partition_names.clear();
+        for i in 1..=expected_count {
+            let part_name = if drive.contains("nvme")
+                || drive.chars().last().unwrap_or('a').is_ascii_digit()
+            {
+                format!("{}p{}", drive, i)
+            } else {
+                format!("{}{}", drive, i)
+            };
 
-        attempts += 1;
-        if attempts >= max_attempts {
-            bail!(
-                "Partitions were not created properly after {} attempts. Expected {}, found {}",
-                max_attempts,
-                expected_count,
-                partition_names.len()
-            );
-        }
-
-        // Exponential backoff with max delay
-        let delay = std::cmp::min(1000, 100 * attempts);
-        std::thread::sleep(std::time::Duration::from_millis(delay));
-
-        // Try to refresh partition table every few attempts with retry
-        if attempts % 5 == 0 {
-            let _ = execute_with_retry(&format!("partprobe {}", drive), 2)
-                .or_else(|_| execute_with_retry(&format!("sfdisk -R {}", drive), 2))
-                .or_else(|_| execute_with_retry(&format!("blockdev --rereadpt {}", drive), 2));
+            if Path::new(&part_name).exists() {
+                partition_names.push(part_name);
+            } else {
+                partition_names.clear();
+                break;
+            }
         }
     }
+
+    if partition_names.len() == expected_count {
+        info(&format!("Found {} partitions", expected_count));
+        return Ok(partition_names);
+    }
+
+    // Try to refresh partition table once
+    let _ = execute(&format!("partprobe {}", drive))
+        .or_else(|_| execute(&format!("sfdisk -R {}", drive)))
+        .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
+
+    // Give it another moment
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Try detection again after refresh
+    partition_names.clear();
+    for i in 1..=expected_count {
+        let part_name = if drive.contains("nvme")
+            || drive.chars().last().unwrap_or('a').is_ascii_digit()
+        {
+            format!("{}p{}", drive, i)
+        } else {
+            format!("{}{}", drive, i)
+        };
+
+        if Path::new(&part_name).exists() {
+            partition_names.push(part_name);
+        } else {
+            partition_names.clear();
+            break;
+        }
+    }
+
+    if partition_names.len() == expected_count {
+        info(&format!("Found {} partitions after refresh", expected_count));
+        return Ok(partition_names);
+    }
+
+    bail!(
+        "Partitions were not created properly. Expected {}, found {}",
+        expected_count,
+        partition_names.len()
+    )
 }
 
 fn set_efi_boot_flag(partition: &str) -> Result<()> {
@@ -1040,40 +1004,12 @@ fn is_partition_in_use(partition: &str) -> bool {
 }
 
 fn ensure_partition_ready(partition: &str) -> Result<()> {
-    let mut attempts = 0;
-    let max_attempts = 15;
-
-    while attempts < max_attempts {
-        // Check if partition exists and is ready
-        if Path::new(partition).exists() {
-            // Try to read partition info to verify it's ready with retry
-            if execute_with_retry(&format!("lsblk -n -o NAME {}", partition), 2).is_ok() {
-                // Additional check: verify partition is accessible (not locked)
-                if is_partition_accessible(partition) {
-                    return Ok(());
-                }
-            }
-        }
-
-        attempts += 1;
-        if attempts < max_attempts {
-            info(&format!(
-                "Waiting for partition {} to be ready (attempt {}/{})",
-                partition, attempts, max_attempts
-            ));
-            
-            // Try to wake up partition device
-            let _ = execute(&format!("blockdev --rereadpt {} 2>/dev/null || true", partition));
-            
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
+    // Simple check - just verify partition exists
+    if Path::new(partition).exists() {
+        return Ok(());
     }
-
-    bail!(
-        "Partition {} is not ready after {} attempts",
-        partition,
-        max_attempts
-    )
+    
+    bail!("Partition {} does not exist", partition)
 }
 
 fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
