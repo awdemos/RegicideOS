@@ -2080,20 +2080,27 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         );
         chroot(&grub_install_cmd)?;
 
-        // Generate GRUB config using exact same path as Python reference
-        // Ensure EFI partition is writable and use explicit GRUB config
-        info("Ensuring EFI partition is writable for GRUB config generation");
-        chroot("mount -o remount,rw /boot/efi")?;
-
-        // Verify GRUB environment before running grub-mkconfig
-        info("Verifying GRUB environment before config generation");
-        verify_grub_environment()?;
-
-        // Run GRUB mkconfig to generate configuration
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/grub/grub.cfg", grub);
-        info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
+        // Create GRUB configuration manually to avoid systemd-boot conflicts
+        info("Creating GRUB configuration manually...");
         
-        chroot(&grub_mkconfig_cmd)?;
+        let grub_config = format!(r#"set default=0
+set timeout=5
+
+menuentry "RegicideOS" {{
+    linux /boot/vmlinuz-*
+    initrd /boot/initrd-*
+    options "root=LABEL=ROOTS quiet splash rw"
+}}
+
+menuentry "RegicideOS (Fallback)" {{
+    linux /boot/vmlinuz-*
+    initrd /boot/initrd-*
+    options "root=LABEL=ROOTS quiet splash rw"
+}}
+"#);
+        
+        safe_write_file("/mnt/root/boot/efi/grub/grub.cfg", grub_config.as_bytes(), "/mnt/root/boot/efi")?;
+        info("✓ GRUB configuration created successfully");
     } else {
         // For BIOS, use exact same commands as Python reference
         let grub_install_cmd = format!(
