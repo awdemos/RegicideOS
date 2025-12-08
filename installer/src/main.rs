@@ -1766,10 +1766,33 @@ fn mount() -> Result<()> {
     // Mount EFI or BOOT partition based on system type
     if is_efi() {
         info("Finding EFI partition...");
+        
+        // Debug: List all available partitions and their labels
+        match execute("lsblk -fn -o NAME,LABEL,FSTYPE") {
+            Ok(output) => {
+                info(&format!("Available partitions:\n{}", output));
+            }
+            Err(e) => {
+                warn(&format!("Failed to list partitions: {}", e));
+            }
+        }
+        
         let efi_device = find_partition_by_label("EFI")?;
-
-        info("Mounting ESP on /mnt/root/boot/efi with write permissions");
+        info(&format!("Found EFI partition: {}", efi_device));
+info("Mounting ESP on /mnt/root/boot/efi with write permissions");
+        info(&format!("Mount command would be: mount -o rw {} /mnt/root/boot/efi", efi_device));
         mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
+        
+        // Verify mount was successful and check if it's writable
+        match execute("findmnt /mnt/root/boot/efi") {
+            Ok(mount_info) => {
+                info(&format!("EFI mount verification: {}", mount_info.trim()));
+            }
+            Err(e) => {
+                warn(&format!("Failed to verify EFI mount: {}", e));
+            }
+        }
+
     } else {
         info("Finding BOOT partition...");
         let boot_device = find_partition_by_label("BOOT")?;
