@@ -2103,7 +2103,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         info(&format!("Using kernel: {}", kernel_files));
         info(&format!("Using initrd: {}", initrd_files));
         
-        let grub_config = format!(r#"set default=0
+        let grub_config = format!(r#"set default="RegicideOS"
 set timeout=5
 
 menuentry "RegicideOS" {{
@@ -2121,6 +2121,21 @@ menuentry "RegicideOS (Fallback)" {{
         
         safe_write_file("/mnt/root/boot/efi/grub/grub.cfg", grub_config.as_bytes(), "/mnt/root/boot/efi")?;
         info("✓ GRUB configuration created successfully");
+        
+        // Debug: Show what was actually written
+        match chroot_with_output("cat /boot/efi/grub/grub.cfg") {
+            Ok(config_content) => {
+                info("GRUB config content:");
+                info(&format!("{}", config_content));
+            }
+            Err(e) => warn(&format!("Failed to read GRUB config: {}", e)),
+        }
+        
+        // Verify GRUB config file exists and is readable
+        match chroot_with_output("ls -la /boot/efi/grub/") {
+            Ok(output) => info(&format!("GRUB directory contents:\n{}", output.trim())),
+            Err(e) => warn(&format!("Failed to list GRUB directory: {}", e)),
+        }
     } else {
         // For BIOS, use exact same commands as Python reference
         let grub_install_cmd = format!(
