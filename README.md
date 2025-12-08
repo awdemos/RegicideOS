@@ -150,11 +150,7 @@ If you need to build from source or use a custom configuration:
 ```bash
 # Install required packages in live environment
 # For Fedora:
-sudo dnf -y install curl gcc btrfs-progs sgdisk
-
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
+sudo dnf -y install curl gcc btrfs-progs sgdisk rust cargo
 
 # Clone and build
 git clone https://github.com/awdemos/RegicideOS.git

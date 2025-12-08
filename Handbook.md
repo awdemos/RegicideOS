@@ -19,20 +19,10 @@
 3. [Installation](#3-installation)
 4. [System Architecture](#4-system-architecture)
 5. [Core Components](#5-core-components)
-6. [AI-Powered System Management](#6-ai-powered-system-management)
-    - 6.1 [PortCL - Package Management Optimization](#61-portcl---package-management-optimization)
-    - 6.2 [BtrMind - Storage Management AI](#62-btrmind---storage-management-ai)
-    - 6.3 [Merlin - LLM Router](#63-merlin---llm-router)
-7. [Package Management](#7-package-management)
-    - 7.1 [Overlay System](#71-overlay-system)
-    - 7.2 [Foxmerge Package Management](#72-foxmerge-package-management)
-    - 7.3 [User Configuration and Dotfiles](#73-user-configuration-and-dotfiles)
-    - 7.4 [Rust Development Environment](#74-rust-development-environment)
-    - 7.5 [Container-Based Applications](#75-container-based-applications)
-8. [Development Environment](#8-development-environment)
-9. [System Administration](#9-system-administration)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Advanced Topics](#11-advanced-topics)
+6. [Package Management](#6-package-management)
+7. [Development Environment](#7-development-environment)
+8. [System Administration](#8-system-administration)
+9. [Troubleshooting](#9-troubleshooting)
 
 ---
 
@@ -40,29 +30,19 @@
 
 ### 1.1 What is RegicideOS?
 
-RegicideOS is a revolutionary Linux distribution that represents the future of operating systems. Built as a specialized fork of Xenia Linux, RegicideOS embodies two core principles:
+RegicideOS is a specialized fork of Xenia Linux focused on:
 
-- **Rust-First Architecture**: Every system component that can be implemented in Rust is being migrated to Rust for maximum memory safety and performance
-- **AI-Powered Operations**: Intelligent system management using continual reinforcement learning for autonomous optimization
-
-### 1.2 Philosophy and Design Goals
-
-RegicideOS challenges the status quo of traditional operating systems by:
-
-- **Eliminating Memory Vulnerabilities**: Through Rust's ownership model and zero-cost abstractions
-- **Autonomous System Management**: AI agents that learn and adapt to optimize system performance
+- **Rust-First Architecture**: System components migrated to Rust for memory safety and performance
 - **Immutable System Architecture**: Read-only root filesystem for enhanced security and reliability
-- **Future-Proof Design**: Architecture ready for next-generation technologies like the Asterinas kernel
 
-### 1.3 Key Differentiators from Xenia Linux
+### 1.2 Key Differentiators from Xenia Linux
 
 | Feature | Xenia Linux | RegicideOS |
 |---------|-------------|------------|
 | **Desktop Environment** | Multiple choices | Cosmic Desktop only |
-| **AI Integration** | Limited | Core system feature |
 | **Language Focus** | Mixed ecosystem | Rust-first approach |
 | **System Updates** | Traditional | Immutable/atomic |
-| **Package Management** | Standard repositories | Overlay-based with AI optimization |
+| **Package Management** | Standard repositories | Overlay-based |
 
 ---
 
@@ -75,24 +55,17 @@ RegicideOS challenges the status quo of traditional operating systems by:
 - **Memory**: 4GB RAM
 - **Storage**: 12GB available disk space
 - **Firmware**: UEFI or Legacy BIOS
-- **Graphics**: Any GPU with basic framebuffer support
 
 #### Recommended Specifications
-- **Processor**: Multi-core x86-64 with AVX2 support
-- **Memory**: 8GB+ RAM (for AI features)
+- **Processor**: Multi-core x86-64
+- **Memory**: 8GB+ RAM
 - **Storage**: 20GB+ SSD storage
 - **Firmware**: UEFI with Secure Boot support
-- **Graphics**: GPU with Vulkan/OpenGL 4.0+ support
-- **Network**: Ethernet or Wi-Fi for package updates
 
 ### 2.2 Supported Architectures
 
 Currently supported:
 - `x86_64` (AMD64)
-
-Future planned support:
-- `aarch64` (ARM64)
-- `riscv64` (RISC-V)
 
 ---
 
@@ -195,155 +168,17 @@ sudo ./binaries/regicide-installer -c regicide-config.toml
 sudo ./target/release/installer -c regicide-config.toml
 ```
 
-### 3.4 Manual Installation with OverlayFS ⚠️ **DEPRECATED**
+### 3.3 Manual Installation (Legacy)
 
-> **⚠️ DEPRECATION NOTICE**: This 4-partition overlayfs layout is deprecated. RegicideOS now recommends BTRFS-native architecture described in Section 4.1 for better performance, snapshots, and simpler management. This section is provided for reference only and should not be used for new installations.
+> **⚠️ DEPRECATED**: The 4-partition overlayfs layout is deprecated. Use BTRFS-native architecture instead.
 
-Below is the legacy walk-through showing how the old 4-partition overlayfs system works. This should only be used for understanding existing systems or migration purposes.
+For reference, the legacy system used:
+- EFI System Partition (512MB, FAT32)
+- ROOTS partition (holds system images)
+- OVERLAY partition (writable layers) 
+- HOME partition (user data)
 
-Run the commands on a live ISO (or read them only for the concept—either way you will see the whole picture).
-
--------------------------------------------------
-**0. Start with empty disk (assume `/dev/sda`)**
--------------------------------------------------
-
-```bash
-# Wipe existing disk
-sgdisk --zap-all /dev/sda
-sgdisk --clear /dev/sda
-
-# Create 4 partitions
-sgdisk --new=1:0:+512M --typecode=1:EF00 --change-name=1:EFI /dev/sda
-sgdisk --new=2:0:+8G --typecode=2:8300 --change-name=2:ROOTS /dev/sda
-sgdisk --new=3:0:+8G --typecode=3:8300 --change-name=3:OVERLAY /dev/sda
-sgdisk --new=4:0:0 --typecode=4:8300 --change-name=4:HOME /dev/sda
-
-# Inform kernel of partition table changes
-partprobe /dev/sda
-```
-
--------------------------------------------------
-**1. Format partitions**
--------------------------------------------------
-
-```bash
-# EFI System Partition (bootloader)
-mkfs.vfat -F32 /dev/sda1
-
-# ROOTS partition (holds immutable system images)
-mkfs.btrfs -L ROOTS /dev/sda2
-
-# OVERLAY partition (holds writable layers)
-mkfs.btrfs -L OVERLAY /dev/sda3
-
-# HOME partition (user data)
-mkfs.btrfs -L HOME /dev/sda4
-```
-
--------------------------------------------------
-**2. Mount and prepare overlay structure**
--------------------------------------------------
-
-```bash
-# Create mount points
-mkdir /mnt/roots /mnt/overlay /mnt/home
-
-# Mount partitions
-mount /dev/sda2 /mnt/roots
-mount /dev/sda3 /mnt/overlay
-mount /dev/sda4 /mnt/home
-
-# Create BTRFS subvolumes on OVERLAY
-btrfs subvolume create /mnt/overlay/etc
-btrfs subvolume create /mnt/overlay/var
-btrfs subvolume create /mnt/overlay/usr
-
-# Create BTRFS subvolume on HOME
-btrfs subvolume create /mnt/home/home
-```
-
--------------------------------------------------
-**3. Turn that tree into a SquashFS file**
--------------------------------------------------
-
-```bash
-mksquashfs /tmp/rootfs  /tmp/root.img  -comp zstd -Xcompression-level 19
-```
-
-`root.img` is now the immutable "golden master".
-
--------------------------------------------------
-**4. Populate partitions**
--------------------------------------------------
-
-```bash
-# Copy system image to ROOTS partition
-cp /tmp/root.img /mnt/roots/
-
-# Mount EFI partition for bootloader
-mkdir -p /mnt/efi
-mount /dev/sda1 /mnt/efi
-
-# Install GRUB (adapt for EFI/BIOS as needed)
-grub-install --target=x86_64-efi --efi-directory=/mnt/efi --boot-directory=/mnt/efi --removable
-
-# Create GRUB config that loopsquash-mounts newest root*.img
-mkdir -p /mnt/efi/grub
-cat > /mnt/efi/grub/grub.cfg << 'EOF'
-set timeout=5
-set default=0
-
-menuentry "RegicideOS" {
-    loopback loop /root.img
-    linux (loop)/boot/vmlinuz-* root=loop:/root.img overlay=LABEL=OVERLAY home=LABEL=HOME quiet splash
-    initrd (loop)/boot/initrd-*
-}
-EOF
-```
-
--------------------------------------------------
-**5. Final mount structure for runtime**
--------------------------------------------------
-
-When system boots, the initramfs does:
-
-```bash
-# Mount EFI partition (read-only for bootloader)
-mount -L EFI /boot/efi
-
-# Mount ROOTS partition (read-only)
-mount -L ROOTS /mnt/roots -o ro
-
-# Loop-mount system image from ROOTS
-mount -t squashfs -o loop /mnt/roots/root.img /sysroot
-
-# Mount OVERLAY partition
-mount -L OVERLAY /mnt/overlay
-
-# Mount HOME partition  
-mount -L HOME /mnt/home
-
-# Create overlay mounts for writable directories
-mount -t overlay overlay -o lowerdir=/sysroot/etc,upperdir=/mnt/overlay/etc,workdir=/mnt/overlay/etc-work /sysroot/etc
-mount -t overlay overlay -o lowerdir=/sysroot/var,upperdir=/mnt/overlay/var,workdir=/mnt/overlay/var-work /sysroot/var
-mount -t overlay overlay -o lowerdir=/sysroot/usr,upperdir=/mnt/overlay/usr,workdir=/mnt/overlay/usr-work /sysroot/usr
-
-# Mount home subvolume
-mount -t btrfs -o subvol=home /mnt/home /sysroot/home
-
-# Switch-root into /sysroot → systemd starts
-```
-
-Once you see the commands above, the phrase "single system image" just means "every machine can share the same SquashFS and only keep its *local* differences in a thin writable layer."
-
-#### 3.4.1 Architecture Benefits
-
-1. **System Integrity**: Base system cannot be accidentally modified
-2. **Easy Updates**: Just drop in a new SquashFS image
-3. **Fast Rollback**: Boot without overlay to return to clean state
-4. **Storage Efficiency**: Single system image shared across multiple machines
-5. **Snapshot Support**: Overlay state can be snapshotted and restored
-6. **Security**: Immutable root reduces attack surface
+This has been replaced by the BTRFS-native approach described in Section 4.1.
 
 ### 3.5 Post-Installation
 
@@ -368,200 +203,31 @@ After successful installation:
 The RegicideOS installer performs these steps:
 
 1. **System Preparation**
-   - Prevent suspend interrupts during critical operations
    - Validate system dependencies (gdisk, cryptsetup, etc.)
    - Check network connectivity to Xenia repositories
 
 2. **Drive Partitioning**
    - EFI System Partition (512MB, FAT32) with boot flag
-   - Root Partition (8GB, ext4 for boot) + LUKS-encrypted BTRFS (remaining space)
-   - Automatic retry and verification of partition creation
+   - Root Partition with LUKS-encrypted BTRFS (remaining space)
 
 3. **Filesystem Setup**
    - Create BTRFS subvolumes for overlay system
    - Configure read-only root filesystem via SquashFS
    - Set up writable overlays for `/etc`, `/var`, `/usr`
-   - Enhanced error handling for filesystem operations
 
-4. **LUKS Encryption (if selected)**
-   - Secure LUKS container creation with proper device path handling
-   - Fixed labeling system that works with encrypted containers
-   - Automatic device mapper setup and verification
-
-5. **System Image Download**
+4. **System Image Download**
    - Download compressed system image from Xenia repositories
-   - Verify integrity and decompress to target
-   - Uses `cosmic-fedora` flavor (corrected from `cosmic-desktop`)
+   - Uses `cosmic-fedora` flavor
 
-6. **Bootloader Installation**
+5. **Bootloader Installation**
    - Install GRUB for EFI or Legacy BIOS
-   - Automatic gdisk installation for EFI boot flags
    - Configure boot parameters for immutable system
 
-7. **AI Component Setup**
-   - Initialize AI system monitoring agents
-   - Configure continual learning frameworks
-   - Set up default optimization policies
-
-8. **Post-Installation Cleanup**
+6. **Post-Installation Cleanup**
    - Verify all mounts and services
    - Generate installation report
 
-### 3.4 Manual Installation with OverlayFS ⚠️ **DEPRECATED**
-
-> **⚠️ DEPRECATION NOTICE**: This 4-partition overlayfs layout is deprecated. RegicideOS now recommends the BTRFS-native architecture described in Section 4.1 for better performance, snapshots, and simpler management. This section is provided for reference only and should not be used for new installations.
-
-Below is the legacy walk-through showing how the old 4-partition overlayfs system works. This should only be used for understanding existing systems or migration purposes.
-
-Run the commands on a live ISO (or read them only for the concept—either way you will see the whole picture).
-
-------------------------------------------------
-**0. Start with empty disk (assume `/dev/sda`)**
-------------------------------------------------
-
-```
-gdisk /dev/sda
-```
-
-Create four partitions and give them the **GPT partition-labels** that the Xenia initrd looks for:
-
-| number | size       | label   | code | purpose |
-|--------|------------|---------|------|---------|
-| 1      | 512 MiB    | EFI     | EF00 | ESP (FAT32) |
-| 2      | 5 GiB      | ROOTS   | 8300 | ext4, will hold SquashFS |
-| 3      | 2 GiB      | OVERLAY | 8300 | ext4, writable layer |
-| 4      | rest       | HOME    | 8300 | ext4, /home |
-
-(You can use `fdisk -t gpt` or `parted`—only the **label string** matters.)
-
-------------------------------------------------
-**1. Make the filesystems**
-------------------------------------------------
-
-```
-mkfs.vfat -n EFI     /dev/sda1
-mkfs.ext4 -L ROOTS   /dev/sda2
-mkfs.ext4 -L OVERLAY /dev/sda3
-mkfs.ext4 -L HOME    /dev/sda4
-```
-
-------------------------------------------------
-**2. Build (or download) the read-only master image**
-------------------------------------------------
-
-You need *one* directory tree that contains a complete Gentoo/rootfs.
-You can:
-
-- `emerge --root=/tmp/rootfs -N @world` on another Gentoo box, or
-- extract the official Xenia root tarball into `/tmp/rootfs`.
-
-------------------------------------------------
-**3. Turn that tree into a SquashFS file**
-------------------------------------------------
-
-```
-mksquashfs /tmp/rootfs  /tmp/root.img  -comp zstd -Xcompression-level 19
-```
-
-`root.img` is now the immutable "golden master".
-
-------------------------------------------------
-**4. Populate the partitions**
-------------------------------------------------
-
-Mount them anywhere convenient:
-
-```
-mkdir -p /mnt/{efi,roots,overlay,home}
-mount /dev/sda1 /mnt/efi
-mount /dev/sda2 /mnt/roots
-mount /dev/sda3 /mnt/overlay
-mount /dev/sda4 /mnt/home
-```
-
-Copy the image:
-
-```
-cp /tmp/root.img /mnt/roots/
-```
-
-Create empty overlay directories (the initrd will use them):
-
-```
-mkdir -p /mnt/overlay/upper /mnt/overlay/work
-```
-
-(You can leave `/mnt/home` empty; the first boot will create lost+found and any dot-files.)
-
-------------------------------------------------
-**5. Install GRUB so UEFI can start it**
-------------------------------------------------
-
-We still need a kernel + initrd **inside** the SquashFS so GRUB can load them.
-The easiest way is to bind-mount the SquashFS once, chroot into it, build a kernel/initrd, then copy those two files back to the ESP.
-
-```
-mkdir /tmp/sq
-mount -t squashfs /mnt/roots/root.img /tmp/sq
-cp -a /tmp/sq/boot/{vmlinuz-*,initramfs-*} /mnt/roots/
-umount /tmp/sq
-```
-
-Now install GRUB (still from the live environment):
-
-```
-grub-install --target=x86_64-efi --efi-directory=/mnt/efi --boot-directory=/mnt/roots/boot --removable
-```
-
-`--removable` makes the firmware find `\EFI\BOOT\BOOTX64.EFI` (no NVRAM entry needed).
-
-Create a minimal `grub.cfg` (on the ESP, or in `/mnt/roots/boot/grub/grub.cfg`):
-
-```
-set root=(hd0,gpt2)        # ROOTS partition
-linux  /boot/vmlinuz-<ver> root=LABEL=ROOTS overlay=LABEL=OVERLAY home=LABEL=HOME quiet
-initrd /boot/initramfs-<ver>.img
-```
-
-------------------------------------------------
-**6. First boot – what the initrd does**
-------------------------------------------------
-
-- Opens LUKS if you encrypted anything.
-- Mounts **ROOTS** read-only → finds `root.img`.
-- Mounts **OVERLAY** read-write.
-- Creates the OverlayFS merge:
-  ```
-  mount -t overlay overlay -o lowerdir=/rootfs,upperdir=/overlay/upper,workdir=/overlay/work /newroot
-  ```
-- Binds **HOME** onto `/newroot/home`.
-- `switch_root` → systemd starts.
-
-You now have a **writable** system whose *base* is still the pristine SquashFS.
-
-------------------------------------------------
-**7. Daily life & upgrades**
-------------------------------------------------
-
-- Install packages, edit configs, add users – everything lands in **OVERLAY**.
-- When a new OS release appears, just drop the new `root-new.img` into the ROOTS partition and reboot; GRUB picks the newest file by mtime.
-- If you ever break the overlay, boot with `overlay=disabled` (GRUB menu entry) – you are instantly back to the clean SquashFS.
-
-------------------------------------------------
-
-That is literally all the "magic": four labelled partitions, one SquashFS, one overlay mount.
-Once you see the commands above, the phrase "single system image" just means "every machine can share the same SquashFS and only keep its *local* differences in a thin writable layer."
-
-#### 3.4.1 Architecture Benefits
-
-1. **System Integrity**: Base system cannot be accidentally modified
-2. **Easy Updates**: Just drop in a new SquashFS image
-3. **Fast Rollback**: Boot without overlay to return to clean state
-4. **Storage Efficiency**: Single system image shared across multiple machines
-5. **Snapshot Support**: Overlay state can be snapshotted and restored
-6. **Security**: Immutable root reduces attack surface
-
-### 3.5 Post-Installation
+### 3.4 Post-Installation
 
 After successful installation:
 
@@ -572,24 +238,8 @@ After successful installation:
    # Check all mounts are working
    mount | grep -E "(overlay|btrfs)"
    
-   # Verify AI services status
-   systemctl status portcl btrmind
-   
    # Check for installation errors
    sudo journalctl -u installer.service --since "5 minutes ago"
-   ```
-4. **Enable AI features** (optional, see Section 6)
-5. **Install additional software** through overlay system
-6. **Security verification** (critical due to installer vulnerabilities):
-   ```bash
-   # Check for suspicious processes
-   ps aux | grep -E "(sh|bash)" | grep -v grep
-   
-   # Verify no unexpected network connections
-   ss -tulpn | grep LISTEN
-   
-   # Review installation logs for anomalies
-   sudo journalctl -u installer.service | grep -E "(ERROR|WARN|command)"
    ```
 
 ---
@@ -598,156 +248,58 @@ After successful installation:
 
 ### 4.1 BTRFS-Native Architecture
 
-RegicideOS uses BTRFS-native snapshots and sub-volumes to provide the same illusion of "one immutable image + a thin writable layer", while also giving you **copy-on-write snapshots for free**.
+RegicideOS uses BTRFS-native snapshots and sub-volumes to provide an immutable base system with writable overlays.
 
 #### 4.1.1 Disk Layout
 
 ```
 /dev/sda1   512 MB  FAT32   label "EFI"
-/dev/sda2   rest    BTRFS   label "ROOTS"   ← single big BTRFS partition
+/dev/sda2   rest    BTRFS   label "ROOTS"
 ```
 
-Inside that second partition we create **five fixed sub-volumes**:
+BTRFS sub-volumes:
+- `@etc` - writable layer for /etc
+- `@var` - writable layer for /var  
+- `@usr` - writable layer for /usr
+- `@home` - /home tree
 
-```
-ROOTS (top-level BTRFS)
-├─ @                ← empty, reserved for root-image *files*
-├─ @overlay         ← top-level for overlays
-│  ├─ @etc           ← writable layer for /etc
-│  ├─ @var           ← writable layer for /var
-│  └─ @usr           ← writable layer for /usr
-└─ @home             ← /home tree
-```
+#### 4.1.2 Boot Sequence
 
-*(The installer calls them `overlay`, `etc`, `var`, `usr`, `home` without the "@" the @ is just a BTRFS convention.)*
+1. **UEFI → GRUB → kernel + initrd** (loaded from SquashFS)
+2. **BTRFS sub-volumes bind-mounted** on top of SquashFS directories
+3. **Switch-root** → systemd starts
 
-#### 4.1.2 Boot Sequence with BTRFS
+#### 4.1.3 Key Benefits
 
-1. **UEFI → GRUB → kernel + initrd** (loaded from a **SquashFS** that lives in the *root* of ROOTS).
-2. **Early user-space** (foxmount helper) does **not** use overlayfs at all; it does:
-   ```
-   mount -t btrfs -o subvol=@etc  /dev/sda2  /sysroot/etc
-   mount -t btrfs -o subvol=@var  /dev/sda2  /sysroot/var
-   mount -t btrfs -o subvol=@usr  /dev/sda2  /sysroot/usr
-   mount -t btrfs -o subvol=@home /dev/sda2  /sysroot/home
-   ```
-   The **SquashFS** is loop-mounted **once** on `/sysroot`; the individual **BTRFS sub-volumes are bind-mounted on top** of the directories that must stay writable.
-3. **Switch-root** into `/sysroot` → systemd starts.
+- **Single partition** - no separate OVERLAY partition needed
+- **Instant snapshots** - `btrfs subvolume snapshot -r @etc @etc-backup`
+- **Easy rollback** - restore snapshots without rebooting
+- **Storage efficiency** - immediate space reclamation
 
-#### 4.1.3 Why BTRFS is Better for RegicideOS
+### 4.2 BTRFS Commands
 
-| classic overlayfs | BTRFS snapshots |
-|---|---|
-| upperdir + workdir must live on **same fs** as each other, but **can be different** from lowerdir → you still need two partitions (ROOTS + OVERLAY). | Everything is **one partition**; no extra partition for "OVERLAY". |
-| No built-in snapshot of the **writable layer**. | Every sub-volume can be snapshotted instantly: `btrfs sub snap -r @etc @etc-2025-09-21` |
-| Deleting the old lower SquashFS frees **zero** space until you delete the overlay too. | Deleting an old `root.img` **immediately** frees space (BTRFS reflinks are per-file, not per-dir). |
-| Roll-back of **system** means rebooting into old SquashFS; roll-back of **user changes** means wiping the whole upperdir. | You can roll **either** direction independently: `snapper rollback @etc` to yesterday while keeping today's `/usr` layer. |
-| Overlayfs white-outs sometimes confuse backup tools. | Plain directories and files—nothing exotic. |
-
-#### 4.1.4 Snapshot Workflow
-
-```
-# take a consistent checkpoint before big changes
-btrfs subvolume snapshot -r @etc @etc-before-emerge
-btrfs subvolume snapshot -r @usr @usr-before-emerge
-
-# do potentially dangerous stuff
-emerge -avuDN @world
-
-# if it breaks, roll back in seconds
-btrfs subvolume delete @etc
-btrfs subvolume snapshot @etc-before-emerge @etc
-reboot   # now you're on yesterday's /etc with today's kernel
-```
-
-#### 4.1.5 Key Benefits
-
-- **Still boots from a read-only SquashFS** (the "golden image").
-- **Writable parts are not an overlayfs layer** any more; they are **individual BTRFS sub-volumes** that get **bind-mounted on top** of the squashfs directories.
-- This gives the same "immutable base + disposable changes" behaviour, **plus** instant snapshots, roll-backs, and single-partition simplicity—reason enough for the docs to say *"Use BTRFS only; the old layouts are deprecated."*
-
-### 4.2 BTRFS Command Reference
-
-Here are the essential BTRFS commands for managing your RegicideOS system:
-
-#### 4.2.1 Subvolume Management
-
+#### Subvolume Management
 ```bash
-# List all subvolumes
-btrfs subvolume list /mnt/roots
+# List subvolumes
+btrfs subvolume list /
 
-# Create a new subvolume
-btrfs subvolume create /mnt/roots/@new-subvol
+# Create snapshot
+btrfs subvolume snapshot -r /@etc /@etc-backup
 
-# Delete a subvolume
-btrfs subvolume delete /mnt/roots/@old-subvol
-
-# Create a snapshot (read-only)
-btrfs subvolume snapshot -r /mnt/roots/@etc /mnt/roots/@etc-2025-09-20
-
-# Create a snapshot (writable)
-btrfs subvolume snapshot /mnt/roots/@etc /mnt/roots/@etc-working
-
-# Show subvolume information
-btrfs subvolume show /mnt/roots/@etc
+# Delete subvolume
+btrfs subvolume delete /@old-subvol
 ```
 
-#### 4.2.2 System Maintenance
-
+#### System Maintenance
 ```bash
 # Check filesystem status
-btrfs filesystem df /mnt/roots
-btrfs filesystem usage /mnt/roots
+btrfs filesystem df /
 
-# Balance the filesystem (optimizes data distribution)
-btrfs balance start /mnt/roots
+# Balance filesystem
+btrfs balance start /
 
-# Scrub the filesystem (checks for data errors)
-btrfs scrub start /mnt/roots
-btrfs scrub status /mnt/roots
-
-# Defragment files
-btrfs filesystem defrag -r /mnt/roots/@usr
-
-# Enable compression on new files
-btrfs property set /mnt/roots/@var compression zstd
-```
-
-#### 4.2.3 Snapshot Management
-
-```bash
-# Create consistent system snapshot before major changes
-btrfs subvolume snapshot -r /mnt/roots/@etc /mnt/roots/@etc-before-emerge
-btrfs subvolume snapshot -r /mnt/roots/@usr /mnt/roots/@usr-before-emerge
-btrfs subvolume snapshot -r /mnt/roots/@var /mnt/roots/@var-before-emerge
-
-# Roll back after failed operation
-btrfs subvolume delete /mnt/roots/@etc
-btrfs subvolume snapshot /mnt/roots/@etc-before-emerge /mnt/roots/@etc
-
-# Send/receive snapshots (for backup/transfer)
-btrfs send /mnt/roots/@etc-2025-09-20 | btrfs receive /backup/snapshots/
-
-# List snapshots
-btrfs subvolume list -s /mnt/roots
-```
-
-#### 4.2.4 Migration from OverlayFS
-
-```bash
-# If migrating from old overlayfs layout, create subvolumes:
-btrfs subvolume create /mnt/roots/@etc
-btrfs subvolume create /mnt/roots/@usr
-btrfs subvolume create /mnt/roots/@var
-btrfs subvolume create /mnt/roots/@home
-
-# Copy existing overlay data to new subvolumes
-cp -a /mnt/overlay/etc/* /mnt/roots/@etc/
-cp -a /mnt/overlay/usr/* /mnt/roots/@usr/
-cp -a /mnt/overlay/var/* /mnt/roots/@var/
-
-# Set default subvolume if needed
-btrfs subvolume set-default /mnt/roots/@
+# Scrub for errors
+btrfs scrub start /
 ```
 
 ### 4.3 Security Model
@@ -755,7 +307,6 @@ btrfs subvolume set-default /mnt/roots/@
 - **Read-Only Root**: Base system cannot be modified during runtime
 - **Verified Boot**: System image integrity verified at boot
 - **Namespace Isolation**: Containers provide application isolation
-- **Memory Safety**: Rust components eliminate entire vulnerability classes
 
 ---
 
@@ -763,12 +314,11 @@ btrfs subvolume set-default /mnt/roots/@
 
 ### 5.1 Cosmic Desktop Environment
 
-RegicideOS exclusively ships with Cosmic Desktop, System76's next-generation desktop environment:
+RegicideOS exclusively ships with Cosmic Desktop:
 
 #### Features:
-- **Rust Implementation**: Built with Iced framework for performance
+- **Rust Implementation**: Built with Iced framework
 - **Wayland Native**: Modern display protocol support
-- **GPU Acceleration**: Hardware-accelerated graphics pipeline
 - **Tiling Window Manager**: Efficient workspace organization
 
 #### Configuration:
@@ -778,25 +328,20 @@ RegicideOS exclusively ships with Cosmic Desktop, System76's next-generation des
 
 # Example: Enable tiling by default
 cosmic-settings set tiling.default true
-
-# Configure display scaling
-cosmic-settings set display.scale-factor 1.5
 ```
 
 ### 5.2 System Components
 
 #### 5.2.1 Init System
 - **systemd**: Service and process management
-- **Custom Units**: AI agents run as systemd services
 
 #### 5.2.2 Container Runtime
 - **Distrobox**: Application containerization
 - **Podman Backend**: Secure, rootless containers
-- **Integration**: Seamless desktop application support
 
 ### 5.3 Network Management
 
-RegicideOS uses NetworkManager with systemd integration:
+RegicideOS uses NetworkManager:
 
 ```bash
 # View network status
@@ -804,232 +349,97 @@ nmcli general status
 
 # Connect to WiFi
 nmcli dev wifi connect "SSID" password "password"
-
-# Configure static IP
-nmcli con add type ethernet ifname eth0 ip4 192.168.1.100/24 gw4 192.168.1.1
 ```
 
 ---
 
-## 6. AI-Powered System Management
+## 6. Package Management
 
-RegicideOS implements three primary AI agents for autonomous system management:
+### 6.1 Overlay System
 
-### 6.1 PortCL - Package Management Optimization
+RegicideOS uses a hybrid package management approach:
 
-**PortCL** (Portage Continual Learning) optimizes package management operations using reinforcement learning.
+1. **Base System**: Immutable system image from Xenia repositories
+2. **GURU Overlay**: Community-maintained packages
+3. **Regicide Overlay**: Custom modifications
 
-#### Key Features:
-- **Build Optimization**: Automatic parallelism adjustment based on system load
-- **Dependency Management**: Intelligent build order optimization  
-- **Resource Scheduling**: Off-peak operation scheduling for resource-intensive tasks
-- **Continual Learning**: Adapts to changing system configurations
+### 6.2 Foxmerge Package Management
 
-#### Configuration:
-```toml
-# /etc/portcl/config.toml
-[monitoring]
-poll_interval = 30  # seconds
-metrics_history = 24  # hours
+Foxmerge is Xenia Linux's primary package management tool:
 
-[learning]
-model_path = "/var/lib/portcl/model.pt"
-replay_buffer_size = 10000
-learning_rate = 0.001
-
-[actions]
-enable_parallelism_adjustment = true
-enable_build_reordering = true
-enable_scheduling = true
-```
-
-#### Usage:
+#### Basic Operations
 ```bash
-# Start PortCL service
-sudo systemctl enable --now portcl.service
+# Update all overlay packages
+sudo foxmerge update
 
-# View current status
-portcl status
+# Install a package
+sudo foxmerge install package-name
 
-# Manual action trigger
-portcl optimize --task build_optimization
+# Remove a package
+sudo foxmerge remove package-name
+
+# Search for packages
+sudo foxmerge search search-term
 ```
 
-### 6.2 BtrMind - Storage Management AI
-
-**BtrMind** proactively manages BTRFS filesystem health using reinforcement learning.
-
-#### Key Features:
-- **Space Optimization**: Automatic cleanup of temporary files and caches
-- **Compression Management**: Intelligent file compression based on access patterns
-- **Metadata Balancing**: BTRFS metadata optimization
-- **Snapshot Management**: Automated snapshot cleanup and rotation
-
-#### Configuration:
-```toml
-# /etc/btrmind/config.toml
-[thresholds]
-warning_level = 85.0      # Disk usage percentage
-critical_level = 95.0     # Critical threshold
-emergency_level = 98.0    # Emergency cleanup
-
-[actions]
-enable_compression = true
-enable_balance = true
-enable_snapshot_cleanup = true
-enable_temp_cleanup = true
-
-[learning]
-model_update_interval = 3600  # 1 hour
-reward_smoothing = 0.95
-exploration_rate = 0.1
-```
-
-#### Usage:
+#### Overlay Management
 ```bash
-# Check BtrMind status
-sudo systemctl status btrmind.service
+# List available overlays
+sudo foxmerge overlay list
 
-# Manual space analysis
-btrmind analyze
+# Enable an overlay
+sudo foxmerge overlay enable overlay-name
 
-# Force cleanup action
-sudo btrmind cleanup --aggressive
+# Sync overlay repositories
+sudo foxmerge overlay sync
 ```
 
-### 6.3 System Health Monitoring
+### 6.3 User Configuration and Dotfiles
 
-#### 6.3.1 Metrics Collection
-The AI agents collect comprehensive system metrics:
-
-- **Performance**: CPU, memory, I/O utilization
-- **Storage**: Disk usage, fragmentation, access patterns
-- **Network**: Bandwidth utilization, connection quality
-- **Applications**: Resource consumption, crash rates
-
-#### 6.3.2 Learning and Adaptation
-All agents implement continual reinforcement learning:
-
-1. **State Observation**: Continuous system monitoring
-2. **Action Selection**: AI-driven decision making
-3. **Reward Calculation**: Performance improvement scoring
-4. **Model Update**: Continuous learning without forgetting
-5. **Knowledge Transfer**: Cross-agent information sharing
-
-### 6.4 AI Agent Management
-
-#### 6.4.1 Service Management
-```bash
-# View all AI services
-sudo systemctl list-units "*mind*" "*portcl*"
-
-# Enable AI monitoring
-sudo systemctl enable portcl btrmind
-
-# Disable AI features
-sudo systemctl stop portcl btrmind
-sudo systemctl disable portcl btrmind
-```
-
-#### 6.4.2 Performance Monitoring
-```bash
-# View agent performance logs
-sudo journalctl -u portcl.service -f
-sudo journalctl -u btrmind.service -f
-
-# Check learning progress
-portcl metrics --learning-progress
-btrmind stats --model-performance
-```
-
-### 6.3 Merlin - LLM Router
-
-**Merlin** is an intelligent multi-provider LLM router designed for RegicideOS that provides smart routing and load balancing across different language model providers.
-
-#### Key Features:
-- **Multi-Provider Support**: OpenAI, Anthropic, Gemini, and local GGUF models
-- **Smart Routing**: Epsilon-greedy and Thompson sampling algorithms for optimal model selection
-- **Real-Time Metrics**: Performance monitoring and quality judging
-- **Observability**: Comprehensive telemetry and health checking
-- **High Availability**: Automatic failover and load balancing
-
-#### Configuration:
-```toml
-# /etc/merlin/config.toml
-[server]
-port = 7777
-host = "127.0.0.1"
-
-[routing]
-policy = "epsilon_greedy"  # or "thompson_sampling"
-exploration_rate = 0.1
-
-[providers.openai]
-api_key = "your-openai-key"
-base_url = "https://api.openai.com/v1"
-models = ["gpt-4", "gpt-3.5-turbo"]
-
-[providers.anthropic]
-api_key = "your-anthropic-key"
-base_url = "https://api.anthropic.com"
-models = ["claude-3-opus", "claude-3-sonnet"]
-
-[providers.gemini]
-api_key = "your-gemini-key"
-base_url = "https://generativelanguage.googleapis.com/v1beta"
-models = ["gemini-pro"]
-
-[providers.gguf]
-model_path = "/var/lib/merlin/models/"
-enabled = true
-
-[telemetry]
-enable_metrics = true
-metrics_port = 9090
-log_level = "info"
-```
-
-#### Usage:
-```bash
-# Start Merlin service
-sudo systemctl enable --now merlin.service
-
-# Manual start with custom config
-merlin serve --port 7777 --config /etc/merlin/config.toml
-
-# Check service health
-curl http://localhost:7777/health
-
-# View metrics
-curl http://localhost:7777/metrics
-
-# Send chat request
-curl -X POST http://localhost:7777/chat \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Hello, Merlin!", "provider": "auto"}'
-```
-
-#### API Endpoints:
-- `GET /health` - Service health status
-- `GET /metrics` - Performance metrics and statistics
-- `POST /chat` - Send chat requests (returns optimal provider response)
-- `GET /providers` - List available providers and models
-- `POST /feedback` - Provide quality feedback for routing improvement
-
-#### Integration with RegicideOS:
-Merlin integrates seamlessly with other RegicideOS AI components:
+RegicideOS provides official dotfiles:
 
 ```bash
-# Configure PortCL to use Merlin for optimization suggestions
-sudo nano /etc/portcl/config.toml
-[ai]
-llm_router = "http://localhost:7777/chat"
-model_preference = "auto"
+# Install dotfiles package
+sudo emerge -av app-misc/regicide-dotfiles
 
-# Configure BtrMind to use Merlin for storage analysis
-sudo nano /etc/btrmind/config.toml
-[ai]
-llm_endpoint = "http://localhost:7777/chat"
+# Install dotfiles for your user
+install-regicide-dotfiles
+```
+
+**Features included:**
+- Modern Rust CLI tools (eza, bat, fd, ripgrep)
+- Enhanced bash with intelligent aliases
+- RegicideOS-themed tmux configuration
+- Starship prompt with castle theming
+
+### 6.4 Rust Development Environment
+
+```bash
+# Install Rust toolchain
+sudo dnf install -y rust cargo rustfmt clippy
+
+# Install additional targets
+rustc target add thumbv6m-none-eabi  # ARM Cortex-M
+rustc target add wasm32-unknown-unknown  # WebAssembly
+```
+
+### 6.5 Container-Based Applications
+
+#### Distrobox Integration
+```bash
+# Create development environment
+distrobox create --name dev --image fedora:39
+distrobox enter dev
+
+# Install applications in container
+sudo dnf install -y code brave-browser
+```
+
+#### Flatpak Integration
+```bash
+# Install applications
+flatpak install flathub com.brave.Browser
+flatpak install flathub com.visualstudio.code
 ```
 
 ---
@@ -1875,274 +1285,6 @@ sudo btrmind cleanup --force
 sudo systemctl disable btrmind
 ```
 
-
-
----
-
-## 11. Advanced Topics
-
-### 11.1 Custom AI Agent Development
-
-#### 11.1.1 Agent Framework
-
-RegicideOS provides a framework for custom AI agents:
-
-```rust
-// src/main.rs - Custom Agent Template
-use regicide_ai::{Agent, ReinforcementLearner, SystemMetrics};
-use anyhow::Result;
-
-struct CustomAgent {
-    learner: ReinforcementLearner,
-    metrics: SystemMetrics,
-}
-
-impl Agent for CustomAgent {
-    async fn observe(&mut self) -> Result<Vec<f64>> {
-        // Collect system observations
-        Ok(self.metrics.collect_all().await?)
-    }
-    
-    async fn act(&self, action_id: usize) -> Result<()> {
-        // Execute system actions
-        match action_id {
-            0 => self.no_action(),
-            1 => self.optimize_memory(),
-            2 => self.cleanup_caches(),
-            _ => self.default_action(),
-        }
-    }
-    
-    fn calculate_reward(&self, prev_state: &[f64], curr_state: &[f64]) -> f64 {
-        // Define reward function
-        let improvement = curr_state[0] - prev_state[0];
-        improvement * 10.0
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let mut agent = CustomAgent::new()?;
-    agent.run_learning_loop().await
-}
-```
-
-#### 11.1.2 Agent Integration
-
-Register custom agents with the system:
-
-```bash
-# Install custom agent
-cargo build --release
-sudo cp target/release/custom-agent /usr/local/bin/
-
-# Create systemd service
-sudo tee /etc/systemd/system/custom-agent.service > /dev/null << EOF
-[Unit]
-Description=Custom AI Agent
-After=network.target
-
-[Service]
-Type=simple
-User=nobody
-ExecStart=/usr/local/bin/custom-agent
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable service
-sudo systemctl enable custom-agent.service
-sudo systemctl start custom-agent.service
-```
-
-### 11.2 Kernel Migration Preparation
-
-#### 11.2.1 Asterinas Kernel Support
-
-RegicideOS is designed for future migration to the Asterinas kernel:
-
-```bash
-# Check Asterinas compatibility
-regicide-kernel-check --asterinas
-
-# Enable Asterinas boot option (future)
-sudo regicide-kernel-switch --target asterinas
-
-# Fallback to Linux kernel
-sudo regicide-kernel-switch --target linux
-```
-
-### 11.3 Performance Optimization
-
-#### 11.3.1 System Tuning
-
-```bash
-# Enable performance governor
-sudo cpupower frequency-set -g performance
-
-# Optimize BTRFS
-sudo btrfs filesystem balance start -dusage=50 /
-sudo btrfs filesystem defragment -r -v /home
-
-# Memory optimization
-echo 'vm.swappiness = 10' | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
-```
-
-#### 11.3.2 AI Agent Tuning
-
-```bash
-# Adjust PortCL learning parameters
-sudo nano /etc/portcl/config.toml
-# Increase learning_rate for faster adaptation
-# Decrease replay_buffer_size for less memory usage
-
-# BtrMind optimization
-sudo nano /etc/btrmind/config.toml
-# Lower poll_interval for more responsive monitoring
-# Adjust thresholds based on usage patterns
-```
-
-### 11.4 Security Hardening
-
-#### 11.4.1 System Hardening
-
-```bash
-# Enable firewall
-sudo systemctl enable --now firewalld
-sudo firewall-cmd --set-default-zone=public
-
-# Secure boot verification
-sudo mokutil --sb-state
-
-# Audit system
-sudo systemctl enable --now auditd
-```
-
-#### 11.4.2 Container Security
-
-```bash
-# Secure container defaults
-echo 'cgroup_enable=memory swapaccount=1' | sudo tee -a /boot/cmdline.txt
-
-# SELinux/AppArmor profiles (TBD)
-# Future: Rust-based security framework
-```
-
----
-
-## Appendices
-
-### Appendix A: Configuration Files
-
-#### A.1 PortCL Configuration Template
-```toml
-# /etc/portcl/config.toml
-[monitoring]
-poll_interval = 30
-metrics_history = 24
-
-[learning]
-model_path = "/var/lib/portcl/model.pt"
-replay_buffer_size = 10000
-learning_rate = 0.001
-discount_factor = 0.99
-
-[actions]
-enable_parallelism_adjustment = true
-enable_build_reordering = true
-enable_scheduling = true
-max_parallel_jobs = 8
-
-[thresholds]
-cpu_high = 90.0
-memory_high = 85.0
-disk_critical = 95.0
-```
-
-#### A.2 BtrMind Configuration Template
-```toml
-# /etc/btrmind/config.toml
-[monitoring]
-poll_interval = 60
-trend_analysis_window = 24
-
-[thresholds]
-warning_level = 85.0
-critical_level = 95.0
-emergency_level = 98.0
-
-[actions]
-enable_compression = true
-enable_balance = true
-enable_snapshot_cleanup = true
-enable_temp_cleanup = true
-
-[learning]
-model_update_interval = 3600
-reward_smoothing = 0.95
-exploration_rate = 0.1
-```
-
-### Appendix B: Command Reference
-
-#### B.1 System Commands
-```bash
-# System information
-uname -a                    # Kernel and system info
-lsb_release -a              # Distribution info
-systemctl status portcl btrmind  # AI agent status
-
-# Update system
-sudo xenia-update                    # Automated system update
-curl -s https://repo.xenialinux.com/releases/Manifest.toml  # Check available updates
-sudo foxmerge update                  # Update overlay packages (see Section 7.2)
-
-# BTRFS snapshots
-sudo btrfs subvolume snapshot / /snapshots/manual-$(date +%Y%m%d)  # Create snapshot
-sudo btrfs subvolume list /  # List snapshots
-sudo btrfs subvolume set-default <snapshot-id> /  # Set default snapshot (rollback)
-```
-
-#### B.2 AI Agent Commands
-```bash
-# PortCL
-portcl status
-portcl metrics
-portcl optimize --task <task>
-portcl config validate
-
-# BtrMind  
-btrmind status
-btrmind analyze
-btrmind cleanup [--aggressive]
-btrmind stats
-```
-
----
-
-### Appendix C: Future Development Roadmap
-
-#### C.1 Short-term Goals (6 months)
-- [ ] Complete Cosmic Desktop integration
-- [ ] Stable AI agent implementations
-- [ ] Comprehensive testing suite
-- [ ] Community overlay repository
-
-#### C.2 Medium-term Goals (1-2 years)
-- [ ] Advanced AI capabilities (natural language control)
-- [ ] Multi-agent coordination
-- [ ] ARM64 architecture support
-- [ ] Enhanced security framework
-
-#### C.3 Long-term Vision (2+ years)
-- [ ] Asterinas kernel migration
-- [ ] Distributed system capabilities  
-- [ ] Quantum-resistant cryptography
-- [ ] Neural network hardware acceleration
-
 ---
 
 **Document Version**: 1.0  
@@ -2153,8 +1295,9 @@ btrmind stats
 
 <div align="center">
 
-**RegicideOS - The Future of Operating Systems**
+**RegicideOS Handbook**
 
-*Built with Rust 🦀 • Powered by AI 🤖 • Designed for Tomorrow 🚀*
+*System Administration and Reference Guide*
 
 </div>
+
