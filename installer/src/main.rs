@@ -1783,38 +1783,14 @@ fn mount() -> Result<()> {
 
 async fn download_root(url: &str) -> Result<()> {
     let root_img_path = "/mnt/gentoo/root.img";
-    
-    // Get path to cosmic-fedora.img in the same directory as the installer binary
-    let installer_path = std::env::current_exe()
-        .with_context(|| "Failed to get installer executable path")?;
-    let installer_dir = installer_path.parent().unwrap_or_else(|| Path::new("."));
-    let local_img_path = installer_dir.join("cosmic-fedora.img");
 
-    // Check if local cosmic-fedora.img exists and use it instead of downloading
-    if local_img_path.exists() {
-        info("Using local cosmic-fedora.img (offline mode)");
-        
-        if Path::new(root_img_path).exists() {
-            safe_remove_file(root_img_path, "/mnt/gentoo")?;
-        }
-
-        // Copy local image to target location
-        info(&format!("Copying {} to {}", local_img_path.display(), root_img_path));
-        let local_bytes = fs::read(&local_img_path)?;
-        safe_write_file(root_img_path, &local_bytes, "/mnt/gentoo")?;
-
-        // Verify file was written and has content
-        let metadata = fs::metadata(root_img_path)?;
-        if metadata.len() == 0 {
-            bail!("Root image file is empty after copy");
-        }
-
-        info(&format!("Copied {} bytes locally", metadata.len()));
-        return Ok(());
+    // Remove existing file if present
+    if Path::new(root_img_path).exists() {
+        safe_remove_file(root_img_path, "/mnt/gentoo")?;
     }
 
-    // Fallback to download if local file not found
-    info(&format!("Local cosmic-fedora.img not found, downloading from {}", url));
+    info(&format!("Downloading root image from {}", url));
+    let response = reqwest::get(url).await?;
     
     if Path::new(root_img_path).exists() {
         safe_remove_file(root_img_path, "/mnt/gentoo")?;
