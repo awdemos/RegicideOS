@@ -1681,8 +1681,45 @@ fn mount() -> Result<()> {
     execute("mount --bind /run /mnt/root/run")?;
     execute("mount --make-slave /mnt/root/run")?;
 
+    // Mount EFI partition BEFORE creating directories in it (fixes read-only error)
+    if is_efi() {
+        info("Finding and mounting EFI partition before creating boot directories...");
+        let efi_device = find_partition_by_label("EFI")?;
+        info(&format!("Found EFI partition: {}", efi_device));
+        mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
+        
+        // Verify mount was successful
+        match execute("findmnt /mnt/root/boot/efi") {
+            Ok(mount_info) => {
+                info(&format!("EFI mount verification: {}", mount_info.trim()));
+            }
+            Err(e) => {
+                warn(&format!("Failed to verify EFI mount: {}", e));
+            }
+        }
+    }
+
     // Ensure proper boot directory structure for GRUB on writable EFI partition
     info("Creating boot directory structure for GRUB");
+    
+    // Debug: Check if EFI partition is actually mounted and writable
+    match execute("mount | grep '/mnt/root/boot/efi'") {
+        Ok(mount_info) => info(&format!("EFI mount status: {}", mount_info.trim())),
+        Err(e) => warn(&format!("Failed to check EFI mount: {}", e)),
+    }
+    
+    // Test write to EFI partition before creating directories
+    let test_file = "/mnt/root/boot/efi/.installer_test";
+    match safe_write_file(test_file, b"test_write", "/mnt/root/boot/efi") {
+        Ok(()) => {
+            info("✓ EFI partition is writable");
+            let _ = safe_remove_file(test_file, "/mnt/root/boot/efi");
+        }
+        Err(e) => {
+            bail!("❌ EFI partition is NOT writable: {}", e);
+        }
+    }
+    
     safe_create_dir_all("/mnt/root/boot/efi/grub", "/mnt/root/boot/efi")?;
     
     // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
@@ -1761,44 +1798,6 @@ fn mount() -> Result<()> {
                 Path::new(&link_path).exists()
             ));
         }
-    }
-
-    // Mount EFI or BOOT partition based on system type
-    if is_efi() {
-        info("Finding EFI partition...");
-        
-        // Debug: List all available partitions and their labels
-        match execute("lsblk -fn -o NAME,LABEL,FSTYPE") {
-            Ok(output) => {
-                info(&format!("Available partitions:\n{}", output));
-            }
-            Err(e) => {
-                warn(&format!("Failed to list partitions: {}", e));
-            }
-        }
-        
-        let efi_device = find_partition_by_label("EFI")?;
-        info(&format!("Found EFI partition: {}", efi_device));
-info("Mounting ESP on /mnt/root/boot/efi with write permissions");
-        info(&format!("Mount command would be: mount -o rw {} /mnt/root/boot/efi", efi_device));
-        mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
-        
-        // Verify mount was successful and check if it's writable
-        match execute("findmnt /mnt/root/boot/efi") {
-            Ok(mount_info) => {
-                info(&format!("EFI mount verification: {}", mount_info.trim()));
-            }
-            Err(e) => {
-                warn(&format!("Failed to verify EFI mount: {}", e));
-            }
-        }
-
-    } else {
-        info("Finding BOOT partition...");
-        let boot_device = find_partition_by_label("BOOT")?;
-
-        info("Mounting BOOT on /mnt/root/boot with write permissions");
-        mount_with_retry(&boot_device, "/mnt/root/boot", None, Some("rw"))?;
     }
 
     Ok(())
@@ -1912,12 +1911,12 @@ fn verify_grub_environment() -> Result<()> {
 
 
 
-    // Check 3: Verify boot directory is writable
-    let boot_test_file = "/mnt/root/boot/.grub_test_write";
-    if let Err(e) = safe_write_file(boot_test_file, b"test", "/mnt/root/boot") {
-        bail!("Boot directory is not writable: {}", e);
+    // Check 3: Verify boot directory is writable (test EFI partition, not read-only squashfs)
+    let boot_test_file = "/mnt/root/boot/efi/.grub_test_write";
+    if let Err(e) = safe_write_file(boot_test_file, b"test", "/mnt/root/boot/efi") {
+        bail!("EFI boot directory is not writable: {}", e);
     }
-    let _ = safe_remove_file(boot_test_file, "/mnt/root/boot");
+    let _ = safe_remove_file(boot_test_file, "/mnt/root/boot/efi");
 
     // Check 4: Verify EFI/BOOT partition is mounted and writable
     let efi_dir = if is_efi() {
@@ -2844,18 +2843,36 @@ async fn main() -> Result<()> {
     format_drive(&config_parsed.drive, layout)?;
 
     info("Starting installation");
-    mount_roots()?;
+    
+    // Simplified installation following Xenia manual pattern
+    info("Step 1: Mount ROOTS partition");
+    let roots_device = find_partition_by_label("ROOTS")?;
+    info(&format!("Found ROOTS partition: {}", roots_device));
+    safe_create_dir_all("/mnt/gentoo", "/mnt")?;
+    mount_with_retry(&roots_device, "/mnt/gentoo", None, None)?;
 
-    info("Downloading root image");
+    info("Step 2: Download root image");
     let root_url = get_url(&config_parsed).await?;
     download_root(&root_url).await?;
+
+    info("Step 3: Mount root image and setup filesystems");
     mount()?;
 
-    info("Installing bootloader");
+    info("Step 4: Install bootloader");
     let platform = if is_efi() { "x86_64-efi" } else { "i386-pc" };
+    info(&format!("Platform detected: {}", platform));
+    info(&format!("Target device: {}", &config_parsed.drive));
+    
+    // Debug: Show current mounts before GRUB installation
+    match execute("findmnt | grep -E '(boot|efi)' || echo 'No boot/efi mounts found'") {
+        Ok(output) => info(&format!("Current boot-related mounts:\n{}", output.trim())),
+        Err(e) => warn(&format!("Failed to show mounts: {}", e)),
+    }
+    
+    info("About to call install_bootloader...");
     install_bootloader(platform, &config_parsed.drive)?;
 
-    info("Starting post-installation tasks");
+    info("Step 5: Post-installation tasks");
     post_install(&config_parsed)?;
 
     info("Installation completed successfully!");
