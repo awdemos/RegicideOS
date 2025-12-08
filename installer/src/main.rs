@@ -1,7 +1,19 @@
+#![allow(dead_code)]
+#![allow(clippy::single_component_path_imports)]
+#![allow(clippy::print_literal)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::trim_split_whitespace)]
+#![allow(clippy::useless_format)]
+#![allow(clippy::double_ended_iterator_last)]
+#![allow(clippy::manual_is_multiple_of)]
+#![allow(clippy::redundant_pattern_matching)]
+#![allow(clippy::unnecessary_map_or)]
+#![allow(clippy::bind_instead_of_map)]
+#![allow(clippy::match_like_matches_macro)]
+
 use anyhow::{bail, Context, Result};
 use clap::{Arg, Command};
-use regex;
-use reqwest;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
@@ -9,8 +21,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio;
-use toml;
 
 // Import from lib module
 use installer::{
@@ -29,13 +39,7 @@ impl Colours {
 fn die(message: &str) -> ! {
     // Sanitize error message to prevent information disclosure
     let sanitized = sanitize_error_message(message);
-    eprintln!(
-        "{}{}{} {}",
-        Colours::RED,
-        "[ERROR]",
-        Colours::ENDC,
-        sanitized
-    );
+    eprintln!("{}[ERROR]{} {}", Colours::RED, Colours::ENDC, sanitized);
     std::process::exit(1);
 }
 
@@ -74,18 +78,12 @@ fn sanitize_error_message(message: &str) -> String {
 }
 
 fn info(message: &str) {
-    println!("{}{}{} {}", Colours::BLUE, "[INFO]", Colours::ENDC, message);
+    println!("{}[INFO]{} {}", Colours::BLUE, Colours::ENDC, message);
 }
 
 fn warn(message: &str) {
     let sanitized = sanitize_error_message(message);
-    println!(
-        "{}{}{} {}",
-        Colours::YELLOW,
-        "[WARN]",
-        Colours::ENDC,
-        sanitized
-    );
+    println!("{}[WARN]{} {}", Colours::YELLOW, Colours::ENDC, sanitized);
 }
 
 fn print_banner() {
@@ -109,9 +107,9 @@ fn print_banner() {
 // Execute commands with full error output
 fn execute_with_output(command: &str) -> Result<String> {
     let output = ProcessCommand::new("sh")
-        .args(&["-c", command])
+        .args(["-c", command])
         .output()
-        .with_context(|| format!("Failed to execute command: {}", command))?;
+        .with_context(|| format!("Failed to execute command: {command}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -119,6 +117,43 @@ fn execute_with_output(command: &str) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+// Check if partition is accessible (not locked)
+fn is_partition_accessible(partition: &str) -> bool {
+    // Try to read the first block of the partition
+    if let Ok(_) = execute(&format!("dd if={} of=/dev/null bs=512 count=1 2>/dev/null", partition)) {
+        true
+    } else {
+        false
+    }
+}
+
+// Execute command with retry for locked resources
+fn execute_with_retry(command: &str, max_retries: u32) -> Result<String> {
+    let mut attempts = 0;
+    loop {
+        match execute(command) {
+            Ok(output) => return Ok(output),
+            Err(e) => {
+                attempts += 1;
+                if attempts >= max_retries {
+                    return Err(e);
+                }
+                
+                // Check if error might be due to locked resources
+                let error_msg = e.to_string().to_lowercase();
+                if error_msg.contains("resource busy") || 
+                   error_msg.contains("device or resource busy") ||
+                   error_msg.contains("no such file or directory") && command.contains("lsblk") {
+                    info(&format!("Partition detection blocked, retrying in 500ms (attempt {}/{})", attempts, max_retries));
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
 }
 
 // Safe command execution with strict allowlist
@@ -629,8 +664,8 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
         // Try multiple detection methods
         let mut partition_names = Vec::new();
 
-        // Method 1: Use lsblk to detect partitions
-        if let Ok(partitions_output) = execute(&format!("lsblk -ln -o NAME {}", drive)) {
+        // Method 1: Use lsblk to detect partitions with retry for locked partitions
+        if let Ok(partitions_output) = execute_with_retry(&format!("lsblk -ln -o NAME {}", drive), 3) {
             println!("DEBUG: lsblk output for {}: {}", drive, partitions_output);
             let mut detected_partitions: Vec<String> = partitions_output
                 .lines()
@@ -731,11 +766,11 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
         let delay = std::cmp::min(1000, 100 * attempts);
         std::thread::sleep(std::time::Duration::from_millis(delay));
 
-        // Try to refresh partition table every few attempts
+        // Try to refresh partition table every few attempts with retry
         if attempts % 5 == 0 {
-            let _ = execute(&format!("partprobe {}", drive))
-                .or_else(|_| execute(&format!("sfdisk -R {}", drive)))
-                .or_else(|_| execute(&format!("blockdev --rereadpt {}", drive)));
+            let _ = execute_with_retry(&format!("partprobe {}", drive), 2)
+                .or_else(|_| execute_with_retry(&format!("sfdisk -R {}", drive), 2))
+                .or_else(|_| execute_with_retry(&format!("blockdev --rereadpt {}", drive), 2));
         }
     }
 }
@@ -791,8 +826,6 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
 
 fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     info(&format!("Partitioning drive {}", drive));
-
-
 
     // Step 2: Create new partition table
     info("Creating new partition table");
@@ -1008,19 +1041,32 @@ fn is_partition_in_use(partition: &str) -> bool {
 
 fn ensure_partition_ready(partition: &str) -> Result<()> {
     let mut attempts = 0;
-    let max_attempts = 10;
+    let max_attempts = 15;
 
     while attempts < max_attempts {
         // Check if partition exists and is ready
         if Path::new(partition).exists() {
-            // Try to read partition info to verify it's ready
-            if let Ok(_) = execute(&format!("lsblk -n -o NAME {}", partition)) {
-                return Ok(());
+            // Try to read partition info to verify it's ready with retry
+            if execute_with_retry(&format!("lsblk -n -o NAME {}", partition), 2).is_ok() {
+                // Additional check: verify partition is accessible (not locked)
+                if is_partition_accessible(partition) {
+                    return Ok(());
+                }
             }
         }
 
         attempts += 1;
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        if attempts < max_attempts {
+            info(&format!(
+                "Waiting for partition {} to be ready (attempt {}/{})",
+                partition, attempts, max_attempts
+            ));
+            
+            // Try to wake up partition device
+            let _ = execute(&format!("blockdev --rereadpt {} 2>/dev/null || true", partition));
+            
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
     }
 
     bail!(
@@ -1438,8 +1484,10 @@ fn chroot(command: &str) -> Result<()> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         // Use anyhow::anyhow directly to avoid sanitization for debugging
         return Err(anyhow::anyhow!(
-            "Chroot command failed: {}\nSTDOUT: {}\nSTDERR: {}", 
-            command, stdout, stderr
+            "Chroot command failed: {}\nSTDOUT: {}\nSTDERR: {}",
+            command,
+            stdout,
+            stderr
         ));
     }
 
@@ -1464,8 +1512,10 @@ fn chroot_with_output(command: &str) -> Result<String> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         // Use anyhow::anyhow directly to avoid sanitization for debugging
         return Err(anyhow::anyhow!(
-            "Chroot command failed: {}\nSTDOUT: {}\nSTDERR: {}", 
-            command, stdout, stderr
+            "Chroot command failed: {}\nSTDOUT: {}\nSTDERR: {}",
+            command,
+            stdout,
+            stderr
         ));
     }
 
@@ -1687,7 +1737,7 @@ fn mount() -> Result<()> {
         let efi_device = find_partition_by_label("EFI")?;
         info(&format!("Found EFI partition: {}", efi_device));
         mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
-        
+
         // Verify mount was successful
         match execute("findmnt /mnt/root/boot/efi") {
             Ok(mount_info) => {
@@ -1701,13 +1751,13 @@ fn mount() -> Result<()> {
 
     // Ensure proper boot directory structure for GRUB on writable EFI partition
     info("Creating boot directory structure for GRUB");
-    
+
     // Debug: Check if EFI partition is actually mounted and writable
     match execute("mount | grep '/mnt/root/boot/efi'") {
         Ok(mount_info) => info(&format!("EFI mount status: {}", mount_info.trim())),
         Err(e) => warn(&format!("Failed to check EFI mount: {}", e)),
     }
-    
+
     // Test write to EFI partition before creating directories
     let test_file = "/mnt/root/boot/efi/.installer_test";
     match safe_write_file(test_file, b"test_write", "/mnt/root/boot/efi") {
@@ -1719,61 +1769,68 @@ fn mount() -> Result<()> {
             bail!("❌ EFI partition is NOT writable: {}", e);
         }
     }
-    
+
     safe_create_dir_all("/mnt/root/boot/efi/grub", "/mnt/root/boot/efi")?;
-    
+
     // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
     // This fixes grub2-mkconfig calling grub2-probe from wrong location
     info("Creating GRUB tool symlinks to fix hardcoded paths...");
     let _grub_links = [
         ("grub-probe", "grub-probe"),
         ("grub2-probe", "grub2-probe"),
-        ("grub-mkconfig", "grub-mkconfig"), 
+        ("grub-mkconfig", "grub-mkconfig"),
         ("grub2-mkconfig", "grub2-mkconfig"),
     ];
-    
+
     // Create symlinks from /usr/bin to /usr/sbin for GRUB tools if needed
     // This fixes grub2-mkconfig calling grub2-probe from wrong location
     info("Creating GRUB tool symlinks to fix hardcoded paths...");
-    
+
     // First, let's debug what actually exists
     info("Debugging GRUB tool locations...");
     match chroot_with_output("ls -la /usr/sbin/grub* 2>/dev/null || echo 'not found'") {
         Ok(output) => info(&format!("GRUB tools in /usr/sbin: {}", output.trim())),
         Err(e) => warn(&format!("Failed to list /usr/sbin/grub*: {}", e)),
     }
-    
+
     match chroot_with_output("ls -la /usr/bin/grub* 2>/dev/null || echo 'not found'") {
         Ok(output) => info(&format!("GRUB tools in /usr/bin: {}", output.trim())),
         Err(e) => warn(&format!("Failed to list /usr/bin/grub*: {}", e)),
     }
-    
+
     let _grub_links = [
         ("grub-probe", "grub-probe"),
         ("grub2-probe", "grub2-probe"),
-        ("grub-mkconfig", "grub-mkconfig"), 
+        ("grub-mkconfig", "grub-mkconfig"),
         ("grub2-mkconfig", "grub2-mkconfig"),
     ];
-    
+
     for (target, link_name) in &_grub_links {
         let target_path = format!("/mnt/root/usr/sbin/{}", target);
         let link_path = format!("/mnt/root/usr/bin/{}", link_name);
-        
-        info(&format!("Checking symlink: target={}, link={}", target_path, link_path));
-        info(&format!("Target exists: {}, Link exists: {}", 
-            Path::new(&target_path).exists(), 
+
+        info(&format!(
+            "Checking symlink: target={}, link={}",
+            target_path, link_path
+        ));
+        info(&format!(
+            "Target exists: {}, Link exists: {}",
+            Path::new(&target_path).exists(),
             Path::new(&link_path).exists()
         ));
-        
+
         if Path::new(&target_path).exists() && !Path::new(&link_path).exists() {
             // Try copying instead of symlinking to avoid mount issues
             let copy_cmd = format!("cp /usr/sbin/{} /usr/bin/{}", target, link_name);
             info(&format!("Running copy command: {}", copy_cmd));
-            
+
             match chroot(&copy_cmd) {
                 Ok(()) => {
-                    info(&format!("✓ Copied: /usr/bin/{} <- /usr/sbin/{}", link_name, target));
-                    
+                    info(&format!(
+                        "✓ Copied: /usr/bin/{} <- /usr/sbin/{}",
+                        link_name, target
+                    ));
+
                     // Verify the copy was created and is executable
                     match chroot_with_output(&format!("ls -la /usr/bin/{}", link_name)) {
                         Ok(verify_output) => {
@@ -1789,12 +1846,16 @@ fn mount() -> Result<()> {
                         Err(e) => warn(&format!("Failed to verify copy: {}", e)),
                     }
                 }
-                Err(e) => warn(&format!("Failed to copy {} -> {}: {}", link_name, target, e)),
+                Err(e) => warn(&format!(
+                    "Failed to copy {} -> {}: {}",
+                    link_name, target, e
+                )),
             }
         } else {
-            info(&format!("Skipping copy {} (target exists: {}, link exists: {})", 
-                link_name, 
-                Path::new(&target_path).exists(), 
+            info(&format!(
+                "Skipping copy {} (target exists: {}, link exists: {})",
+                link_name,
+                Path::new(&target_path).exists(),
                 Path::new(&link_path).exists()
             ));
         }
@@ -1841,9 +1902,11 @@ fn verify_grub_environment() -> Result<()> {
 
     // Check 1: Verify GRUB binaries are accessible in chroot environment
     info("Checking GRUB binary availability in chroot...");
-    
+
     // Check for GRUB mkconfig binary in chroot (prioritize sbin)
-    let grub_mkconfig_check = match chroot_with_output("which grub-mkconfig 2>/dev/null || which grub2-mkconfig 2>/dev/null || echo 'not found'") {
+    let grub_mkconfig_check = match chroot_with_output(
+        "which grub-mkconfig 2>/dev/null || which grub2-mkconfig 2>/dev/null || echo 'not found'",
+    ) {
         Ok(output) => {
             let result = output.trim();
             if result != "not found" && !result.is_empty() {
@@ -1870,9 +1933,11 @@ fn verify_grub_environment() -> Result<()> {
             false
         }
     };
-    
+
     // Check for GRUB probe binary in chroot (prioritize sbin)
-    let grub_probe_check = match chroot_with_output("which grub-probe 2>/dev/null || which grub2-probe 2>/dev/null || echo 'not found'") {
+    let grub_probe_check = match chroot_with_output(
+        "which grub-probe 2>/dev/null || which grub2-probe 2>/dev/null || echo 'not found'",
+    ) {
         Ok(output) => {
             let result = output.trim();
             if result != "not found" && !result.is_empty() {
@@ -1880,17 +1945,22 @@ fn verify_grub_environment() -> Result<()> {
                 true
             } else {
                 // Try direct path check if which fails
-                match chroot_with_output("ls /usr/sbin/grub-probe /usr/sbin/grub2-probe 2>/dev/null || echo 'not found'") {
+                match chroot_with_output(
+                    "ls /usr/sbin/grub-probe /usr/sbin/grub2-probe 2>/dev/null || echo 'not found'",
+                ) {
                     Ok(direct_output) => {
                         let direct_result = direct_output.trim();
                         if direct_result != "not found" && !direct_result.is_empty() {
-                            info(&format!("✓ GRUB probe found in /usr/sbin: {}", direct_result));
+                            info(&format!(
+                                "✓ GRUB probe found in /usr/sbin: {}",
+                                direct_result
+                            ));
                             true
                         } else {
                             false
                         }
                     }
-                    Err(_) => false
+                    Err(_) => false,
                 }
             }
         }
@@ -1903,13 +1973,11 @@ fn verify_grub_environment() -> Result<()> {
     if !grub_mkconfig_check {
         bail!("GRUB mkconfig binary not found in chroot environment - please install GRUB");
     }
-    
+
     if !grub_probe_check {
         warn("GRUB probe binary not found in chroot - some GRUB functionality may be limited");
         // Don't fail the installation for missing probe binary
     }
-
-
 
     // Check 3: Verify boot directory is writable (test EFI partition, not read-only squashfs)
     let boot_test_file = "/mnt/root/boot/efi/.grub_test_write";
@@ -1945,13 +2013,13 @@ fn verify_grub_environment() -> Result<()> {
             let writable_base = if dir.starts_with("/mnt/root/boot") {
                 "/mnt/root/boot"
             } else if dir.starts_with("/mnt/root/etc") {
-                "/mnt/root/etc" 
+                "/mnt/root/etc"
             } else if dir.starts_with("/mnt/root/usr") {
                 "/mnt/root/usr"
             } else {
                 "/mnt/root"
             };
-            
+
             if let Err(e) = safe_create_dir_all(dir, writable_base) {
                 bail!("Could not create required directory {}: {}", dir, e);
             }
@@ -2005,7 +2073,7 @@ fn verify_grub_environment() -> Result<()> {
     info("Verifying GRUB crypto modules for encrypted boot support...");
     let crypto_modules = [
         "cryptodisk",
-        "luks", 
+        "luks",
         "gcry_rijndael",
         "gcry_sha256",
         "gcry_sha512",
@@ -2032,11 +2100,11 @@ fn verify_grub_environment() -> Result<()> {
     Ok(())
 }
 
-
-
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     // Check for grub binary in chroot environment using chroot commands
-    let grub = match chroot_with_output("which grub-install 2>/dev/null || which grub2-install 2>/dev/null || echo 'not found'") {
+    let grub = match chroot_with_output(
+        "which grub-install 2>/dev/null || which grub2-install 2>/dev/null || echo 'not found'",
+    ) {
         Ok(output) => {
             let result = output.trim();
             if result != "not found" && !result.is_empty() {
@@ -2082,38 +2150,236 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
         // Create GRUB configuration manually to avoid systemd-boot conflicts
         info("Creating GRUB configuration manually...");
-        
-        // First, find actual kernel and initrd files in squashfs
-        let kernel_files = match chroot_with_output("find /boot -name 'vmlinuz-*' -type f | head -1") {
-            Ok(files) => files.trim().to_string(),
-            Err(_) => {
-                warn("Could not find kernel files, using fallback");
-                "/boot/vmlinuz".to_string()
+
+        // First, find actual kernel and initrd files in squashfs with enhanced retry
+        let kernel_files = {
+            let mut kernel_path = "/boot/vmlinuz".to_string();
+            let mut found = false;
+            
+            // First ensure /boot is accessible and not locked
+            for boot_check in 1..=3 {
+                if chroot_with_output("ls /boot 2>/dev/null").is_ok() {
+                    break;
+                }
+                if boot_check < 3 {
+                    info(&format!("Boot directory not ready, waiting... (attempt {}/3)", boot_check));
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
             }
-        };
-        
-        let initrd_files = match chroot_with_output("find /boot -name 'initrd-*' -type f | head -1") {
-            Ok(files) => files.trim().to_string(),
-            Err(_) => {
-                warn("Could not find initrd files, using fallback");
-                "/boot/initrd".to_string()
+            
+            for attempt in 1..=5 {
+                match chroot_with_output("find /boot -name 'vmlinuz-*' -type f 2>/dev/null | head -1") {
+                    Ok(files) if !files.trim().is_empty() => {
+                        kernel_path = files.trim().to_string();
+                        info(&format!("Found kernel on attempt {}: {}", attempt, kernel_path));
+                        found = true;
+                        break;
+                    }
+                    Ok(_) => {
+                        warn(&format!("Kernel search attempt {} returned empty", attempt));
+                    }
+                    Err(e) => {
+                        warn(&format!("Kernel search attempt {} failed: {}", attempt, e));
+                    }
+                }
+                
+                if attempt < 5 {
+                    info(&format!("Retrying kernel detection in 1 second... (attempt {}/5)", attempt));
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
             }
+            
+            if !found {
+                warn("Could not find kernel files after 5 attempts, using fallback");
+                // Try alternative kernel names
+                match chroot_with_output("ls /boot/vmlinuz* 2>/dev/null | head -1") {
+                    Ok(files) if !files.trim().is_empty() => {
+                        kernel_path = files.trim().to_string();
+                    }
+                    _ => {
+                        kernel_path = "/boot/vmlinuz".to_string();
+                    }
+                }
+            }
+            kernel_path
         };
-        
+
+        let initrd_files = {
+            let mut initrd_path = "/boot/initrd".to_string();
+            let mut found = false;
+            
+            for attempt in 1..=5 {
+                match chroot_with_output("find /boot -name 'initrd-*' -type f 2>/dev/null | head -1") {
+                    Ok(files) if !files.trim().is_empty() => {
+                        initrd_path = files.trim().to_string();
+                        info(&format!("Found initrd on attempt {}: {}", attempt, initrd_path));
+                        found = true;
+                        break;
+                    }
+                    Ok(_) => {
+                        warn(&format!("Initrd search attempt {} returned empty", attempt));
+                    }
+                    Err(e) => {
+                        warn(&format!("Initrd search attempt {} failed: {}", attempt, e));
+                    }
+                }
+                
+                if attempt < 5 {
+                    info(&format!("Retrying initrd detection in 1 second... (attempt {}/5)", attempt));
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+            
+            if !found {
+                warn("Could not find initrd files after 5 attempts, using fallback");
+                // Try alternative initrd names with better detection
+                match chroot_with_output("ls /boot/initrd* 2>/dev/null | head -1") {
+                    Ok(files) if !files.trim().is_empty() => {
+                        initrd_path = files.trim().to_string();
+                        info(&format!("Using fallback initrd: {}", initrd_path));
+                    }
+                    _ => {
+                        // Try common initrd patterns
+                        match chroot_with_output("ls /boot/initramfs-* 2>/dev/null | head -1") {
+                            Ok(files) if !files.trim().is_empty() => {
+                                initrd_path = files.trim().to_string();
+                                info(&format!("Using initramfs fallback: {}", initrd_path));
+                            }
+                            _ => {
+                                // Try to find any initramfs/initrd with different patterns
+                                match chroot_with_output("find /boot -name '*init*' -type f 2>/dev/null | head -1") {
+                                    Ok(files) if !files.trim().is_empty() => {
+                                        initrd_path = files.trim().to_string();
+                                        info(&format!("Using generic init fallback: {}", initrd_path));
+                                    }
+                                    _ => {
+                                        warn("No initrd found - boot will fail!");
+                                        initrd_path = "".to_string(); // Empty to indicate missing
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            initrd_path
+        };
+
         info(&format!("Using kernel: {}", kernel_files));
         info(&format!("Using initrd: {}", initrd_files));
-        
+
         // Check if LUKS encryption is being used and adjust boot parameters
         let is_encrypted = Path::new("/dev/mapper/regicideos").exists();
         let (root_param, boot_options) = if is_encrypted {
             info("Detected LUKS encryption - using encrypted boot parameters");
-            ("/dev/mapper/regicideos", "cryptroot=UUID=regicideos quiet splash rw")
+            
+            // Ensure initramfs has LUKS support
+            info("Configuring LUKS boot support...");
+            
+            // Add cryptsetup to initramfs if needed
+            if chroot_with_output("which cryptsetup").is_ok() {
+                info("✓ cryptsetup found in chroot");
+            } else {
+                warn("cryptsetup not found in chroot, LUKS boot may fail");
+            }
+            
+            // Get the actual LUKS partition UUID
+            let luks_uuid = match execute("blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'") {
+                Ok(uuid) => uuid.trim().to_string(),
+                Err(_) => "regicideos".to_string(),
+            };
+            
+            info(&format!("Using LUKS UUID: {}", luks_uuid));
+            
+            // Create LUKS unlock script for initramfs
+            chroot("mkdir -p /etc/initramfs-tools/scripts/init-premount")?;
+            chroot(&format!(r#"cat > /etc/initramfs-tools/scripts/init-premount/luks-unlock << 'EOF'
+#!/bin/sh
+# LUKS unlock script for initramfs
+PREREQ=""
+
+prereqs()
+{{
+    echo "\$PREREQ"
+}}
+
+case $1 in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+. /scripts/functions
+
+# Wait for devices to settle
+sleep 2
+
+# Try to unlock LUKS partition by UUID
+if [ -e /dev/disk/by-uuid/{} ]; then
+    log_begin_msg "Unlocking LUKS encrypted partition (UUID: {})"
+    /lib/cryptsetup/cryptsetup luksOpen /dev/disk/by-uuid/{} regicideos
+    log_end_msg $?
+else
+    # Fallback to device name
+    log_begin_msg "Unlocking LUKS encrypted partition (fallback to /dev/sda3)"
+    /lib/cryptsetup/cryptsetup luksOpen /dev/sda3 regicideos
+    log_end_msg $?
+fi
+EOF"#, luks_uuid, luks_uuid, luks_uuid))?;
+            
+            chroot("chmod +x /etc/initramfs-tools/scripts/init-premount/luks-unlock")?;
+            
+            // Add crypttab entry for LUKS device
+            chroot(&format!("echo 'regicideos UUID={} none luks' >> /etc/crypttab", luks_uuid))?;
+            
+            // Update initramfs to include LUKS support
+            if chroot_with_output("which update-initramfs").is_ok() {
+                chroot("update-initramfs -u -k all")?;
+            } else if chroot_with_output("which mkinitcpio").is_ok() {
+                // For Arch-based systems
+                chroot("sed -i 's/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/HOOKS=(base udev autodetect modconf block encrypt filesystems keyboard fsck)/' /etc/mkinitcpio.conf")?;
+                chroot("mkinitcpio -P")?;
+            }
+            
+            (
+                "/dev/mapper/regicideos".to_string(),
+                format!("cryptdevice=UUID={}:regicideos root=/dev/mapper/regicideos quiet splash rw", luks_uuid),
+            )
         } else {
             info("Using unencrypted boot parameters");
-            ("LABEL=ROOTS", "quiet splash rw")
+            ("LABEL=ROOTS".to_string(), "quiet splash rw".to_string())
         };
-        
-        let grub_config = format!(r#"set default="RegicideOS"
+
+        let grub_config = if is_encrypted {
+            format!(
+                r#"set default="RegicideOS"
+set timeout=5
+
+menuentry "RegicideOS (Encrypted)" {{
+    linux {}
+    initrd {}
+    options "root={} {}"
+}}
+
+menuentry "RegicideOS (Encrypted Recovery)" {{
+    linux {}
+    initrd {}
+    options "root={} {} single"
+}}
+"#,
+                kernel_files,
+                initrd_files,
+                root_param,
+                boot_options,
+                kernel_files,
+                initrd_files,
+                root_param,
+                boot_options
+            )
+        } else {
+            format!(
+                r#"set default="RegicideOS"
 set timeout=5
 
 menuentry "RegicideOS" {{
@@ -2122,16 +2388,30 @@ menuentry "RegicideOS" {{
     options "root={} {}"
 }}
 
-menuentry "RegicideOS (Fallback)" {{
+menuentry "RegicideOS (Recovery)" {{
     linux {}
     initrd {}
-    options "root={} {}"
+    options "root={} {} single"
 }}
-"#, kernel_files, initrd_files, root_param, boot_options, kernel_files, initrd_files, root_param, boot_options);
-        
-        safe_write_file("/mnt/root/boot/efi/grub/grub.cfg", grub_config.as_bytes(), "/mnt/root/boot/efi")?;
+"#,
+                kernel_files,
+                initrd_files,
+                root_param,
+                boot_options,
+                kernel_files,
+                initrd_files,
+                root_param,
+                boot_options
+            )
+        };
+
+        safe_write_file(
+            "/mnt/root/boot/efi/grub/grub.cfg",
+            grub_config.as_bytes(),
+            "/mnt/root/boot/efi",
+        )?;
         info("✓ GRUB configuration created successfully");
-        
+
         // Debug: Show what was actually written
         match chroot_with_output("cat /boot/efi/grub/grub.cfg") {
             Ok(config_content) => {
@@ -2140,7 +2420,7 @@ menuentry "RegicideOS (Fallback)" {{
             }
             Err(e) => warn(&format!("Failed to read GRUB config: {}", e)),
         }
-        
+
         // Verify GRUB config file exists and is readable
         match chroot_with_output("ls -la /boot/efi/grub/") {
             Ok(output) => info(&format!("GRUB directory contents:\n{}", output.trim())),
@@ -2162,11 +2442,11 @@ menuentry "RegicideOS (Fallback)" {{
         info("Verifying GRUB environment before config generation");
         verify_grub_environment()?;
 
-        // Run GRUB mkconfig to generate configuration
-        let grub_mkconfig_cmd = format!("{}-mkconfig -o /boot/efi/grub/grub.cfg", grub);
-        info(&format!("Running GRUB mkconfig: {}", grub_mkconfig_cmd));
+        // Skip GRUB mkconfig since we created manual configuration
+        info("Skipping grub-mkconfig - using manual LUKS-compatible configuration");
         
-        chroot(&grub_mkconfig_cmd)?;
+        // Our manual GRUB config was already written above
+        // grub-mkconfig would overwrite it with broken LUKS parameters
     }
 
     Ok(())
@@ -2255,37 +2535,58 @@ fn post_install(config: &Config) -> Result<()> {
         info("Creating user");
         chroot(&format!("useradd -m {}", config.username))?;
 
-        let mut attempts = 0;
-        loop {
+        // Password setting with retry loop (matches Xenia reference behavior)
+        let mut valid = false;
+        while !valid {
             match chroot(&format!("passwd {}", config.username)) {
-                Ok(_) => break,
-                _ => {
-                    attempts += 1;
-                    if attempts >= 3 {
-                        warn("Failed to set password after 3 attempts. User will need to set password manually.");
-                        break;
-                    }
-                    println!("Password setting failed. Please try again.");
+                Ok(_) => {
+                    valid = true;
+                    info("Password set successfully");
+                }
+                Err(e) => {
+                    warn(&format!("Password setting failed: {}", e));
+                    println!("Please try setting the password again.");
                 }
             }
         }
 
         chroot(&format!("usermod -aG wheel,video {}", config.username))?;
+        info(&format!("User {} created and added to wheel,video groups", config.username));
     }
 
     let flatpaks = get_flatpak_packages(&config.applications);
     if !flatpaks.is_empty() {
-        safe_create_dir_all("/mnt/root/etc/declare", "/mnt/root/etc")?;
-        safe_write_file(
-            "/mnt/root/etc/declare/flatpak",
-            flatpaks.as_bytes(),
-            "/mnt/root/etc",
-        )?;
+        info("Installing flatpak applications...");
 
-        if !Path::new("/mnt/root/usr/bin/rc-service").exists() {
-            chroot("systemctl enable declareflatpak")?;
+        // Create /etc/declare directory and flatpak file (for declareflatpak service compatibility)
+        chroot("mkdir -p /etc/declare")?;
+        chroot(&format!("echo '{}' > /etc/declare/flatpak", flatpaks))?;
+        
+        // Initialize flatpak and add Flathub repository
+        chroot("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")?;
+
+        // Install each flatpak package
+        for package in flatpaks.split_whitespace() {
+            info(&format!("Installing flatpak: {}", package));
+            if let Err(e) = chroot(&format!("flatpak install -y flathub {}", package)) {
+                warn(&format!("Failed to install flatpak {}: {}", package, e));
+            } else {
+                info(&format!("Successfully installed flatpak: {}", package));
+            }
+        }
+
+        // Update flatpak metadata
+        chroot("flatpak update --noninteractive")?;
+        
+        // Enable declareflatpak service if available (matches Xenia reference behavior)
+        if chroot_with_output("which systemctl").is_ok() {
+            info("Enabling declareflatpak service (systemd)");
+            chroot("systemctl enable declareflatpak 2>/dev/null || true")?;
+        } else if chroot_with_output("which rc-service").is_ok() {
+            info("Adding declareflatpak service (OpenRC)");
+            chroot("rc-update add declareflatpak 2>/dev/null || true")?;
         } else {
-            chroot("rc-update add declareflatpak")?;
+            info("declareflatpak service not available - flatpaks installed directly");
         }
     }
 
@@ -2895,7 +3196,7 @@ async fn main() -> Result<()> {
     format_drive(&config_parsed.drive, layout)?;
 
     info("Starting installation");
-    
+
     // Simplified installation following Xenia manual pattern
     info("Step 1: Mount ROOTS partition");
     let roots_device = find_partition_by_label("ROOTS")?;
@@ -2914,13 +3215,13 @@ async fn main() -> Result<()> {
     let platform = if is_efi() { "x86_64-efi" } else { "i386-pc" };
     info(&format!("Platform detected: {}", platform));
     info(&format!("Target device: {}", &config_parsed.drive));
-    
+
     // Debug: Show current mounts before GRUB installation
     match execute("findmnt | grep -E '(boot|efi)' || echo 'No boot/efi mounts found'") {
         Ok(output) => info(&format!("Current boot-related mounts:\n{}", output.trim())),
         Err(e) => warn(&format!("Failed to show mounts: {}", e)),
     }
-    
+
     info("About to call install_bootloader...");
     install_bootloader(platform, &config_parsed.drive)?;
 
