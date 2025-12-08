@@ -1783,12 +1783,38 @@ fn mount() -> Result<()> {
 
 async fn download_root(url: &str) -> Result<()> {
     let root_img_path = "/mnt/gentoo/root.img";
+    let local_img_path = "cosmic-fedora.img";
 
+    // Check if local cosmic-fedora.img exists and use it instead of downloading
+    if Path::new(local_img_path).exists() {
+        info("Using local cosmic-fedora.img (offline mode)");
+        
+        if Path::new(root_img_path).exists() {
+            safe_remove_file(root_img_path, "/mnt/gentoo")?;
+        }
+
+        // Copy local image to target location
+        info(&format!("Copying {} to {}", local_img_path, root_img_path));
+        let local_bytes = fs::read(local_img_path)?;
+        safe_write_file(root_img_path, &local_bytes, "/mnt/gentoo")?;
+
+        // Verify file was written and has content
+        let metadata = fs::metadata(root_img_path)?;
+        if metadata.len() == 0 {
+            bail!("Root image file is empty after copy");
+        }
+
+        info(&format!("Copied {} bytes locally", metadata.len()));
+        return Ok(());
+    }
+
+    // Fallback to download if local file not found
+    info(&format!("Local cosmic-fedora.img not found, downloading from {}", url));
+    
     if Path::new(root_img_path).exists() {
         safe_remove_file(root_img_path, "/mnt/gentoo")?;
     }
 
-    info(&format!("Downloading root image from {}", url));
     let response = reqwest::get(url).await?;
 
     if !response.status().is_success() {
