@@ -1,16 +1,13 @@
 #![allow(dead_code)]
-#![allow(clippy::single_component_path_imports)]
-#![allow(clippy::print_literal)]
-#![allow(clippy::needless_borrows_for_generic_args)]
-#![allow(clippy::uninlined_format_args)]
 #![allow(clippy::trim_split_whitespace)]
 #![allow(clippy::useless_format)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::uninlined_format_args)]
 #![allow(clippy::double_ended_iterator_last)]
-#![allow(clippy::manual_is_multiple_of)]
-#![allow(clippy::redundant_pattern_matching)]
 #![allow(clippy::unnecessary_map_or)]
+#![allow(clippy::redundant_pattern_matching)]
+#![allow(clippy::print_literal)]
 #![allow(clippy::bind_instead_of_map)]
-#![allow(clippy::match_like_matches_macro)]
 
 use anyhow::{bail, Context, Result};
 use clap::{Arg, Command};
