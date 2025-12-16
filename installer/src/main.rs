@@ -1659,6 +1659,11 @@ fn mount() -> Result<()> {
         Some("ro,loop"),
     )?;
 
+    // CRITICAL: Remount /mnt/root read-write after initial mount
+    // Linux defaults new filesystems to ro for safety, especially after cryptsetup
+    info("Remounting /mnt/root read-write for configuration access");
+    execute("mount -o remount,rw /mnt/root")?;
+
     info("Mounting special filesystems first");
     mount_with_retry("/proc", "/mnt/root/proc", Some("proc"), None)?;
     execute("mount --rbind /dev /mnt/root/dev")?;
@@ -1684,10 +1689,18 @@ fn mount() -> Result<()> {
         info(&format!("Found EFI partition: {}", efi_device));
         mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
 
-        // Verify mount was successful
-        match execute("findmnt /mnt/root/boot/efi") {
-            Ok(mount_info) => {
-                info(&format!("EFI mount verification: {}", mount_info.trim()));
+        // Verify mount was successful using /proc/mounts fallback
+        match std::process::Command::new("cat")
+            .arg("/proc/mounts")
+            .output()
+        {
+            Ok(output) => {
+                let mounts = String::from_utf8_lossy(&output.stdout);
+                if mounts.contains("/mnt/root/boot/efi") {
+                    info("✓ EFI mount verified successfully");
+                } else {
+                    warn("EFI mount not found in /proc/mounts");
+                }
             }
             Err(e) => {
                 warn(&format!("Failed to verify EFI mount: {}", e));
@@ -3679,39 +3692,32 @@ async fn main() -> Result<()> {
     info("Step 3: Mount root image and setup filesystems");
     mount()?;
 
-    info("Step 4: Install essential utilities (util-linux for findmnt)");
-    // Install util-linux before chroot to ensure findmnt command is available
-    match chroot_with_output("which pacman") {
-        Ok(_) => {
-            chroot("pacman -S --noconfirm util-linux")?;
-            info("✓ Installed util-linux with pacman");
-        }
-        Err(_) => match chroot_with_output("which dnf") {
-            Ok(_) => {
-                chroot("dnf install -y util-linux")?;
-                info("✓ Installed util-linux with dnf");
-            }
-            Err(_) => match chroot_with_output("which apt") {
-                Ok(_) => {
-                    chroot("apt update && apt install -y util-linux")?;
-                    info("✓ Installed util-linux with apt");
-                }
-                Err(_) => {
-                    warn("Could not install util-linux - findmnt may not work in chroot");
-                }
-            },
-        },
-    }
+    info("Step 4: Prepare for bootloader installation");
 
     info("Step 5: Install bootloader");
     let platform = if is_efi() { "x86_64-efi" } else { "i386-pc" };
     info(&format!("Platform detected: {}", platform));
     info(&format!("Target device: {}", &config_parsed.drive));
 
-    // Debug: Show current mounts before GRUB installation
-    match execute("findmnt | grep -E '(boot|efi)' || echo 'No boot/efi mounts found'") {
-        Ok(output) => info(&format!("Current boot-related mounts:\n{}", output.trim())),
-        Err(e) => warn(&format!("Failed to show mounts: {}", e)),
+    // Debug: Show current mounts before GRUB installation using /proc/mounts fallback
+    // findmnt fails in partial chroot, use /proc/mounts instead
+    match std::process::Command::new("cat")
+        .arg("/proc/mounts")
+        .output()
+    {
+        Ok(output) => {
+            let mounts = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| line.contains("boot") || line.contains("efi"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if mounts.is_empty() {
+                info("No boot/efi mounts found");
+            } else {
+                info(&format!("Current boot-related mounts:\n{}", mounts));
+            }
+        }
+        Err(e) => warn(&format!("Failed to read /proc/mounts: {}", e)),
     }
 
     info("About to call install_bootloader...");
