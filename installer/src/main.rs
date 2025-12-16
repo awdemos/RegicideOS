@@ -1648,6 +1648,68 @@ fn mount_roots() -> Result<()> {
     Ok(())
 }
 
+fn step3_native_mount() -> Result<()> {
+    info("Step 3: Native root mount (skip squashfs)");
+
+    // Skip root.img entirely - mount native ROOTS/LUKS directly
+    let roots_dev = find_partition_by_label("ROOTS")?; // ext4 unencrypted root
+    safe_create_dir_all("/mnt/root", "/mnt")?;
+
+    // Mount native root RW (no squashfs)
+    mount_with_retry(&roots_dev, "/mnt/root", None, Some("rw,noatime"))?;
+    info(&format!("✓ Mounted ROOTS partition: {}", roots_dev));
+
+    // Bind mounts (same as before but after native root mount)
+    info("Mounting special filesystems after native root mount");
+    execute("mount --bind /proc /mnt/root/proc")?;
+    execute("mount --rbind /dev /mnt/root/dev")?;
+    execute("mount --rbind /sys /mnt/root/sys")?;
+    execute("mount --bind /run /mnt/root/run")?;
+    execute("mount --make-rslave /mnt/root")?;
+
+    // Add additional bind mounts required for proper chroot environment
+    if Path::new("/sys/firmware/efi/efivars").exists() {
+        execute("mount --bind /sys/firmware/efi/efivars /mnt/root/sys/firmware/efi/efivars")?;
+    }
+    execute("mount --bind /dev/pts /mnt/root/dev/pts")?;
+    execute("mount --bind /dev/shm /mnt/root/dev/shm")?;
+
+    // Prevent mount propagation back to host
+    execute("mount --make-rslave /mnt/root")?;
+
+    // Mount EFI partition BEFORE creating directories in it
+    if is_efi() {
+        info("Finding and mounting EFI partition...");
+        let efi_device = find_partition_by_label("EFI")?;
+        info(&format!("Found EFI partition: {}", efi_device));
+        mount_with_retry(&efi_device, "/mnt/root/boot", None, Some("rw"))?;
+
+        // Verify mount was successful using /proc/mounts fallback
+        match std::process::Command::new("cat")
+            .arg("/proc/mounts")
+            .output()
+        {
+            Ok(output) => {
+                let mounts = String::from_utf8_lossy(&output.stdout);
+                if mounts.contains("/mnt/root/boot") {
+                    info("✓ EFI mount verified successfully");
+                } else {
+                    warn("EFI mount not found in /proc/mounts");
+                }
+            }
+            Err(e) => {
+                warn(&format!("Failed to verify EFI mount: {}", e));
+            }
+        }
+
+        // Create boot directory structure for GRUB
+        safe_create_dir_all("/mnt/root/boot/grub", "/mnt/root/boot")?;
+    }
+
+    info("✓ Native mount setup complete - filesystem is writable");
+    Ok(())
+}
+
 fn mount() -> Result<()> {
     safe_create_dir_all("/mnt/root", "/mnt").ok();
 
@@ -2781,7 +2843,12 @@ menuentry "RegicideOS (Verbose)" {{
     Ok(())
 }
 
-fn post_install(config: &Config) -> Result<()> {
+async fn post_install(config: &Config) -> Result<()> {
+    // Download root.img as overlay template AFTER native mount is ready
+    info("Downloading root image for overlay template");
+    let root_url = get_url(config).await?;
+    download_root(&root_url).await?;
+
     let layout_name = &config.filesystem;
     info("Mounting overlays & home");
 
@@ -2847,16 +2914,17 @@ fn post_install(config: &Config) -> Result<()> {
         }
     }
 
+    // Use downloaded root.img as overlay lowerdir (template from squashfs)
     execute(&format!(
-        "mount -t overlay overlay -o lowerdir=/mnt/root/usr,upperdir={}/usr,workdir={}/usrw,ro /mnt/root/usr",
+        "mount -t overlay overlay -o lowerdir=/mnt/gentoo/usr,upperdir={}/usr,workdir={}/usrw,ro /mnt/root/usr",
         usr_path, usr_path
     ))?;
     execute(&format!(
-        "mount -t overlay overlay -o lowerdir=/mnt/root/etc,upperdir={}/etc,workdir={}/etcw,rw /mnt/root/etc",
+        "mount -t overlay overlay -o lowerdir=/mnt/gentoo/etc,upperdir={}/etc,workdir={}/etcw,rw /mnt/root/etc",
         etc_path, etc_path
     ))?;
     execute(&format!(
-        "mount -t overlay overlay -o lowerdir=/mnt/root/var,upperdir={}/var,workdir={}/varw,rw /mnt/root/var",
+        "mount -t overlay overlay -o lowerdir=/mnt/gentoo/var,upperdir={}/var,workdir={}/varw,rw /mnt/root/var",
         var_path, var_path
     ))?;
 
@@ -3685,12 +3753,8 @@ async fn main() -> Result<()> {
     safe_create_dir_all("/mnt/gentoo", "/mnt")?;
     mount_with_retry(&roots_device, "/mnt/gentoo", None, None)?;
 
-    info("Step 2: Download root image");
-    let root_url = get_url(&config_parsed).await?;
-    download_root(&root_url).await?;
-
-    info("Step 3: Mount root image and setup filesystems");
-    mount()?;
+    info("Step 2: Mount native ROOTS filesystem");
+    step3_native_mount()?;
 
     info("Step 4: Prepare for bootloader installation");
 
@@ -3724,7 +3788,7 @@ async fn main() -> Result<()> {
     install_bootloader(platform, &config_parsed.drive)?;
 
     info("Step 5: Post-installation tasks");
-    post_install(&config_parsed)?;
+    post_install(&config_parsed).await?;
 
     info("Installation completed successfully!");
 
