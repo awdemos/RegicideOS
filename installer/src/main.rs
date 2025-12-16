@@ -1666,6 +1666,17 @@ fn mount() -> Result<()> {
     execute("mount --bind /run /mnt/root/run")?;
     execute("mount --make-slave /mnt/root/run")?;
 
+    // Add additional bind mounts required for proper chroot environment
+    // Following Xenia upstream pattern for complete chroot setup
+    if Path::new("/sys/firmware/efi/efivars").exists() {
+        execute("mount --bind /sys/firmware/efi/efivars /mnt/root/sys/firmware/efi/efivars")?;
+    }
+    execute("mount --bind /dev/pts /mnt/root/dev/pts")?;
+    execute("mount --bind /dev/shm /mnt/root/dev/shm")?;
+
+    // Prevent mount propagation back to host
+    execute("mount --make-rslave /mnt/root")?;
+
     // Mount EFI partition BEFORE creating directories in it (fixes read-only error)
     if is_efi() {
         info("Finding and mounting EFI partition before creating boot directories...");
@@ -2078,20 +2089,24 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Configure GRUB for LUKS support BEFORE installation
         info("Configuring GRUB for LUKS encryption support...");
 
-        // Create /etc/default/grub with cryptodisk support
+        // Ensure /mnt is writable before creating GRUB config files
+        info("Ensuring filesystem is writable for GRUB configuration...");
+        execute("mount -o remount,rw /mnt")?;
+
+        // Create /etc/default/grub with cryptodisk support using chroot
         chroot("mkdir -p /etc/default")?;
-        let grub_default_config = r#"GRUB_DEFAULT=0
+
+        // Write GRUB config inside chroot to avoid RO filesystem issues
+        chroot(
+            "cat > /etc/default/grub << 'EOF'
+GRUB_DEFAULT=0
 GRUB_TIMEOUT=5
-GRUB_DISTRIBUTOR="RegicideOS"
-GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
-GRUB_CMDLINE_LINUX=""
+GRUB_DISTRIBUTOR=\"RegicideOS\"
+GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash\"
+GRUB_CMDLINE_LINUX=\"\"
 GRUB_ENABLE_CRYPTODISK=y
-GRUB_PRELOAD_MODULES="cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm"
-"#;
-        safe_write_file(
-            "/mnt/root/etc/default/grub",
-            grub_default_config.as_bytes(),
-            "/mnt/root/etc/default",
+GRUB_PRELOAD_MODULES=\"cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm\"
+EOF",
         )?;
 
         // Check if LUKS encryption is being used to determine required modules
@@ -3385,7 +3400,31 @@ async fn main() -> Result<()> {
     info("Step 3: Mount root image and setup filesystems");
     mount()?;
 
-    info("Step 4: Install bootloader");
+    info("Step 4: Install essential utilities (util-linux for findmnt)");
+    // Install util-linux before chroot to ensure findmnt command is available
+    match chroot_with_output("which pacman") {
+        Ok(_) => {
+            chroot("pacman -S --noconfirm util-linux")?;
+            info("✓ Installed util-linux with pacman");
+        }
+        Err(_) => match chroot_with_output("which dnf") {
+            Ok(_) => {
+                chroot("dnf install -y util-linux")?;
+                info("✓ Installed util-linux with dnf");
+            }
+            Err(_) => match chroot_with_output("which apt") {
+                Ok(_) => {
+                    chroot("apt update && apt install -y util-linux")?;
+                    info("✓ Installed util-linux with apt");
+                }
+                Err(_) => {
+                    warn("Could not install util-linux - findmnt may not work in chroot");
+                }
+            },
+        },
+    }
+
+    info("Step 5: Install bootloader");
     let platform = if is_efi() { "x86_64-efi" } else { "i386-pc" };
     info(&format!("Platform detected: {}", platform));
     info(&format!("Target device: {}", &config_parsed.drive));
