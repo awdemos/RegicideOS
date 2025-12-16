@@ -2086,29 +2086,6 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     };
 
     if platform.contains("efi") {
-        // Configure GRUB for LUKS support BEFORE installation
-        info("Configuring GRUB for LUKS encryption support...");
-
-        // Ensure /mnt is writable before creating GRUB config files
-        info("Ensuring filesystem is writable for GRUB configuration...");
-        execute("mount -o remount,rw /mnt")?;
-
-        // Create /etc/default/grub with cryptodisk support using chroot
-        chroot("mkdir -p /etc/default")?;
-
-        // Write GRUB config inside chroot to avoid RO filesystem issues
-        chroot(
-            "cat > /etc/default/grub << 'EOF'
-GRUB_DEFAULT=0
-GRUB_TIMEOUT=5
-GRUB_DISTRIBUTOR=\"RegicideOS\"
-GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash\"
-GRUB_CMDLINE_LINUX=\"\"
-GRUB_ENABLE_CRYPTODISK=y
-GRUB_PRELOAD_MODULES=\"cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm\"
-EOF",
-        )?;
-
         // Check if LUKS encryption is being used to determine required modules
         let is_encrypted = Path::new("/dev/mapper/regicideos").exists();
         let crypto_modules = if is_encrypted {
@@ -2126,8 +2103,7 @@ EOF",
         );
         chroot(&grub_install_cmd)?;
 
-        // Create GRUB configuration manually to avoid systemd-boot conflicts
-        info("Creating GRUB configuration manually...");
+        // GRUB configuration will be created in post_install after overlay filesystem is mounted
 
         // First, find actual kernel and initrd files in squashfs with enhanced retry
         let kernel_files = {
@@ -2510,6 +2486,288 @@ menuentry "RegicideOS (Verbose)" {{
     Ok(())
 }
 
+fn create_grub_configuration() -> Result<()> {
+    info("Creating GRUB configuration after overlay filesystem is mounted...");
+
+    // First, find actual kernel and initrd files in squashfs with enhanced retry
+    let kernel_files = {
+        let mut kernel_path = "/boot/vmlinuz".to_string();
+        let mut found = false;
+
+        // First ensure /boot is accessible and not locked
+        for boot_check in 1..=3 {
+            if chroot_with_output("ls /boot 2>/dev/null").is_ok() {
+                break;
+            }
+            if boot_check < 3 {
+                info(&format!(
+                    "Boot directory not ready, waiting... (attempt {}/3)",
+                    boot_check
+                ));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+
+        for attempt in 1..=5 {
+            match chroot_with_output("find /boot -name 'vmlinuz-*' -type f 2>/dev/null | head -1") {
+                Ok(files) if !files.trim().is_empty() => {
+                    kernel_path = files.trim().to_string();
+                    info(&format!(
+                        "Found kernel on attempt {}: {}",
+                        attempt, kernel_path
+                    ));
+                    found = true;
+                    break;
+                }
+                Ok(_) => {
+                    warn(&format!("Kernel search attempt {} returned empty", attempt));
+                }
+                Err(e) => {
+                    warn(&format!("Kernel search attempt {} failed: {}", attempt, e));
+                }
+            }
+
+            if attempt < 5 {
+                info(&format!(
+                    "Retrying kernel detection in 1 second... (attempt {}/5)",
+                    attempt
+                ));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+
+        if !found {
+            warn("Could not find kernel files after 5 attempts, using fallback");
+            // Try alternative kernel names
+            match chroot_with_output("ls /boot/vmlinuz* 2>/dev/null | head -1") {
+                Ok(files) if !files.trim().is_empty() => {
+                    kernel_path = files.trim().to_string();
+                }
+                _ => {
+                    kernel_path = "/boot/vmlinuz".to_string();
+                }
+            }
+        }
+        kernel_path
+    };
+
+    let initrd_files = {
+        let mut initrd_path = "/boot/initrd".to_string();
+        let mut found = false;
+
+        for attempt in 1..=5 {
+            match chroot_with_output("find /boot -name 'initrd-*' -type f 2>/dev/null | head -1") {
+                Ok(files) if !files.trim().is_empty() => {
+                    initrd_path = files.trim().to_string();
+                    info(&format!(
+                        "Found initrd on attempt {}: {}",
+                        attempt, initrd_path
+                    ));
+                    found = true;
+                    break;
+                }
+                Ok(_) => {
+                    warn(&format!("Initrd search attempt {} returned empty", attempt));
+                }
+                Err(e) => {
+                    warn(&format!("Initrd search attempt {} failed: {}", attempt, e));
+                }
+            }
+
+            if attempt < 5 {
+                info(&format!(
+                    "Retrying initrd detection in 1 second... (attempt {}/5)",
+                    attempt
+                ));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+
+        if !found {
+            warn("Could not find initrd files after 5 attempts, using fallback");
+            // Try alternative initrd names with better detection
+            match chroot_with_output("ls /boot/initrd* 2>/dev/null | head -1") {
+                Ok(files) if !files.trim().is_empty() => {
+                    initrd_path = files.trim().to_string();
+                    info(&format!("Using initrd fallback: {}", initrd_path));
+                }
+                _ => {
+                    match chroot_with_output("ls /boot/initramfs-* 2>/dev/null | head -1") {
+                        Ok(files) if !files.trim().is_empty() => {
+                            initrd_path = files.trim().to_string();
+                            info(&format!("Using initramfs fallback: {}", initrd_path));
+                        }
+                        _ => {
+                            // Try to find any initramfs/initrd with different patterns
+                            match chroot_with_output(
+                                "find /boot -name '*init*' -type f 2>/dev/null | head -1",
+                            ) {
+                                Ok(files) if !files.trim().is_empty() => {
+                                    initrd_path = files.trim().to_string();
+                                    info(&format!("Using generic init fallback: {}", initrd_path));
+                                }
+                                _ => {
+                                    warn("No initrd found - boot will fail!");
+                                    initrd_path = "/boot/initrd".to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        initrd_path
+    };
+
+    info(&format!("Using kernel: {}", kernel_files));
+    info(&format!("Using initrd: {}", initrd_files));
+
+    // Check if LUKS encryption is being used and adjust boot parameters
+    let is_encrypted = Path::new("/dev/mapper/regicideos").exists();
+    let (root_param, boot_options) = if is_encrypted {
+        info("Detected LUKS encryption - using encrypted boot parameters");
+
+        // Get actual LUKS partition UUID
+        let luks_uuid =
+            match execute("blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'") {
+                Ok(uuid) => uuid.trim().to_string(),
+                Err(_) => "regicideos".to_string(),
+            };
+
+        info(&format!("Using LUKS UUID: {}", luks_uuid));
+
+        (
+            "/dev/mapper/regicideos".to_string(),
+            format!(
+                "cryptdevice=UUID={}:regicideos root=/dev/mapper/regicideos quiet splash rw",
+                luks_uuid
+            ),
+        )
+    } else {
+        info("Using unencrypted boot parameters");
+        ("/dev/sda2".to_string(), "quiet splash rw".to_string())
+    };
+
+    // Generate GRUB configuration with LUKS support
+    let grub_config = if is_encrypted {
+        format!(
+            r#"set default="RegicideOS"
+set timeout=5
+set color_normal=light-gray/black
+set color_highlight=green/black
+
+# LUKS encryption configuration
+insmod luks
+insmod cryptodisk
+insmod gcry_rijndael
+insmod gcry_sha256
+insmod gcry_sha512
+
+menuentry "RegicideOS (Encrypted)" {{
+    linux {}
+    initrd {}
+    options "root={} {}"
+}}
+
+menuentry "RegicideOS (Encrypted Recovery)" {{
+    linux {}
+    initrd {}
+    options "root={} {} single"
+}}
+
+menuentry "RegicideOS (Encrypted Verbose)" {{
+    linux {}
+    initrd {}
+    options "root={} {} verbose"
+}}
+"#,
+            kernel_files,
+            initrd_files,
+            root_param,
+            boot_options,
+            kernel_files,
+            initrd_files,
+            root_param,
+            boot_options,
+            kernel_files,
+            initrd_files,
+            root_param,
+            boot_options
+        )
+    } else {
+        format!(
+            r#"set default="RegicideOS"
+set timeout=5
+set color_normal=light-gray/black
+set color_highlight=green/black
+
+menuentry "RegicideOS" {{
+    linux {}
+    initrd {}
+    options "root={} {}"
+}}
+
+menuentry "RegicideOS (Recovery)" {{
+    linux {}
+    initrd {}
+    options "root={} {} single"
+}}
+
+menuentry "RegicideOS (Verbose)" {{
+    linux {}
+    initrd {}
+    options "root={} {} verbose"
+}}
+"#,
+            kernel_files,
+            initrd_files,
+            root_param,
+            boot_options,
+            kernel_files,
+            initrd_files,
+            root_param,
+            boot_options,
+            kernel_files,
+            initrd_files,
+            root_param,
+            boot_options
+        )
+    };
+
+    safe_write_file(
+        "/mnt/root/boot/efi/grub/grub.cfg",
+        grub_config.as_bytes(),
+        "/mnt/root/boot/efi",
+    )?;
+
+    // Also copy GRUB config to EFI/fedora directory for EFI compatibility
+    chroot("mkdir -p /boot/efi/EFI/fedora")?;
+    safe_write_file(
+        "/mnt/root/boot/efi/EFI/fedora/grub.cfg",
+        grub_config.as_bytes(),
+        "/mnt/root/boot/efi/EFI/fedora",
+    )?;
+
+    info("✓ GRUB configuration created successfully");
+
+    // Debug: Show what was actually written
+    match chroot_with_output("cat /boot/efi/grub/grub.cfg") {
+        Ok(config_content) => {
+            info("GRUB config content:");
+            info(&format!("{}", config_content));
+        }
+        Err(e) => warn(&format!("Failed to read GRUB config: {}", e)),
+    }
+
+    // Verify GRUB config file exists and is readable
+    match chroot_with_output("ls -la /boot/efi/grub/") {
+        Ok(output) => info(&format!("GRUB directory contents:\n{}", output.trim())),
+        Err(e) => warn(&format!("Failed to list GRUB directory: {}", e)),
+    }
+
+    Ok(())
+}
+
 fn post_install(config: &Config) -> Result<()> {
     let layout_name = &config.filesystem;
     info("Mounting overlays & home");
@@ -2588,6 +2846,27 @@ fn post_install(config: &Config) -> Result<()> {
         "mount -t overlay overlay -o lowerdir=/mnt/root/var,upperdir={}/var,workdir={}/varw,rw /mnt/root/var",
         var_path, var_path
     ))?;
+
+    // Now that overlay filesystem is mounted and /etc is writable, create GRUB configuration
+    info("Creating GRUB configuration after overlay filesystem is mounted...");
+
+    // Create /etc/default/grub with cryptodisk support
+    chroot("mkdir -p /etc/default")?;
+    chroot(
+        "cat > /etc/default/grub << 'EOF'
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR=\"RegicideOS\"
+GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash\"
+GRUB_CMDLINE_LINUX=\"\"
+GRUB_ENABLE_CRYPTODISK=y
+GRUB_PRELOAD_MODULES=\"cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm\"
+EOF",
+    )?;
+    info("✓ GRUB default configuration created in writable overlay");
+
+    // Create full GRUB configuration now that overlay filesystem is ready
+    create_grub_configuration()?;
 
     if !config.username.is_empty() {
         info("Creating user");
