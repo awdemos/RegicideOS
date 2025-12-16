@@ -2075,11 +2075,39 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     };
 
     if platform.contains("efi") {
-        // Install GRUB for EFI systems - run INSIDE chroot like Python reference
-        // Use exact same commands as Python reference for compatibility
+        // Configure GRUB for LUKS support BEFORE installation
+        info("Configuring GRUB for LUKS encryption support...");
+
+        // Create /etc/default/grub with cryptodisk support
+        chroot("mkdir -p /etc/default")?;
+        let grub_default_config = r#"GRUB_DEFAULT=0
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="RegicideOS"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+GRUB_CMDLINE_LINUX=""
+GRUB_ENABLE_CRYPTODISK=y
+GRUB_PRELOAD_MODULES="cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm"
+"#;
+        safe_write_file(
+            "/mnt/root/etc/default/grub",
+            grub_default_config.as_bytes(),
+            "/mnt/root/etc/default",
+        )?;
+
+        // Check if LUKS encryption is being used to determine required modules
+        let is_encrypted = Path::new("/dev/mapper/regicideos").exists();
+        let crypto_modules = if is_encrypted {
+            "cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm"
+        } else {
+            "lvm"
+        };
+
+        info(&format!("Installing GRUB with modules: {}", crypto_modules));
+
+        // Install GRUB for EFI systems with crypto modules embedded
         let grub_install_cmd = format!(
-            "{}-install --modules=lvm --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\"",
-            grub, platform
+            "{}-install --modules={} --force --target=\"{}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\" --recheck",
+            grub, crypto_modules, platform
         );
         chroot(&grub_install_cmd)?;
 
@@ -2664,15 +2692,61 @@ EOF"#,
                 luks_uuid
             ))?;
 
-            // Update initramfs to include LUKS support
+            // Update initramfs to include LUKS support with proper encrypt hooks
             if chroot_with_output("which update-initramfs").is_ok() {
+                // For Debian/Ubuntu-based systems
+                // Ensure encrypt hook is included in initramfs
+                chroot("mkdir -p /etc/initramfs-tools/conf.d")?;
+                let initramfs_conf = r#"MODULES=most
+BUSYBOX=auto
+KEYMAP=n
+COMPRESS=gzip
+DEVICE=
+BOOT=
+CRYPTSETUP=y
+"#;
+                safe_write_file(
+                    "/mnt/root/etc/initramfs-tools/conf.d/cryptsetup",
+                    initramfs_conf.as_bytes(),
+                    "/mnt/root/etc/initramfs-tools/conf.d",
+                )?;
+
+                // Update initramfs to include LUKS support
                 chroot("update-initramfs -u -k all")?;
-                info("✓ Updated initramfs with LUKS support");
+                info("✓ Updated initramfs with LUKS encrypt hooks");
+
+                // Verify encrypt modules are included
+                match chroot_with_output(
+                    "lsinitramfs /boot/initrd.img-* | grep -E '(cryptsetup|encrypt)' | head -3",
+                ) {
+                    Ok(output) if !output.trim().is_empty() => {
+                        info(&format!(
+                            "✓ Verified encrypt modules in initramfs: {}",
+                            output.trim()
+                        ));
+                    }
+                    _ => {
+                        warn("Could not verify encrypt modules in initramfs");
+                    }
+                }
             } else if chroot_with_output("which mkinitcpio").is_ok() {
-                // For Arch-based systems
-                chroot("sed -i 's/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/HOOKS=(base udev autodetect modconf block encrypt filesystems keyboard fsck)/' /etc/mkinitcpio.conf")?;
+                // Ensure encrypt hook comes before filesystems
+                chroot("sed -i 's/HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)/HOOKS=(base udev autodetect modconf block encrypt lvm2 filesystems keyboard fsck)/' /etc/mkinitcpio.conf")?;
                 chroot("mkinitcpio -P")?;
-                info("✓ Updated mkinitcpio with LUKS support");
+                info("✓ Updated mkinitcpio with LUKS encrypt hooks");
+
+                // Verify encrypt modules are included
+                match chroot_with_output("lsinitcpio | grep -E '(encrypt|cryptsetup)' | head -3") {
+                    Ok(output) if !output.trim().is_empty() => {
+                        info(&format!(
+                            "✓ Verified encrypt modules in mkinitcpio: {}",
+                            output.trim()
+                        ));
+                    }
+                    _ => {
+                        warn("Could not verify encrypt modules in mkinitcpio");
+                    }
+                }
             } else {
                 warn("Neither update-initramfs nor mkinitcpio found - LUKS initramfs support may be incomplete");
             }
