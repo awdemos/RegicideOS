@@ -987,7 +987,7 @@ fn is_partition_in_use(partition: &str) -> bool {
 
     // Check for LUKS mappings
     if partition.starts_with("/dev/mapper/") {
-        if let Ok(ls_info) = execute(&format!("ls -la /dev/mapper")) {
+        if let Ok(ls_info) = execute("ls -la /dev/mapper") {
             for line in ls_info.lines() {
                 if line.contains(partition) {
                     return true;

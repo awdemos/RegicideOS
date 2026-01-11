@@ -1,9 +1,11 @@
 # Feature Specification: UEFI Installer
 
-**Feature Branch**: `[001-uefi-installer]`  
-**Created**: 2025-09-10  
-**Status**: Draft  
+**Feature Branch**: `[001-uefi-installer]`
+**Created**: 2025-09-10
+**Status**: ✅ **IMPLEMENTED** (Historical - installer is production-ready)
 **Input**: User description: "UEFI-only system installer with TUI interface and btrfs requirement"
+
+> **Note**: This specification was used to guide installer development. The installer is now production-ready at `/installer/`. Review checklist below was auto-generated and never executed; can be ignored.
 
 ## Execution Flow (main)
 ```
