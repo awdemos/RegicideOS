@@ -754,17 +754,19 @@ cat /boot/efi/grub/grub.cfg
 
 #### 9.1.2 LUKS-Specific Issues
 
-**No Password Prompt at Boot:**
+> **Note**: As of v2.0 (January 2026), the installer includes comprehensive LUKS boot improvements including dynamic partition detection and proper UUID handling. The issues below describe legacy problems that should no longer occur.
 
-**Causes:**
-1. GRUB installed before initramfs configured
-2. Hardcoded `/dev/sda3` partition reference
+**No Password Prompt at Boot (Legacy - Should Not Occur in v2.0+):**
+
+**Legacy Causes (Fixed in v2.0):**
+1. ~~GRUB installed before initramfs configured~~ → Now configures initramfs BEFORE GRUB installation
+2. ~~Hardcoded `/dev/sda3` partition reference~~ → Now uses dynamic `find_luks_partition()` detection
 3. Missing crypttab entry
 4. Initramfs lacks encrypt hooks
 
-**Solutions:**
+**Current Troubleshooting (if issues persist):**
 ```bash
-# Check LUKS partition is detected
+# Check LUKS partition is detected (v2.0+ uses dynamic detection)
 sudo blkid -o device -t TYPE=crypto_LUKS
 
 # Verify initramfs has LUKS support
@@ -773,11 +775,27 @@ lsinitramfs /boot/initrd.img-* | grep cryptsetup
 # Check crypttab
 cat /etc/crypttab
 
-# Reinstall GRUB with proper modules
+# Reinstall GRUB with proper modules (v2.0+ does this automatically)
 sudo grub-install --modules="cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm" --target=x86_64-efi --efi-directory=/boot/efi
 
 # Regenerate initramfs
 sudo update-initramfs -u -k all
+```
+
+**LUKS Device Not Found (v2.0+ Enhancement):**
+
+The installer v2.0 now uses `find_luks_partition()` to dynamically detect LUKS partitions across multiple schemes:
+- `/dev/sda3`, `/dev/sdb3` (standard SATA/SCSI)
+- `/dev/nvme0n1p3`, `/dev/nvme1n1p3` (NVMe drives)
+- `/dev/mmcblk0p3` (eMMC storage)
+
+If detection fails:
+```bash
+# Manually verify LUKS partition
+sudo blkid -o device -t TYPE=crypto_LUKS
+
+# Check all block devices
+sudo lsblk -f | grep crypto
 ```
 
 ### 9.2 Boot Issues

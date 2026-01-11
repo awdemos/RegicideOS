@@ -1,9 +1,11 @@
 # Feature Specification: System Deployment
 
-**Feature Branch**: `[003-system-deployment]`  
-**Created**: 2025-09-10  
-**Status**: Draft  
+**Feature Branch**: `[003-system-deployment]`
+**Created**: 2025-09-10
+**Status**: ✅ **IMPLEMENTED** (Historical - system deployment is production-ready)
 **Input**: User description: "Root image download, mounting, bootloader installation, and post-install configuration"
+
+> **Note**: This specification was used to guide installer development. The installer is now production-ready at `/installer/`. Review checklist below was auto-generated and never executed; can be ignored.
 
 ## Execution Flow (main)
 ```
