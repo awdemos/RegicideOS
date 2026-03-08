@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "created": "2026-03-01T19:28:56+00:00",
+  "last_scan": "2026-03-01T19:43:29+00:00",
+  "scan_count": 2,
+  "overall_score": 100.0,
+  "objective_score": 100.0,
+  "strict_score": 100.0,
+  "verified_strict_score": 100.0,
+  "stats": {
+    "total": 0,
+    "open": 0,
+    "fixed": 0,
+    "auto_resolved": 0,
+    "wontfix": 0,
+    "false_positive": 0,
+    "by_tier": {}
+  },
+  "findings": {},
+  "scan_coverage": {
+    "typescript": {
+      "status": "full",
+      "confidence": 1.0,
+      "detectors": {
+        "security": {
+          "detector": "security",
+          "status": "full",
+          "confidence": 1.0,
+          "summary": "Security coverage complete for enabled detectors.",
+          "impact": "",
+          "remediation": "",
+          "tool": "",
+          "reason": ""
+        }
+      },
+      "warnings": [],
+      "updated_at": "2026-03-01T19:43:29+00:00"
+    }
+  },
+  "score_confidence": {},
+  "subjective_integrity": {
+    "status": "pass",
+    "target_score": 95.0,
+    "matched_count": 0,
+    "matched_dimensions": [],
+    "reset_dimensions": []
+  },
+  "subjective_assessments": {},
+  "lang_capabilities": {
+    "typescript": {
+      "fixers": [
+        "dead-useeffect",
+        "debug-logs",
+        "empty-if-chain",
+        "unused-imports",
+        "unused-params",
+        "unused-vars"
+      ],
+      "typecheck_cmd": "npx tsc --noEmit"
+    }
+  },
+  "zone_distribution": {},
+  "scan_history": [
+    {
+      "timestamp": "2026-03-01T19:31:41+00:00",
+      "lang": "typescript",
+      "strict_score": 100.0,
+      "verified_strict_score": 100.0,
+      "objective_score": 100.0,
+      "overall_score": 100.0,
+      "open": 0,
+      "diff_new": 0,
+      "diff_resolved": 0,
+      "ignored": 0,
+      "raw_findings": 0,
+      "suppressed_pct": 0.0,
+      "ignore_patterns": 0,
+      "subjective_integrity": {
+        "status": "pass",
+        "matched_count": 0,
+        "reset_count": 0,
+        "target_score": 95.0
+      },
+      "score_confidence": null,
+      "dimension_scores": null
+    },
+    {
+      "timestamp": "2026-03-01T19:43:29+00:00",
+      "lang": "typescript",
+      "strict_score": 100.0,
+      "verified_strict_score": 100.0,
+      "objective_score": 100.0,
+      "overall_score": 100.0,
+      "open": 0,
+      "diff_new": 0,
+      "diff_resolved": 0,
+      "ignored": 0,
+      "raw_findings": 0,
+      "suppressed_pct": 0.0,
+      "ignore_patterns": 0,
+      "subjective_integrity": {
+        "status": "pass",
+        "matched_count": 0,
+        "reset_count": 0,
+        "target_score": 95.0
+      },
+      "score_confidence": null,
+      "dimension_scores": null
+    }
+  ],
+  "tool_hash": "e073c6da67fa",
+  "scan_path": ".",
+  "scan_completeness": {
+    "typescript": "fast"
+  },
+  "potentials": {
+    "typescript": {
+      "logs": 0,
+      "unused": 0,
+      "exports": 0,
+      "deprecated": 0,
+      "structural": 0,
+      "flat_dirs": 0,
+      "props": 0,
+      "single_use": 0,
+      "coupling": 0,
+      "cycles": 0,
+      "orphaned": 0,
+      "patterns": 0,
+      "naming": 0,
+      "facade": 0,
+      "test_coverage": 0,
+      "smells": 0,
+      "react": 0,
+      "security": 0,
+      "stale_wontfix": 0
+    }
+  },
+  "codebase_metrics": {
+    "typescript": {
+      "total_files": 0,
+      "total_loc": 0,
+      "total_directories": 0
+    }
+  },
+  "dimension_scores": {},
+  "reminder_history": {
+    "report_scores": 2,
+    "review_not_run": 2,
+    "badge_recommendation": 1,
+    "feedback_nudge": 1
+  }
+}

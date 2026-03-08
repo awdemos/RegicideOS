@@ -1,0 +1,9 @@
+[package]
+name = "installer"
+version = "0.1.0"
+edition = "2021"
+
+[package]
+name = "btrmind"
+version = "0.1.0"
+edition = "2021"

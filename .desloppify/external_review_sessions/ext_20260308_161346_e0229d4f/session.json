@@ -1,0 +1,20 @@
+{
+  "session_id": "ext_20260308_161346_e0229d4f",
+  "status": "submitted",
+  "runner": "claude",
+  "created_at": "2026-03-08T16:13:46+00:00",
+  "expires_at": "2026-03-08T17:13:46+00:00",
+  "ttl_hours": 1,
+  "token": "88014457314cf0be65eca47a09a74db1",
+  "attest": "I validated this review was completed without awareness of overall score and is unbiased.",
+  "packet_path": "/Users/a/code/RegicideOS/.desloppify/review_packets/holistic_packet_20260308_161346.json",
+  "blind_packet_path": "/Users/a/code/RegicideOS/.desloppify/review_packet_blind.json",
+  "packet_sha256": "c185ebba825aa7751c4732a4351f457057ce7869cf530ff38a618cc084b1da12",
+  "template_path": "/Users/a/code/RegicideOS/.desloppify/external_review_sessions/ext_20260308_161346_e0229d4f/review_result.template.json",
+  "launch_prompt_path": "/Users/a/code/RegicideOS/.desloppify/external_review_sessions/ext_20260308_161346_e0229d4f/claude_launch_prompt.md",
+  "instructions_path": "/Users/a/code/RegicideOS/.desloppify/external_review_sessions/ext_20260308_161346_e0229d4f/reviewer_instructions.md",
+  "expected_output_path": "/Users/a/code/RegicideOS/.desloppify/external_review_sessions/ext_20260308_161346_e0229d4f/review_result.json",
+  "submitted_at": "2026-03-08T16:20:30+00:00",
+  "submitted_input_file": ".desloppify/external_review_sessions/ext_20260308_161346_e0229d4f/review_result.json",
+  "submitted_canonical_file": "/Users/a/code/RegicideOS/.desloppify/external_review_sessions/ext_20260308_161346_e0229d4f/canonical_import_20260308_162030.json"
+}

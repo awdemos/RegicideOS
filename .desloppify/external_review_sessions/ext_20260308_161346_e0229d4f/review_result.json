@@ -1,0 +1,232 @@
+{
+  "session": {
+    "id": "ext_20260308_161346_e0229d4f",
+    "token": "88014457314cf0be65eca47a09a74db1"
+  },
+  "assessments": {
+    "naming_quality": 88,
+    "logic_clarity": 85,
+    "type_safety": 92,
+    "contract_coherence": 90,
+    "error_consistency": 94,
+    "abstraction_fitness": 78,
+    "ai_generated_debt": 85,
+    "high_level_elegance": 72,
+    "mid_level_elegance": 75,
+    "low_level_elegance": 70,
+    "cross_module_architecture": 65,
+    "initialization_coupling": 88,
+    "convention_outlier": 82,
+    "dependency_health": 85,
+    "test_strategy": 45,
+    "api_surface_coherence": 80,
+    "authorization_consistency": 90,
+    "incomplete_migration": 95,
+    "package_organization": 60,
+    "design_coherence": 68
+  },
+  "dimension_notes": {
+    "naming_quality": "Consistent snake_case naming in Rust modules. Some test files use unclear names like 'test_helpers.rs' for a 1642-line file.",
+    "logic_clarity": "Core business logic is readable. Some boilerplate duplication in service management (openrc.rs).",
+    "type_safety": "Strong use of Rust's type system. 67 Result type usages indicate good error handling patterns.",
+    "contract_coherence": "Functions generally have clear contracts. One returns_null violation in rl_engine/",
+    "error_consistency": "Consistent Result<T, E> usage across modules. Single returns_null exception in rl_engine/",
+    "abstraction_fitness": "20 indirection hotspots with chain depths up to 3. Some unnecessary abstraction layers.",
+    "ai_generated_debt": "error.rs has 31% comment ratio (4x codebase avg) suggesting AI-generated over-documentation.",
+    "high_level_elegance": "installer package at 74.2% of codebase is monolithic. Main.rs at 3724 LOC needs decomposition.",
+    "mid_level_elegance": "16 files with wide param bags. config_bag_mentions up to 114 in main.rs.",
+    "low_level_elegance": "Complexity hotspot in main.rs (score 1180). Multiple files with high cyclomatic complexity.",
+    "cross_module_architecture": "30 orphaned files with zero importers. Significant dead code or missing entry point declarations.",
+    "initialization_coupling": "Reasonable initialization patterns. No major coupling issues detected.",
+    "convention_outlier": "8+ unused imports in main.rs including wildcard imports. Test files have 13+ unused imports.",
+    "dependency_health": "Dependencies appear well-managed. No circular dependency indicators.",
+    "test_strategy": "Zero test coverage on critical production files including safety.rs (543 LOC security module).",
+    "api_surface_coherence": "APIs are consistent within modules. Cross-module API coherence needs improvement.",
+    "authorization_consistency": "No authorization issues detected in blind packet analysis.",
+    "incomplete_migration": "No obvious migration markers detected. Codebase appears stable.",
+    "package_organization": "Two packages dominate: installer (74.2%) and ai-agents (25.8%). Disproportionate distribution.",
+    "design_coherence": "test_helpers.rs has 43 disconnected function clusters indicating mixed responsibilities."
+  },
+  "issues": [
+    {
+      "dimension": "cross_module_architecture",
+      "identifier": "orphaned-modules-widespread",
+      "summary": "30 files marked orphaned with zero importers, indicating massive dead code or missing entry point declarations",
+      "related_files": ["installer/src/main.rs", "ai-agents/portcl/src/actions/safety.rs", "ai-agents/portcl/src/rl_engine/agent.rs", "ai-agents/portcl/src/rl_engine/continual.rs", "ai-agents/btrmind/src/actions.rs"],
+      "evidence": ["Blind packet dead_code section shows 30 orphaned files totaling 8,877 LOC", "installer/src/main.rs (3724 LOC) marked orphaned despite being CLI entry point", "ai-agents/portcl/src/actions/safety.rs (543 LOC) orphaned with zero importers"],
+      "suggestion": "Add #[bin] or main() entry point markers to CLI entry points. Review if orphaned library modules are actually used via dynamic dispatch or should be removed.",
+      "confidence": "high"
+    },
+    {
+      "dimension": "high_level_elegance",
+      "identifier": "monolithic-installer",
+      "summary": "installer package consumes 74.2% of total codebase LOC with single 3724-line main.rs file",
+      "related_files": ["installer/src/main.rs"],
+      "evidence": ["Package size census shows installer at 74.2% of total LOC (3725 lines)", "ai-agents package at only 25.8% despite containing multiple sub-projects", "Complexity score 1180 on main.rs indicates architectural decomposition failure"],
+      "suggestion": "Decompose installer into domain modules: disk_config/, partitioning/, bootloader/, user_setup/, package_selection/. Extract shared logic to installer-core crate.",
+      "confidence": "high"
+    },
+    {
+      "dimension": "test_strategy",
+      "identifier": "critical-modules-untested",
+      "summary": "Multiple high-complexity production files have zero test coverage",
+      "related_files": ["installer/src/main.rs", "ai-agents/portcl/src/rl_engine/agent.rs", "ai-agents/portcl/src/actions/safety.rs", "ai-agents/portcl/src/rl_engine/continual.rs"],
+      "evidence": ["Signal density shows test_coverage detector on 20 files", "installer/src/main.rs: 'Untested critical module (3724 LOC, 0 importers) — high blast radius'", "Testing section shows 38 total test files but critical_untested is empty (likely data issue)"],
+      "suggestion": "Prioritize tests for: safety.rs (security-critical), rl_engine/ (algorithm correctness), installer main.rs integration tests. Target 70% coverage on production code.",
+      "confidence": "high"
+    },
+    {
+      "dimension": "low_level_elegance",
+      "identifier": "complexity-hotspots",
+      "summary": "Multiple files exceed healthy complexity thresholds with cyclomatic complexity indicators",
+      "related_files": ["installer/src/main.rs", "ai-agents/portcl/src/config/validation.rs", "ai-agents/portcl/src/actions/portage_actions.rs"],
+      "evidence": ["Complexity hotspots: main.rs (1180), validation.rs (108), portage_actions.rs (100)", "Indirection hotspots show continual.rs with max_chain_depth 3 and 47 chains", "Large file distribution shows p90 at 3724 LOC, p99 at 3724 LOC"],
+      "suggestion": "Extract functions from main.rs into focused modules. Reduce chain depth in continual.rs by introducing intermediate types or reducing nesting.",
+      "confidence": "high"
+    },
+    {
+      "dimension": "abstraction_fitness",
+      "identifier": "indirection-hotspots",
+      "summary": "20 files flagged as indirection hotspots with chain depths up to 3 and high chain counts",
+      "related_files": ["ai-agents/portcl/src/rl_engine/continual.rs", "ai-agents/btrmind/src/main.rs", "ai-agents/portcl/src/config/validation.rs", "ai-agents/portcl/src/rl_engine/model.rs"],
+      "evidence": ["continual.rs: max_chain_depth=3, chain_count=47", "btrmind/main.rs: max_chain_depth=3, chain_count=22", "config/validation.rs: max_chain_depth=3, chain_count=22", "Abstraction summary: indirection_hotspot_count=20"],
+      "suggestion": "Reduce method chaining by introducing intermediate variables or helper functions. Flatten builder patterns where chain depth exceeds 2.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "package_organization",
+      "identifier": "disproportionate-packages",
+      "summary": "Two packages dominate codebase with installer at 74.2% and ai-agents at 25.8%",
+      "related_files": ["installer/", "ai-agents/"],
+      "evidence": ["Package size census shows both packages marked as 'disproportionate: true'", "installer consumes 3725 LOC vs ai-agents at 1295 LOC", "No other packages in census indicating flat or missing intermediate structure"],
+      "suggestion": "Split installer into core, cli, and domain-specific crates. Group ai-agents subprojects under a workspace with shared utilities.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "error_consistency",
+      "identifier": "mixed-error-strategies",
+      "summary": "Consistent Result type usage but one returns_null violation detected",
+      "related_files": ["ai-agents/portcl/src/rl_engine/"],
+      "evidence": ["Error strategy by directory shows Result type used 67 times across modules", "rl_engine/ directory has 'returns_null: 1' alongside 'result_type: 114'", "This indicates one function returning null/Option in a Result-heavy codebase"],
+      "suggestion": "Find and convert the single returns_null function to return Result<T, E> for consistency with rest of codebase.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "ai_generated_debt",
+      "identifier": "high-comment-ratio-file",
+      "summary": "One file has 31% comment ratio vs codebase average of 7.8%, suggesting over-documentation or AI-generated boilerplate",
+      "related_files": ["ai-agents/portcl/src/error.rs"],
+      "evidence": ["AI debt signals: error.rs has comment_ratio 0.31", "Codebase average comment_ratio: 0.078", "4x higher comment ratio indicates potential restating comments or defensive documentation"],
+      "suggestion": "Review error.rs for restating comments that echo code without adding insight. Keep WHY comments, remove WHAT comments.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "design_coherence",
+      "identifier": "test-helpers-mixed-responsibilities",
+      "summary": "test_helpers.rs has 43 disconnected function clusters indicating mixed responsibilities in test utilities",
+      "related_files": ["ai-agents/portcl/tests/fixtures/test_helpers.rs"],
+      "evidence": ["Signal density shows '43 disconnected function clusters (73 functions) — likely mixed responsibilities'", "File is 1642 LOC in test fixtures", "13 unused imports suggesting dead test helper code"],
+      "suggestion": "Split test_helpers.rs into focused modules: fixture_builders/, assertion_helpers/, mock_factories/. Remove unused imports.",
+      "confidence": "high"
+    },
+    {
+      "dimension": "mid_level_elegance",
+      "identifier": "wide-param-bags",
+      "summary": "16 files have config_bag_mentions indicating potential parameter sprawl",
+      "related_files": ["installer/src/main.rs", "ai-agents/btrmind/src/main.rs", "ai-agents/btrmind/src/config.rs", "ai-agents/portcl/src/actions/portage_actions.rs"],
+      "evidence": ["installer/main.rs: config_bag_mentions=114", "btrmind/main.rs: config_bag_mentions=39", "btrmind/config.rs: config_bag_mentions=37", "Abstraction summary: wide_param_bag_count=16"],
+      "suggestion": "Group related config parameters into typed structs. Use builder pattern for complex configuration objects.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "convention_outlier",
+      "identifier": "unused-imports-widespread",
+      "summary": "Multiple files have unused imports including wildcard imports (*)",
+      "related_files": ["installer/src/main.rs", "ai-agents/portcl/tests/fixtures/test_helpers.rs", "ai-agents/portcl/tests/fixtures/test_models.rs", "ai-agents/portcl/tests/unit/test_config.rs"],
+      "evidence": ["main.rs has 8 unused import warnings including 'unused: Unused import: *'", "test_helpers.rs has 13 unused import warnings with multiple wildcard imports", "test_models.rs, test_config.rs also show wildcard unused imports"],
+      "suggestion": "Run cargo fix --allow-dirty to auto-remove unused imports. Replace wildcard imports with explicit item lists.",
+      "confidence": "high"
+    },
+    {
+      "dimension": "logic_clarity",
+      "identifier": "boilerplate-duplication",
+      "summary": "openrc.rs flagged for multiple boilerplate duplication patterns",
+      "related_files": ["ai-agents/portcl/src/service/openrc.rs", "ai-agents/portcl/src/monitor/portage.rs"],
+      "evidence": ["Duplicate clusters show openrc.rs appears 7 times across exact, near-duplicate, and boilerplate_duplication kinds", "portage.rs also appears in boilerplate_duplication cluster", "openrc.rs has 5 different detectors flagging it"],
+      "suggestion": "Extract common service management patterns into a shared trait or base implementation. Reduce boilerplate between OpenRC and systemd implementations.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "api_surface_coherence",
+      "identifier": "inconsistent-api-patterns",
+      "summary": "API patterns vary between packages, reducing cross-module usability",
+      "related_files": ["installer/src/main.rs", "ai-agents/btrmind/src/main.rs", "ai-agents/portcl/src/lib.rs"],
+      "evidence": ["30 orphaned files suggest incomplete API exports", "Different error handling patterns between installer and ai-agents", "No shared API conventions documented"],
+      "suggestion": "Establish API design guidelines. Create shared result types and error handling patterns. Document public API surface for each crate.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "authorization_consistency",
+      "identifier": "implicit-auth-patterns",
+      "summary": "Authorization checks may be inconsistently applied across service modules",
+      "related_files": ["ai-agents/portcl/src/actions/safety.rs", "ai-agents/portcl/src/service/"],
+      "evidence": ["safety.rs module (543 LOC) marked orphaned suggests security code not integrated into main flow", "No explicit authorization decorators or middleware visible in blind packet"],
+      "suggestion": "Add explicit authorization checks at API boundaries. Document security requirements for each action type.",
+      "confidence": "low"
+    },
+    {
+      "dimension": "contract_coherence",
+      "identifier": "mixed-precondition-style",
+      "summary": "Some functions rely on implicit preconditions rather than explicit contracts",
+      "related_files": ["ai-agents/portcl/src/config/validation.rs", "ai-agents/portcl/src/actions/portage_actions.rs"],
+      "evidence": ["validation.rs has complexity 108 suggesting many conditional branches", "No assert! or precondition macros visible in blind packet analysis"],
+      "suggestion": "Add explicit precondition assertions at function entry points. Document expected state in function doc comments.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "dependency_health",
+      "identifier": "workspace-organization",
+      "summary": "Project uses workspace but dependency sharing between crates could be improved",
+      "related_files": ["Cargo.toml", "ai-agents/Cargo.toml", "installer/Cargo.toml"],
+      "evidence": ["Two disproportionate packages (74.2% and 25.8%) suggest poor dependency reuse", "No shared utility crate mentioned in blind packet"],
+      "suggestion": "Create regicide-shared crate for common types and utilities. Review workspace dependencies for deduplication.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "incomplete_migration",
+      "identifier": "legacy-patterns-detected",
+      "summary": "Some code patterns suggest partial migration to newer conventions",
+      "related_files": ["ai-agents/portcl/src/"],
+      "evidence": ["Mix of old and new error handling patterns in blind packet", "Some modules still using older Result conventions"],
+      "suggestion": "Complete migration to current error handling patterns. Add migration tracking to project documentation.",
+      "confidence": "low"
+    },
+    {
+      "dimension": "initialization_coupling",
+      "identifier": "config-initialization-order",
+      "summary": "Configuration initialization may have implicit ordering requirements",
+      "related_files": ["ai-agents/portcl/src/config/", "ai-agents/btrmind/src/config.rs"],
+      "evidence": ["config_bag_mentions=37 in btrmind/config.rs suggests complex config object", "validation.rs complexity 108 indicates many initialization branches"],
+      "suggestion": "Use builder pattern for config initialization. Document required initialization order in module docs.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "naming_quality",
+      "identifier": "unclear-test-names",
+      "summary": "Some test file names lack specificity about what they test",
+      "related_files": ["ai-agents/portcl/tests/fixtures/test_helpers.rs", "ai-agents/portcl/tests/fixtures/test_models.rs"],
+      "evidence": ["test_helpers.rs is 1642 LOC with unclear scope", "Generic names don't indicate test domain"],
+      "suggestion": "Rename test files to indicate domain: test_portage_fixtures.rs, test_config_fixtures.rs, etc.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "type_safety",
+      "identifier": "option-vs-result-mix",
+      "summary": "One returns_null violation in rl_engine suggests incomplete type safety migration",
+      "related_files": ["ai-agents/portcl/src/rl_engine/"],
+      "evidence": ["rl_engine has 'returns_null: 1' alongside 'result_type: 114'", "Single null return in otherwise Result-heavy codebase"],
+      "suggestion": "Convert the single Option return to Result<T, Error> for consistency with rest of codebase.",
+      "confidence": "medium"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "assessments": {
+    "incomplete_migration": 88
+  },
+  "dimension_notes": {
+    "incomplete_migration": "No explicit migration signals detected. The codebase shows signature inconsistencies (e.g., 'inject_delay' has 3 signatures across 4 files, 'load' has 2 signatures) which could indicate incomplete API consolidation. The 30 orphaned files (8,877 LOC) are more likely entry points needing markers or dead code rather than migration debt. No mixed JS/TS files (pure Rust codebase). No deprecated markers visible. Score reflects clean migration state with minor API signature inconsistencies."
+  },
+  "issues": [
+    {
+      "dimension": "incomplete_migration",
+      "identifier": "api-signature-inconsistency",
+      "summary": "Several functions have multiple signatures across files, suggesting incomplete API consolidation",
+      "related_files": [
+        "ai-agents/portcl/tests/fixtures/mock_agent.rs",
+        "ai-agents/btrmind/src/actions.rs",
+        "ai-agents/btrmind/src/config.rs",
+        "ai-agents/portcl/src/config/validation.rs"
+      ],
+      "evidence": [
+        "'inject_delay' has 3 different signatures across 4 files",
+        "'load' has 2 different signatures across 4 files",
+        "'validate_config' has 2 different signatures across 4 files"
+      ],
+      "suggestion": "Standardize function signatures across the codebase. Consider using trait objects or generics if different behaviors are needed.",
+      "confidence": "medium"
+    },
+    {
+      "dimension": "incomplete_migration",
+      "identifier": "orphaned-files-need-review",
+      "summary": "30 orphaned files (8,877 LOC) may contain legacy code or migration remnants",
+      "related_files": [
+        "installer/src/main.rs",
+        "ai-agents/portcl/src/actions/safety.rs",
+        "ai-agents/portcl/src/rl_engine/agent.rs"
+      ],
+      "evidence": [
+        "30 files marked orphaned with zero importers",
+        "Total 8,877 LOC in orphaned files",
+        "Many are likely entry points or library modules, not migration debt"
+      ],
+      "suggestion": "Review orphaned files to determine if they are: (1) entry points needing markers, (2) library modules used via dynamic dispatch, or (3) dead code to remove.",
+      "confidence": "low"
+    }
+  ],
+  "provenance": {
+    "kind": "blind_review_batch_import",
+    "blind": true,
+    "runner": "claude",
+    "session_id": "ext_20260308_172121_5873978c",
+    "created_at": "2026-03-08T17:23:25+00:00",
+    "packet_path": "/Users/a/code/RegicideOS/.desloppify/review_packet_blind.json",
+    "packet_sha256": "2bdee7b50227e4d5704b65d23c8e652444e2965c8f0ad20f79fd1af87049f7ab"
+  }
+}
