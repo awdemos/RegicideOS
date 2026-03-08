@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regicide-image-builder"
+version = "0.1.0"
+description = "RegicideOS system image builder"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+regicide-builder = "regicide_image_builder:app"
+
+[tool.setuptools]
+py-modules = ["regicide_image_builder", "dagger"]

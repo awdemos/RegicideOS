@@ -240,7 +240,7 @@ poll_interval = 0.001  # Very aggressive
             # Test with read-only directory
             readonly_dir = os.path.join(self.test_dir, 'readonly')
             os.makedirs(readonly_dir)
-            os.chmod(readonly_dir, 0o555)  # Read-only
+            os.chmod(readonly_dir, 0o555)  # Read-only  # nosec B103
             
             readonly_config = os.path.join(self.test_dir, 'readonly.toml')
             with open(readonly_config, 'w') as f:

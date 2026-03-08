@@ -22,6 +22,10 @@ from rich.table import Table
 from rich.panel import Panel
 
 console = Console()
+# Size constants
+MB = 1024 * 1024
+GB = 1024 * 1024 * 1024
+
 
 class BuildVariant(Enum):
     MINIMAL = "minimal"
@@ -63,7 +67,6 @@ class RegicideImageBuilder:
             "total_builds": 0,
             "successful_builds": 0,
             "failed_builds": 0,
-            "average_build_time": 0
         }
 
     async def build_image(self, config: BuildConfig) -> BuildResult:
@@ -94,7 +97,7 @@ class RegicideImageBuilder:
 
             # Calculate build time
             build_time = int(asyncio.get_event_loop().time() - build_start_time)
-            image_size = os.path.getsize(final_image_path) // (1024 * 1024)
+            image_size = os.path.getsize(final_image_path) // MB
 
             # Update build stats
             self.build_stats["total_builds"] += 1
@@ -366,19 +369,19 @@ class RegicideImageBuilder:
             with open("/proc/meminfo", "r") as f:
                 for line in f:
                     if line.startswith("MemTotal:"):
-                        return int(line.split()[1]) // (1024 * 1024)
+                        return int(line.split()[1]) // MB
         except:
             return 8  # Default assumption
 
     def _get_available_disk_gb(self) -> int:
         """Get available disk space in GB"""
         try:
-            stat = shutil.disk_usage(self.temp_dir or "/tmp")
-            return stat.free // (1024 * 1024 * 1024)
+            stat = shutil.disk_usage(self.temp_dir or "/tmp")  # nosec B108
+            return stat.free // GB
         except:
             return 50  # Default assumption
 
-    def show_build_stats(self):
+    def show_build_stats(self) -> None:
         """Display build statistics"""
         table = Table(title="RegicideOS Build Statistics")
         table.add_column("Metric", style="cyan")
@@ -407,7 +410,7 @@ def build(
     compress: bool = typer.Option(True, help="Compress output image")
 ):
     """Build a RegicideOS system image"""
-    async def build_async():
+    async def build_async() -> None:
         builder = RegicideImageBuilder()
 
         config = BuildConfig(
@@ -447,7 +450,7 @@ def build(
     asyncio.run(build_async())
 
 @app.command()
-def list_targets():
+def list_targets() -> None:
     """List available target architectures"""
     table = Table(title="Available Targets")
     table.add_column("Architecture", style="cyan")
@@ -459,7 +462,7 @@ def list_targets():
     console.print(table)
 
 @app.command()
-def list_variants():
+def list_variants() -> None:
     """List available build variants"""
     table = Table(title="Available Variants")
     table.add_column("Variant", style="cyan")
