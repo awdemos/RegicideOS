@@ -1,10 +1,10 @@
 use super::{ServiceManager, ServiceStatus};
 use crate::config::PortageConfig;
 use crate::error::{PortCLError, Result};
-use std::path::Path;
-use std::process::Command;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::process::Command;
 
 pub struct OpenRCServiceManager {
     service_files: Vec<&'static str>,
@@ -13,10 +13,7 @@ pub struct OpenRCServiceManager {
 impl OpenRCServiceManager {
     pub fn new() -> Self {
         Self {
-            service_files: vec![
-                "portcl-agent",
-                "portcl-monitor",
-            ],
+            service_files: vec!["portcl-agent", "portcl-monitor"],
         }
     }
 
@@ -36,7 +33,10 @@ impl OpenRCServiceManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PortCLError::Service(format!("rc-service failed: {}", stderr)));
+            return Err(PortCLError::Service(format!(
+                "rc-service failed: {}",
+                stderr
+            )));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -67,23 +67,20 @@ impl OpenRCServiceManager {
         let target_path = format!("/etc/init.d/{}", service_name);
 
         // Read service file template
-        let service_content = fs::read_to_string(&source_path)
-            .map_err(|e| PortCLError::Io(e))?;
+        let service_content = fs::read_to_string(&source_path).map_err(|e| PortCLError::Io(e))?;
 
         // Replace placeholders if needed
         let final_content = service_content;
 
         // Write to init.d directory
-        fs::write(&target_path, final_content)
-            .map_err(|e| PortCLError::Io(e))?;
+        fs::write(&target_path, final_content).map_err(|e| PortCLError::Io(e))?;
 
         // Make executable
         let mut perms = fs::metadata(&target_path)
             .map_err(|e| PortCLError::Io(e))?
             .permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&target_path, perms)
-            .map_err(|e| PortCLError::Io(e))?;
+        fs::set_permissions(&target_path, perms).map_err(|e| PortCLError::Io(e))?;
 
         println!("Installed service file: {}", target_path);
         Ok(())
@@ -91,16 +88,13 @@ impl OpenRCServiceManager {
 
     fn create_config_directory(&self, config: &PortageConfig) -> Result<()> {
         let config_dir = Path::new("/etc/portcl");
-        fs::create_dir_all(config_dir)
-            .map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(config_dir).map_err(|e| PortCLError::Io(e))?;
 
         let log_dir = "/var/log/portcl";
-        fs::create_dir_all(log_dir)
-            .map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(log_dir).map_err(|e| PortCLError::Io(e))?;
 
         let lib_dir = "/var/lib/portcl";
-        fs::create_dir_all(lib_dir)
-            .map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(lib_dir).map_err(|e| PortCLError::Io(e))?;
 
         Ok(())
     }
@@ -123,11 +117,16 @@ impl ServiceManager for OpenRCServiceManager {
             let output = Command::new("rc-update")
                 .args(&["add", service_name, "default"])
                 .output()
-                .map_err(|e| PortCLError::Service(format!("Failed to add service to runlevel: {}", e)))?;
+                .map_err(|e| {
+                    PortCLError::Service(format!("Failed to add service to runlevel: {}", e))
+                })?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(PortCLError::Service(format!("rc-update failed: {}", stderr)));
+                return Err(PortCLError::Service(format!(
+                    "rc-update failed: {}",
+                    stderr
+                )));
             }
             println!("Added service to default runlevel: {}", service_name);
         }
@@ -152,8 +151,7 @@ impl ServiceManager for OpenRCServiceManager {
             // Remove service file
             let service_path = format!("/etc/init.d/{}", service_name);
             if Path::new(&service_path).exists() {
-                fs::remove_file(&service_path)
-                    .map_err(|e| PortCLError::Io(e))?;
+                fs::remove_file(&service_path).map_err(|e| PortCLError::Io(e))?;
                 println!("Removed service file: {}", service_path);
             }
         }
