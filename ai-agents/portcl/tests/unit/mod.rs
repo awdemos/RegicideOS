@@ -8,6 +8,7 @@ pub mod test_actions;
 pub mod test_rl_engine;
 pub mod test_config;
 pub mod test_error;
+pub mod test_safety;
 
 #[cfg(test)]
 mod tests {
