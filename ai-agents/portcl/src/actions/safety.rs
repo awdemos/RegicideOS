@@ -93,7 +93,7 @@ pub struct PackageState {
 /// Rollback manager for handling system state restoration
 #[derive(Debug, Clone)]
 pub struct RollbackManager {
-    config: SafetyConfig,
+    _config: SafetyConfig,
     snapshots: HashMap<String, SystemSnapshot>,
     current_snapshot: Option<String>,
 }
@@ -107,7 +107,7 @@ impl RollbackManager {
     /// Create a new rollback manager with custom configuration
     pub fn with_config(config: SafetyConfig) -> Self {
         Self {
-            config,
+            _config: config,
             snapshots: HashMap::new(),
             current_snapshot: None,
         }
@@ -262,9 +262,9 @@ impl RollbackManager {
     async fn restore_config_files(&self, config_files: &HashMap<PathBuf, String>) -> Result<()> {
         println!("Restoring {} configuration files", config_files.len());
 
-        for (path, content) in config_files {
+        for (_path, _content) in config_files {
             // In a real implementation, this would write to the filesystem
-            println!("Restoring: {}", path.display());
+            println!("Restoring: {}", _path.display());
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -339,7 +339,7 @@ impl SafetyChecker {
 
     /// Prepare for action execution (create snapshot if needed)
     pub async fn prepare_action(&mut self, action: &Action) -> Result<Option<String>> {
-        let checks = self.validate_action(action).await?;
+        let _checks = self.validate_action(action).await?;
 
         // Check if this is a critical action that requires a backup
         let is_critical = self.is_critical_action(action) && self.config.backup_before_critical;
@@ -364,7 +364,7 @@ impl SafetyChecker {
     }
 
     /// Check system integrity
-    async fn check_system_integrity(&self, action: &Action) -> SafetyCheck {
+    async fn check_system_integrity(&self, _action: &Action) -> SafetyCheck {
         // Simulate system integrity check
         let passed = rand::random::<f64>() > 0.1; // 90% pass rate
 
@@ -388,7 +388,7 @@ impl SafetyChecker {
     }
 
     /// Check package consistency
-    async fn check_package_consistency(&self, action: &Action) -> SafetyCheck {
+    async fn check_package_consistency(&self, _action: &Action) -> SafetyCheck {
         // Simulate package consistency check
         let passed = rand::random::<f64>() > 0.05; // 95% pass rate
 
@@ -412,7 +412,7 @@ impl SafetyChecker {
     }
 
     /// Check filesystem safety
-    async fn check_filesystem_safety(&self, action: &Action) -> SafetyCheck {
+    async fn check_filesystem_safety(&self, _action: &Action) -> SafetyCheck {
         // Simulate filesystem safety check
         let passed = rand::random::<f64>() > 0.02; // 98% pass rate
 
@@ -436,7 +436,7 @@ impl SafetyChecker {
     }
 
     /// Check resource availability
-    async fn check_resource_availability(&self, action: &Action) -> SafetyCheck {
+    async fn check_resource_availability(&self, _action: &Action) -> SafetyCheck {
         // Simulate resource availability check
         let passed = rand::random::<f64>() > 0.1; // 90% pass rate
 
