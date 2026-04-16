@@ -65,14 +65,14 @@ pub struct DiskMetrics {
 }
 
 pub struct MetricsCollector {
-    config: MonitoringConfig,
+    _config: MonitoringConfig,
     system: System,
 }
 
 impl MetricsCollector {
     pub fn new(config: MonitoringConfig) -> Result<Self> {
         Ok(Self {
-            config,
+            _config: config,
             system: System::new_all(),
         })
     }

@@ -3,7 +3,7 @@ use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
