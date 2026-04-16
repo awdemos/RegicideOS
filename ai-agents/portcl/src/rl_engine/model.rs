@@ -1,10 +1,10 @@
+use crate::actions::Action;
 use crate::error::{PortCLError, Result};
 use crate::monitor::PortageMetrics;
-use crate::actions::Action;
-use serde::{Deserialize, Serialize};
-use std::path::Path;
 use ndarray::Array1;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tracing::{debug, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,9 +20,9 @@ pub struct ModelConfig {
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
-            input_size: 50,  // State vector size
-            hidden_sizes: vec![128, 128, 64],  // 3 hidden layers
-            output_size: 6,  // Number of possible actions
+            input_size: 50,                   // State vector size
+            hidden_sizes: vec![128, 128, 64], // 3 hidden layers
+            output_size: 6,                   // Number of possible actions
             learning_rate: 0.001,
             dropout_rate: 0.1,
             batch_norm: true,
@@ -77,25 +77,25 @@ impl DQNModel {
         let mut idx = 0;
 
         // Portage information
-        state[idx] = metrics.portage_info.installed_packages as f64 / 1000.0;  // Normalize
+        state[idx] = metrics.portage_info.installed_packages as f64 / 1000.0; // Normalize
         idx += 1;
-        state[idx] = metrics.portage_info.available_updates as f64 / 100.0;  // Normalize
+        state[idx] = metrics.portage_info.available_updates as f64 / 100.0; // Normalize
         idx += 1;
-        state[idx] = metrics.portage_info.world_packages as f64 / 100.0;  // Normalize
+        state[idx] = metrics.portage_info.world_packages as f64 / 100.0; // Normalize
         idx += 1;
 
         // System metrics
-        state[idx] = metrics.system_metrics.cpu_usage_percent / 100.0;  // Normalize to 0-1
+        state[idx] = metrics.system_metrics.cpu_usage_percent / 100.0; // Normalize to 0-1
         idx += 1;
-        state[idx] = metrics.system_metrics.memory_usage_percent / 100.0;  // Normalize
+        state[idx] = metrics.system_metrics.memory_usage_percent / 100.0; // Normalize
         idx += 1;
-        state[idx] = metrics.system_metrics.disk_usage_percent / 100.0;  // Normalize
+        state[idx] = metrics.system_metrics.disk_usage_percent / 100.0; // Normalize
         idx += 1;
-        state[idx] = metrics.system_metrics.load_average_1min / 10.0;  // Normalize
+        state[idx] = metrics.system_metrics.load_average_1min / 10.0; // Normalize
         idx += 1;
-        state[idx] = metrics.system_metrics.load_average_5min / 10.0;  // Normalize
+        state[idx] = metrics.system_metrics.load_average_5min / 10.0; // Normalize
         idx += 1;
-        state[idx] = metrics.system_metrics.load_average_15min / 10.0;  // Normalize
+        state[idx] = metrics.system_metrics.load_average_15min / 10.0; // Normalize
         idx += 1;
 
         // Process count (normalized)
@@ -108,14 +108,18 @@ impl DQNModel {
 
         // Temperature (if available, normalized)
         if let Some(temp) = metrics.system_metrics.temperature_celsius {
-            state[idx] = (temp - 20.0) / 60.0;  // Normalize assuming 20-80°C range
+            state[idx] = (temp - 20.0) / 60.0; // Normalize assuming 20-80°C range
         }
         idx += 1;
 
         // Network I/O (normalized)
-        state[idx] = (metrics.system_metrics.network_io.bytes_received as f64 / (1024.0 * 1024.0 * 1024.0)).min(1.0);
+        state[idx] = (metrics.system_metrics.network_io.bytes_received as f64
+            / (1024.0 * 1024.0 * 1024.0))
+            .min(1.0);
         idx += 1;
-        state[idx] = (metrics.system_metrics.network_io.bytes_transmitted as f64 / (1024.0 * 1024.0 * 1024.0)).min(1.0);
+        state[idx] = (metrics.system_metrics.network_io.bytes_transmitted as f64
+            / (1024.0 * 1024.0 * 1024.0))
+            .min(1.0);
         idx += 1;
 
         // Recent events summary (last 10 events)
@@ -136,7 +140,7 @@ impl DQNModel {
     }
 
     fn summarize_events(&self, events: &[crate::monitor::events::PortageEvent]) -> Vec<f64> {
-        let mut summary = vec![0.0; 20];  // Allocate 20 slots for event summary
+        let mut summary = vec![0.0; 20]; // Allocate 20 slots for event summary
 
         // Count different event types
         let mut install_count = 0;
@@ -149,7 +153,8 @@ impl DQNModel {
         let mut error_count = 0;
         let mut warning_count = 0;
 
-        for event in events.iter().take(10) {  // Last 10 events
+        for event in events.iter().take(10) {
+            // Last 10 events
             match event.event_type {
                 crate::monitor::events::EventType::PackageInstall => install_count += 1,
                 crate::monitor::events::EventType::PackageUpdate => update_count += 1,
@@ -176,14 +181,16 @@ impl DQNModel {
         summary[8] = warning_count as f64 / 10.0;
 
         // Calculate rates
-        let total_events = events.len().max(1);
-        summary[9] = (compile_success as f64 / (compile_success + compile_failed).max(1) as f64) * 2.0 - 1.0;  // -1 to 1
-        summary[10] = (sync_success as f64 / (sync_success + sync_failed).max(1) as f64) * 2.0 - 1.0;  // -1 to 1
+        let _total_events = events.len().max(1);
+        summary[9] =
+            (compile_success as f64 / (compile_success + compile_failed).max(1) as f64) * 2.0 - 1.0; // -1 to 1
+        summary[10] =
+            (sync_success as f64 / (sync_success + sync_failed).max(1) as f64) * 2.0 - 1.0; // -1 to 1
 
         // Time since last event (normalized)
         if let Some(last_event) = events.first() {
             let duration = chrono::Utc::now().signed_duration_since(last_event.timestamp);
-            summary[11] = (duration.num_minutes() as f64 / 60.0).min(1.0);  // Normalize to hours
+            summary[11] = (duration.num_minutes() as f64 / 60.0).min(1.0); // Normalize to hours
         }
 
         summary
@@ -197,12 +204,12 @@ impl DQNModel {
         let mut q_values = Array1::zeros(self.config.output_size);
 
         // Heuristic-based Q-values for now
-        q_values[0] = 0.0;  // NoOp
-        q_values[1] = self.calculate_parallelism_q_value(state);  // Adjust parallelism
-        q_values[2] = self.calculate_build_order_q_value(state);  // Optimize build order
-        q_values[3] = self.calculate_schedule_q_value(state);  // Schedule operation
-        q_values[4] = self.calculate_prefetch_q_value(state);  // Pre-fetch dependencies
-        q_values[5] = self.calculate_cleanup_q_value(state);  // Clean obsolete packages
+        q_values[0] = 0.0; // NoOp
+        q_values[1] = self.calculate_parallelism_q_value(state); // Adjust parallelism
+        q_values[2] = self.calculate_build_order_q_value(state); // Optimize build order
+        q_values[3] = self.calculate_schedule_q_value(state); // Schedule operation
+        q_values[4] = self.calculate_prefetch_q_value(state); // Pre-fetch dependencies
+        q_values[5] = self.calculate_cleanup_q_value(state); // Clean obsolete packages
 
         // Add exploration noise
         if self.should_explore() {
@@ -216,9 +223,9 @@ impl DQNModel {
     }
 
     fn calculate_parallelism_q_value(&self, state: &Array1<f64>) -> f64 {
-        let cpu_usage = state[3];  // Normalized CPU usage
-        let memory_usage = state[4];  // Normalized memory usage
-        let load_avg = state[6];  // Normalized 1-min load average
+        let cpu_usage = state[3]; // Normalized CPU usage
+        let memory_usage = state[4]; // Normalized memory usage
+        let load_avg = state[6]; // Normalized 1-min load average
 
         // Favor parallelism adjustment when system is underutilized
         if cpu_usage < 0.7 && memory_usage < 0.8 && load_avg < 0.8 {
@@ -229,7 +236,7 @@ impl DQNModel {
     }
 
     fn calculate_build_order_q_value(&self, state: &Array1<f64>) -> f64 {
-        let available_updates = state[1];  // Normalized available updates
+        let available_updates = state[1]; // Normalized available updates
 
         // Favor build order optimization when there are many updates
         if available_updates > 0.3 {
@@ -240,8 +247,8 @@ impl DQNModel {
     }
 
     fn calculate_schedule_q_value(&self, state: &Array1<f64>) -> f64 {
-        let cpu_usage = state[3];  // Normalized CPU usage
-        let load_avg = state[6];  // Normalized 1-min load average
+        let cpu_usage = state[3]; // Normalized CPU usage
+        let load_avg = state[6]; // Normalized 1-min load average
 
         // Favor scheduling when system is busy
         if cpu_usage > 0.8 || load_avg > 0.8 {
@@ -252,7 +259,7 @@ impl DQNModel {
     }
 
     fn calculate_prefetch_q_value(&self, state: &Array1<f64>) -> f64 {
-        let network_activity = state[13] + state[14];  // Combined network I/O
+        let network_activity = state[13] + state[14]; // Combined network I/O
 
         // Favor pre-fetching when network is idle
         if network_activity < 0.3 {
@@ -263,7 +270,7 @@ impl DQNModel {
     }
 
     fn calculate_cleanup_q_value(&self, state: &Array1<f64>) -> f64 {
-        let disk_usage = state[5];  // Normalized disk usage
+        let disk_usage = state[5]; // Normalized disk usage
 
         // Favor cleanup when disk is getting full
         if disk_usage > 0.8 {
@@ -279,14 +286,16 @@ impl DQNModel {
         // Epsilon-greedy action selection
         if self.should_explore() {
             let mut rng = rand::thread_rng();
-            let action_idx = rng.gen_range(0..=q_values.len()-1);
+            let action_idx = rng.gen_range(0..=q_values.len() - 1);
             let action = Self::index_to_action(action_idx)?;
             return Ok((action, q_values[action_idx]));
         }
 
         // Select action with highest Q-value
         let max_q = q_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-        let action_idx = q_values.iter().position(|&x| x == max_q)
+        let action_idx = q_values
+            .iter()
+            .position(|&x| x == max_q)
             .ok_or_else(|| PortCLError::RLEngine("No valid action found".to_string()))?;
 
         let action = Self::index_to_action(action_idx)?;
@@ -302,11 +311,18 @@ impl DQNModel {
         match index {
             0 => Ok(Action::NoOp),
             1 => Ok(Action::AdjustParallelism { jobs: 1 }),
-            2 => Ok(Action::OptimizeBuildOrder { package_list: Vec::new() }),
+            2 => Ok(Action::OptimizeBuildOrder {
+                package_list: Vec::new(),
+            }),
             3 => Ok(Action::ScheduleOperation { delay_seconds: 0 }),
-            4 => Ok(Action::PreFetchDependencies { packages: Vec::new() }),
+            4 => Ok(Action::PreFetchDependencies {
+                packages: Vec::new(),
+            }),
             5 => Ok(Action::CleanObsoletePackages { force: false }),
-            _ => Err(PortCLError::RLEngine(format!("Invalid action index: {}", index))),
+            _ => Err(PortCLError::RLEngine(format!(
+                "Invalid action index: {}",
+                index
+            ))),
         }
     }
 
@@ -330,22 +346,18 @@ impl DQNModel {
 
     pub fn save(&self, path: &Path) -> Result<()> {
         // Save model configuration and training state
-        let model_data = serde_json::to_string_pretty(self)
-            .map_err(|e| PortCLError::Json(e))?;
+        let model_data = serde_json::to_string_pretty(self).map_err(|e| PortCLError::Json(e))?;
 
-        std::fs::write(path, model_data)
-            .map_err(|e| PortCLError::Io(e))?;
+        std::fs::write(path, model_data).map_err(|e| PortCLError::Io(e))?;
 
         info!("Model saved to {}", path.display());
         Ok(())
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        let model_data = std::fs::read_to_string(path)
-            .map_err(|e| PortCLError::Io(e))?;
+        let model_data = std::fs::read_to_string(path).map_err(|e| PortCLError::Io(e))?;
 
-        let model: Self = serde_json::from_str(&model_data)
-            .map_err(|e| PortCLError::Json(e))?;
+        let model: Self = serde_json::from_str(&model_data).map_err(|e| PortCLError::Json(e))?;
 
         info!("Model loaded from {}", path.display());
         Ok(model)

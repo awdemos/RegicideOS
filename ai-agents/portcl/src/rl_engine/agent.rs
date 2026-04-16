@@ -466,18 +466,18 @@ impl RewardCalculator {
 
 pub struct TaskTracker {
     current_task: Option<TaskContext>,
-    task_history: Vec<TaskContext>,
+    _task_history: Vec<TaskContext>,
 }
 
 impl TaskTracker {
     pub fn new() -> Self {
         Self {
             current_task: None,
-            task_history: Vec::new(),
+            _task_history: Vec::new(),
         }
     }
 
-    pub async fn update(&mut self, experience: Experience) -> Result<()> {
+    pub async fn update(&mut self, _experience: Experience) -> Result<()> {
         // Update current task context based on experience
         // This is a simplified implementation
         Ok(())
