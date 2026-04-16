@@ -9,6 +9,7 @@ use crate::config::LearningConfig;
 use crate::actions::Action;
 use crate::SystemMetrics;
 
+#[allow(dead_code)]
 const STATE_SIZE: usize = 4;  // [disk_usage, free_space_trend, metadata_usage, fragmentation]
 
 #[derive(Debug, Clone)]
@@ -31,11 +32,11 @@ impl State {
 
 #[derive(Debug, Clone)]
 struct Experience {
-    state: State,
-    action: Action,
-    reward: f64,
-    next_state: State,
-    outcome_quality: f64, // 0-1, how good the outcome was
+    _state: State,
+    _action: Action,
+    _reward: f64,
+    _next_state: State,
+    _outcome_quality: f64, // 0-1, how good the outcome was
 }
 
 pub struct ReinforcementLearner {
@@ -84,7 +85,7 @@ impl ReinforcementLearner {
     
     pub fn select_best_action(&self, state: &State) -> Action {
         let disk_usage = state.features[0]; // 0-1 normalized
-        let free_space = state.features[1];  // 0-1 normalized (10GB = 1.0)
+        let _free_space = state.features[1];  // 0-1 normalized (10GB = 1.0)
         
         // Get candidate actions based on current state
         let candidate_actions = if disk_usage >= 0.98 { 
@@ -140,11 +141,11 @@ impl ReinforcementLearner {
         
         // Store experience in replay buffer
         let experience = Experience {
-            state: state.clone(),
-            action,
-            reward,
-            next_state: next_state.clone(),
-            outcome_quality,
+            _state: state.clone(),
+            _action: action,
+            _reward: reward,
+            _next_state: next_state.clone(),
+            _outcome_quality: outcome_quality,
         };
         
         self.replay_buffer.push_back(experience.clone());
@@ -168,7 +169,7 @@ impl ReinforcementLearner {
         self.update_success_rates(action, reward);
         
         // Save model periodically
-        if self.step_count % 100 == 0 {
+        if self.step_count.is_multiple_of(100) {
             if let Err(e) = self.save_model() {
                 warn!("Failed to save model: {}", e);
             }
