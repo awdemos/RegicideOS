@@ -62,7 +62,7 @@ impl OpenRCServiceManager {
         }
     }
 
-    fn install_service_file(&self, service_name: &str, config: &PortageConfig) -> Result<()> {
+    fn install_service_file(&self, service_name: &str, _config: &PortageConfig) -> Result<()> {
         let source_path = format!("init.d/{}", service_name);
         let target_path = format!("/etc/init.d/{}", service_name);
 
@@ -86,7 +86,7 @@ impl OpenRCServiceManager {
         Ok(())
     }
 
-    fn create_config_directory(&self, config: &PortageConfig) -> Result<()> {
+    fn create_config_directory(&self, _config: &PortageConfig) -> Result<()> {
         let config_dir = Path::new("/etc/portcl");
         fs::create_dir_all(config_dir).map_err(|e| PortCLError::Io(e))?;
 
