@@ -136,9 +136,8 @@ fn execute(command: &str) -> Result<String> {
     // Allowlist of safe commands with their expected argument patterns
     match program {
         // Block device commands
-        "lsblk" | "blkid" | "partprobe" | "sfdisk" | "sgdisk" | "blockdev" | "hdparm" => {
-            execute_safe_command(program, args)
-        }
+        "lsblk" | "blkid" | "partprobe" | "sfdisk" | "sgdisk" | "blockdev" | "hdparm"
+        | "findmnt" | "fuser" => execute_safe_command(program, args),
 
         // Cat command (only for heredoc usage with sfdisk)
         "cat" => {
@@ -1062,8 +1061,8 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
         let _ = execute(&format!("fuser -v {} 2>/dev/null || true", current_name));
         let _ = execute(&format!("fuser -k {} 2>/dev/null || true", current_name));
 
-        // Step 3: Remove any device mapper references
-        let _ = execute("dmsetup remove_all 2>/dev/null || true");
+        // Step 3: Remove only the installer's own device mapper reference
+        let _ = execute("dmsetup remove regicideos 2>/dev/null || true");
 
         // Step 4: Close any LUKS containers
         let _ = execute(&format!(
@@ -1290,8 +1289,8 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 ));
                 let _ = execute("cryptsetup close regicideos 2>/dev/null || true");
 
-                // Remove any device mapper references
-                let _ = execute("dmsetup remove_all 2>/dev/null || true");
+                // Remove only the installer's own device mapper reference
+                let _ = execute("dmsetup remove regicideos 2>/dev/null || true");
 
                 // Use enhanced clearing for LUKS partition preparation
                 info(&format!(
@@ -1464,7 +1463,13 @@ async fn get_manifest(repository: &str) -> Result<toml::Value> {
 
 async fn get_flavours(repository: &str) -> Result<Vec<String>> {
     let manifest = get_manifest(repository).await?;
-    let arch = "amd64"; // Assuming x86_64 architecture
+    let arch = if cfg!(target_arch = "x86_64") {
+        "amd64"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "amd64"
+    };
 
     let mut flavours = Vec::new();
     if let Some(table) = manifest.as_table() {
@@ -1491,7 +1496,13 @@ async fn get_flavours(repository: &str) -> Result<Vec<String>> {
 
 async fn get_releases(repository: &str, flavour: &str) -> Result<Vec<String>> {
     let manifest = get_manifest(repository).await?;
-    let arch = "amd64";
+    let arch = if cfg!(target_arch = "x86_64") {
+        "amd64"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "amd64"
+    };
 
     let mut releases = Vec::new();
     if let Some(flavour_table) = manifest.get(flavour).and_then(|v| v.as_table()) {
@@ -1520,7 +1531,13 @@ async fn get_releases(repository: &str, flavour: &str) -> Result<Vec<String>> {
 
 async fn get_url(config: &Config) -> Result<String> {
     let manifest = get_manifest(&config.repository).await?;
-    let arch = "amd64";
+    let arch = if cfg!(target_arch = "x86_64") {
+        "amd64"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "amd64"
+    };
 
     if let Some(filename) = manifest
         .get(&config.flavour)
@@ -1681,7 +1698,7 @@ fn step3_native_mount() -> Result<()> {
             bail!("Failed to create /mnt/root/boot/efi: {}", e);
         }
         info("✓ Created /mnt/root/boot/efi");
-        
+
         if Path::new("/sys/firmware/efi/efivars").exists() {
             if let Err(e) = std::fs::create_dir_all("/mnt/root/sys/firmware/efi/efivars") {
                 bail!("Failed to create /mnt/root/sys/firmware/efi/efivars: {}", e);
@@ -1700,15 +1717,8 @@ fn step3_native_mount() -> Result<()> {
     ];
 
     for (src, tgt) in bind_mounts {
-        let status = std::process::Command::new("mount")
-            .args(["--bind", src, tgt])
-            .status()
-            .expect("mount --bind failed");
-        if !status.success() {
-            // Fallback rbind
-            std::process::Command::new("mount")
-                .args(["--rbind", src, tgt])
-                .status()?;
+        if execute(&format!("mount --bind {} {}", src, tgt)).is_err() {
+            execute(&format!("mount --rbind {} {}", src, tgt))?;
         }
         info(&format!("✓ Bound {} -> {}", src, tgt));
     }
@@ -1720,23 +1730,17 @@ fn step3_native_mount() -> Result<()> {
     ];
 
     for (src, tgt) in additional_mounts {
-        std::process::Command::new("mount")
-            .args(["--bind", src, tgt])
-            .status()?;
+        execute(&format!("mount --bind {} {}", src, tgt))?;
         info(&format!("✓ Bound {} -> {}", src, tgt));
     }
 
     // EFI efivars bind mount if directory exists
     if is_efi() && Path::new("/sys/firmware/efi/efivars").exists() {
-        std::process::Command::new("mount")
-            .args(["--bind", "/sys/firmware/efi/efivars", "/mnt/root/sys/firmware/efi/efivars"])
-            .status()?;
+        execute("mount --bind /sys/firmware/efi/efivars /mnt/root/sys/firmware/efi/efivars")?;
         info("✓ Bound /sys/firmware/efi/efivars -> /mnt/root/sys/firmware/efi/efivars");
     }
 
-    std::process::Command::new("mount")
-        .args(["--make-rslave", "/mnt/root"])
-        .status()?;
+    execute("mount --make-rslave /mnt/root")?;
     info("✓ Made mounts private");
 
     // Mount EFI partition - directories already created above
@@ -1744,9 +1748,9 @@ fn step3_native_mount() -> Result<()> {
         info("Finding and mounting EFI partition...");
         let efi_device = find_partition_by_label("EFI")?;
         info(&format!("Found EFI partition: {}", efi_device));
-        
-        // Mount EFI to /mnt/root/boot (efi subdirectory will be created by mount)
-        mount_with_retry(&efi_device, "/mnt/root/boot", None, Some("rw"))?;
+
+        // Mount EFI to /mnt/root/boot/efi (GRUB expects --efi-directory="/boot/efi")
+        mount_with_retry(&efi_device, "/mnt/root/boot/efi", None, Some("rw"))?;
 
         // Verify mount was successful using /proc/mounts fallback
         match std::process::Command::new("cat")
@@ -1766,15 +1770,13 @@ fn step3_native_mount() -> Result<()> {
             }
         }
 
-        // Create boot directory structure for GRUB
-        safe_create_dir_all("/mnt/root/boot/grub", "/mnt/root/boot")?;
+        // Create boot directory structure for GRUB under EFI mount
+        safe_create_dir_all("/mnt/root/boot/efi/grub", "/mnt/root/boot/efi")?;
     }
 
     info("✓ Native mount setup complete - filesystem is writable");
     Ok(())
 }
-
-
 
 async fn download_root(url: &str) -> Result<()> {
     let root_img_path = "/mnt/gentoo/root.img";
@@ -1953,7 +1955,7 @@ fn verify_grub_environment() -> Result<()> {
 
     // Check 7: Test device access that grub-probe will need
     info("Testing device access for GRUB...");
-    let device_tests = ["/dev/sda", "/dev/mapper/regicideos"];
+    let device_tests = ["/dev/mapper/regicideos"];
 
     for device in &device_tests {
         if Path::new(device).exists() {
@@ -2236,7 +2238,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
         // Check if LUKS encryption is being used and adjust boot parameters
         let is_encrypted = Path::new("/dev/mapper/regicideos").exists();
-        let (root_param, boot_options) = if is_encrypted {
+        let (_root_param, _boot_options) = if is_encrypted {
             info("Detected LUKS encryption - using encrypted boot parameters");
 
             // Ensure initramfs has LUKS support
@@ -2251,7 +2253,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
             // Get the actual LUKS partition UUID
             let luks_uuid = match execute(
-                "blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'",
+                "blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | head -1 | xargs -I{} blkid -s UUID -o value {} 2>/dev/null || echo 'regicideos'",
             ) {
                 Ok(uuid) => uuid.trim().to_string(),
                 Err(_) => "regicideos".to_string(),
@@ -2271,121 +2273,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             ("LABEL=ROOTS".to_string(), "quiet splash rw".to_string())
         };
 
-        let grub_config = if is_encrypted {
-            format!(
-                r#"set default="RegicideOS"
-set timeout=5
-set color_normal=light-gray/black
-set color_highlight=green/black
-
-# LUKS encryption configuration
-insmod luks
-insmod cryptodisk
-insmod gcry_rijndael
-insmod gcry_sha256
-insmod gcry_sha512
-
-menuentry "RegicideOS (Encrypted)" {{
-    linux {}
-    initrd {}
-    options "root={} {}"
-}}
-
-menuentry "RegicideOS (Encrypted Recovery)" {{
-    linux {}
-    initrd {}
-    options "root={} {} single"
-}}
-
-menuentry "RegicideOS (Encrypted Verbose)" {{
-    linux {}
-    initrd {}
-    options "root={} {} verbose"
-}}
-"#,
-                kernel_files,
-                initrd_files,
-                root_param,
-                boot_options,
-                kernel_files,
-                initrd_files,
-                root_param,
-                boot_options,
-                kernel_files,
-                initrd_files,
-                root_param,
-                boot_options
-            )
-        } else {
-            format!(
-                r#"set default="RegicideOS"
-set timeout=5
-set color_normal=light-gray/black
-set color_highlight=green/black
-
-menuentry "RegicideOS" {{
-    linux {}
-    initrd {}
-    options "root={} {}"
-}}
-
-menuentry "RegicideOS (Recovery)" {{
-    linux {}
-    initrd {}
-    options "root={} {} single"
-}}
-
-menuentry "RegicideOS (Verbose)" {{
-    linux {}
-    initrd {}
-    options "root={} {} verbose"
-}}
-"#,
-                kernel_files,
-                initrd_files,
-                root_param,
-                boot_options,
-                kernel_files,
-                initrd_files,
-                root_param,
-                boot_options,
-                kernel_files,
-                initrd_files,
-                root_param,
-                boot_options
-            )
-        };
-
-        safe_write_file(
-            "/mnt/root/boot/efi/grub/grub.cfg",
-            grub_config.as_bytes(),
-            "/mnt/root/boot/efi",
-        )?;
-
-        // Also copy GRUB config to EFI/fedora directory for EFI compatibility
-        chroot("mkdir -p /boot/efi/EFI/fedora")?;
-        safe_write_file(
-            "/mnt/root/boot/efi/EFI/fedora/grub.cfg",
-            grub_config.as_bytes(),
-            "/mnt/root/boot/efi/EFI/fedora",
-        )?;
-
-        info("✓ GRUB configuration created successfully");
-
-        // Debug: Show what was actually written
-        match chroot_with_output("cat /boot/efi/grub/grub.cfg") {
-            Ok(config_content) => {
-                info("GRUB config content:");
-                info(&format!("{}", config_content));
-            }
-            Err(e) => warn(&format!("Failed to read GRUB config: {}", e)),
-        }
-
-        // Verify GRUB config file exists and is readable
-        match chroot_with_output("ls -la /boot/efi/grub/") {
-            Ok(output) => info(&format!("GRUB directory contents:\n{}", output.trim())),
-            Err(e) => warn(&format!("Failed to list GRUB directory: {}", e)),
-        }
+        // GRUB configuration will be created in post_install() via create_grub_configuration()
     } else {
         // For BIOS, use exact same commands as Python reference
         let grub_install_cmd = format!(
@@ -2595,7 +2483,7 @@ fn create_grub_configuration() -> Result<()> {
 
         // Get actual LUKS partition UUID
         let luks_uuid =
-            match execute("blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'") {
+            match execute("blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | head -1 | xargs -I{} blkid -s UUID -o value {} 2>/dev/null || echo 'regicideos'") {
                 Ok(uuid) => uuid.trim().to_string(),
                 Err(_) => "regicideos".to_string(),
             };
@@ -2611,7 +2499,7 @@ fn create_grub_configuration() -> Result<()> {
         )
     } else {
         info("Using unencrypted boot parameters");
-        ("/dev/sda2".to_string(), "quiet splash rw".to_string())
+        ("LABEL=ROOTS".to_string(), "quiet splash rw".to_string())
     };
 
     // Generate GRUB configuration with LUKS support
@@ -2630,35 +2518,32 @@ insmod gcry_sha256
 insmod gcry_sha512
 
 menuentry "RegicideOS (Encrypted)" {{
-    linux {}
+    linux {} root={} {}
     initrd {}
-    options "root={} {}"
 }}
 
 menuentry "RegicideOS (Encrypted Recovery)" {{
-    linux {}
+    linux {} root={} {} single
     initrd {}
-    options "root={} {} single"
 }}
 
 menuentry "RegicideOS (Encrypted Verbose)" {{
-    linux {}
+    linux {} root={} {} verbose
     initrd {}
-    options "root={} {} verbose"
 }}
 "#,
             kernel_files,
-            initrd_files,
             root_param,
             boot_options,
-            kernel_files,
             initrd_files,
+            kernel_files,
             root_param,
             boot_options,
-            kernel_files,
             initrd_files,
+            kernel_files,
             root_param,
-            boot_options
+            boot_options,
+            initrd_files
         )
     } else {
         format!(
@@ -2668,35 +2553,32 @@ set color_normal=light-gray/black
 set color_highlight=green/black
 
 menuentry "RegicideOS" {{
-    linux {}
+    linux {} root={} {}
     initrd {}
-    options "root={} {}"
 }}
 
 menuentry "RegicideOS (Recovery)" {{
-    linux {}
+    linux {} root={} {} single
     initrd {}
-    options "root={} {} single"
 }}
 
 menuentry "RegicideOS (Verbose)" {{
-    linux {}
+    linux {} root={} {} verbose
     initrd {}
-    options "root={} {} verbose"
 }}
 "#,
             kernel_files,
-            initrd_files,
             root_param,
             boot_options,
-            kernel_files,
             initrd_files,
+            kernel_files,
             root_param,
             boot_options,
-            kernel_files,
             initrd_files,
+            kernel_files,
             root_param,
-            boot_options
+            boot_options,
+            initrd_files
         )
     };
 
@@ -2745,13 +2627,8 @@ async fn post_install(config: &Config) -> Result<()> {
 
     let (etc_path, var_path, usr_path) = match layout_name.as_str() {
         "btrfs" => {
-            // Direct ProcessCommand calls - bypasses shell whitelist
-            let _ = std::process::Command::new("mount")
-                .args(["-L", "ROOTS", "-o", "subvol=overlay", "/mnt/root/overlay"])
-                .status()?;
-            let _ = std::process::Command::new("mount")
-                .args(["-L", "ROOTS", "-o", "subvol=home", "/mnt/root/home"])
-                .status()?;
+            execute("mount -L ROOTS -o subvol=overlay /mnt/root/overlay")?;
+            execute("mount -L ROOTS -o subvol=home /mnt/root/home")?;
             (
                 "/mnt/root/overlay/etc",
                 "/mnt/root/overlay/var",
@@ -2764,13 +2641,8 @@ async fn post_install(config: &Config) -> Result<()> {
             if !Path::new("/dev/mapper/regicideos").exists() {
                 bail!("LUKS device /dev/mapper/regicideos not found");
             }
-            // Direct ProcessCommand calls - bypasses shell whitelist
-            let _ = std::process::Command::new("mount")
-                .args(["/dev/mapper/regicideos", "-o", "subvol=overlay", "/mnt/root/overlay"])
-                .status()?;
-            let _ = std::process::Command::new("mount")
-                .args(["/dev/mapper/regicideos", "-o", "subvol=home", "/mnt/root/home"])
-                .status()?;
+            execute("mount /dev/mapper/regicideos -o subvol=overlay /mnt/root/overlay")?;
+            execute("mount /dev/mapper/regicideos -o subvol=home /mnt/root/home")?;
             (
                 "/mnt/root/overlay/etc",
                 "/mnt/root/overlay/var",
@@ -2786,13 +2658,8 @@ async fn post_install(config: &Config) -> Result<()> {
             }
             safe_create_dir_all("/mnt/root/overlay", "/mnt/root")?;
             safe_create_dir_all("/mnt/root/home", "/mnt/root")?;
-            // Direct ProcessCommand calls - bypasses shell whitelist
-            let _ = std::process::Command::new("mount")
-                .args(["-L", "OVERLAY", "/mnt/root/overlay"])
-                .status()?;
-            let _ = std::process::Command::new("mount")
-                .args(["-L", "HOME", "/mnt/root/home"])
-                .status()?;
+            execute("mount -L OVERLAY /mnt/root/overlay")?;
+            execute("mount -L HOME /mnt/root/home")?;
             (
                 "/mnt/root/overlay",
                 "/mnt/root/overlay",
@@ -2820,17 +2687,24 @@ async fn post_install(config: &Config) -> Result<()> {
         }
     }
 
-    // Use downloaded root.img as overlay lowerdir (template from squashfs)
+    // Mount downloaded root.img as overlay lowerdir template
+    info("Mounting root image as overlay template");
+    safe_create_dir_all("/mnt/rootimg", "/mnt")?;
+    execute("losetup -f /mnt/gentoo/root.img")?;
+    execute("mount -o ro,loop /mnt/gentoo/root.img /mnt/rootimg")?;
+    info("Root image mounted at /mnt/rootimg");
+
+    // Use mounted root.img as overlay lowerdir (template from squashfs)
     execute(&format!(
-        "mount -t overlay overlay -o lowerdir=/mnt/gentoo/usr,upperdir={}/usr,workdir={}/usrw,ro /mnt/root/usr",
+        "mount -t overlay overlay -o lowerdir=/mnt/rootimg/usr,upperdir={}/usr,workdir={}/usrw,ro /mnt/root/usr",
         usr_path, usr_path
     ))?;
     execute(&format!(
-        "mount -t overlay overlay -o lowerdir=/mnt/gentoo/etc,upperdir={}/etc,workdir={}/etcw,rw /mnt/root/etc",
+        "mount -t overlay overlay -o lowerdir=/mnt/rootimg/etc,upperdir={}/etc,workdir={}/etcw,rw /mnt/root/etc",
         etc_path, etc_path
     ))?;
     execute(&format!(
-        "mount -t overlay overlay -o lowerdir=/mnt/gentoo/var,upperdir={}/var,workdir={}/varw,rw /mnt/root/var",
+        "mount -t overlay overlay -o lowerdir=/mnt/rootimg/var,upperdir={}/var,workdir={}/varw,rw /mnt/root/var",
         var_path, var_path
     ))?;
 
@@ -2917,7 +2791,7 @@ EOF",
 
             // Get actual LUKS partition UUID
             let luks_uuid = match execute(
-                "blkid -s UUID -o value /dev/sda3 2>/dev/null || echo 'regicideos'",
+                "blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | head -1 | xargs -I{} blkid -s UUID -o value {} 2>/dev/null || echo 'regicideos'",
             ) {
                 Ok(uuid) => uuid.trim().to_string(),
                 Err(_) => "regicideos".to_string(),
@@ -2956,10 +2830,15 @@ if [ -e /dev/disk/by-uuid/{} ]; then
     /lib/cryptsetup/cryptsetup luksOpen /dev/disk/by-uuid/{} regicideos
     log_end_msg $?
 else
-    # Fallback to device name
-    log_begin_msg "Unlocking LUKS encrypted partition (fallback to /dev/sda3)"
-    /lib/cryptsetup/cryptsetup luksOpen /dev/sda3 regicideos
-    log_end_msg $?
+    # Fallback to dynamic LUKS partition detection
+    log_begin_msg "Unlocking LUKS encrypted partition (fallback detection)"
+    LUKS_DEV=$(blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | head -1)
+    if [ -n "$LUKS_DEV" ]; then
+        /lib/cryptsetup/cryptsetup luksOpen "$LUKS_DEV" regicideos
+        log_end_msg $?
+    else
+        log_end_msg 1
+    fi
 fi
 EOF"#,
                 luks_uuid, luks_uuid, luks_uuid
@@ -3200,7 +3079,7 @@ fn validate_flavour(flavour: &str) -> Result<()> {
 }
 
 fn validate_package_set(applications: &str) -> Result<()> {
-    let allowed_sets = ["minimal", "base", "desktop", "full"];
+    let allowed_sets = ["recommended", "minimal", "base", "desktop", "full"];
     if !allowed_sets.contains(&applications) {
         bail!("Unsupported application set");
     }
