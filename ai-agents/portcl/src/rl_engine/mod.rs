@@ -16,7 +16,7 @@ use crate::rl_engine::model::Experience;
 use std::sync::{Arc, Mutex};
 
 pub struct RLManager {
-    config: RLConfig,
+    _config: RLConfig,
     agent: PortageAgent,
     continual_learning: Arc<Mutex<ContinualLearning>>,
 }
@@ -37,7 +37,7 @@ impl RLManager {
         let continual_learning = Arc::new(Mutex::new(ContinualLearning::new(cl_config)?));
 
         Ok(Self {
-            config,
+            _config: config,
             agent,
             continual_learning,
         })
