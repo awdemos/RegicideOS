@@ -44,7 +44,7 @@ pub struct PackageQuery {
 }
 
 pub struct PortageMonitor {
-    config: MonitoringConfig,
+    _config: MonitoringConfig,
 }
 
 impl PortageMonitor {
@@ -57,7 +57,7 @@ impl PortageMonitor {
             )));
         }
 
-        Ok(Self { config })
+        Ok(Self { _config: config })
     }
 
     pub async fn get_portage_info(&self) -> Result<PortageInfo> {
@@ -276,7 +276,7 @@ impl PortageMonitor {
 
     async fn get_package_metadata(&self, category: &str, name: &str, version: &str) -> Result<PackageInfo> {
         // Use equery to get detailed package information
-        let info_output = self.run_portage_command(&[
+        let _info_output = self.run_portage_command(&[
             "equery", "list", "-o", &format!("{}/{}-{}", category, name, version)
         ]).await?;
 
