@@ -97,11 +97,11 @@ impl ActionExecutor {
             match self.cleanup_path(temp_path).await {
                 Ok(freed) => {
                     total_freed += freed;
-                    messages.push(format!("Cleaned {} ({:.1}MB freed)", temp_path, freed));
+                    messages.push(format!("Cleaned {temp_path} ({freed:.1}MB freed)"));
                 }
                 Err(e) => {
                     warn!("Failed to clean {}: {}", temp_path, e);
-                    messages.push(format!("Failed to clean {}: {}", temp_path, e));
+                    messages.push(format!("Failed to clean {temp_path}: {e}"));
                 }
             }
         }
@@ -278,7 +278,7 @@ impl ActionExecutor {
                     action: Action::CompressFiles,
                     success: false,
                     space_freed_mb: 0.0,
-                    message: format!("Failed to run BTRFS compression: {}", e),
+                    message: format!("Failed to run BTRFS compression: {e}"),
                 })
             }
         }
@@ -324,7 +324,7 @@ impl ActionExecutor {
                     action: Action::BalanceMetadata,
                     success: false,
                     space_freed_mb: 0.0,
-                    message: format!("Failed to run BTRFS balance: {}", e),
+                    message: format!("Failed to run BTRFS balance: {e}"),
                 })
             }
         }
@@ -370,7 +370,7 @@ impl ActionExecutor {
                 action: Action::CleanupSnapshots,
                 success: true,
                 space_freed_mb: 0.0,
-                message: format!("No snapshots to clean (keeping {} snapshots)", snapshots_to_keep),
+                message: format!("No snapshots to clean (keeping {snapshots_to_keep} snapshots)"),
             });
         }
         
@@ -384,12 +384,13 @@ impl ActionExecutor {
             action: Action::CleanupSnapshots,
             success: true,
             space_freed_mb: total_freed,
-            message: format!("Would delete {} old snapshots", snapshots_to_delete),
+            message: format!("Would delete {snapshots_to_delete} old snapshots"),
         })
     }
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ActionResult {
     pub action: Action,
     pub success: bool,

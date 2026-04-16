@@ -266,7 +266,7 @@ async fn main() -> Result<()> {
             println!("Has Trained Model: {}", stats.has_trained_model);
             println!("\nAction Distribution:");
             for (action, count) in stats.action_distribution {
-                println!("  {:?}: {} times", action, count);
+                println!("  {action:?}: {count} times");
             }
         },
         Some(Commands::Config) => {

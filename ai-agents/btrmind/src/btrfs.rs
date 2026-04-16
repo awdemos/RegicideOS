@@ -113,8 +113,8 @@ impl BtrfsMonitor {
                used_percent, used_mb, free_mb);
         
         Ok(DiskUsage {
-            total_mb,
-            used_mb,
+            _total_mb: total_mb,
+            _used_mb: used_mb,
             free_mb,
             used_percent,
         })
@@ -169,8 +169,8 @@ impl BtrfsMonitor {
 
 #[derive(Debug)]
 struct DiskUsage {
-    total_mb: f64,
-    used_mb: f64,
+    _total_mb: f64,
+    _used_mb: f64,
     free_mb: f64,
     used_percent: f64,
 }
