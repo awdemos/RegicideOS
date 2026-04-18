@@ -1,155 +1,101 @@
-# 🏰 RegicideOS
-
 <div align="center">
-  
-![RegicideOS Logo](regicideos_poster.png)
 
-**A Rust-first, AI-powered Linux distribution**
+# 🖥️ RegicideOS
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Rust](https://img.shields.io/badge/Made%20with-Rust-orange.svg)](https://www.rust-lang.org/)
-[![AI](https://img.shields.io/badge/Powered%20by-AI-purple.svg)](https://example.com)
+### AI-Native · Rust-First · Immutable Linux Distribution
+
+[![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://kernel.org/)
+[![Btrfs](https://img.shields.io/badge/Btrfs-8db600?style=for-the-badge&logo=linux&logoColor=white)](https://btrfs.wiki.kernel.org/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](https://www.gnu.org/licenses/gpl-3.0)
+
+**A forward-looking Linux distribution with a clear mission:** every component that can be implemented in Rust will be migrated to Rust, and AI capabilities are integrated at the system level.
+
+[📥 Install](#installation) · [🏗️ Architecture](#architecture) · [🗺️ Roadmap](#roadmap) · [🤝 Contributing](#contributing)
 
 </div>
 
 ---
 
-## 🌟 Overview
+## 🎯 Why RegicideOS?
 
-RegicideOS is a forward-looking Linux distribution that has begun as a fork of Xenia Linux with a clear vision: to create an **AI-first, Rust-powered operating system** designed for the future of computing.
+> *"Regicide" refers to the "kings" of the current operating system marketplace: unsafe programming languages, bloated legacy stacks, and human-centric system administration.*
 
-Our mission is to build a secure, performant, and intelligent operating system where every component that can be implemented in Rust will be migrated to Rust, and AI capabilities are integrated at the system level.
+**The commits will keep coming until every single Red Hat Enterprise customer cancels their subscription.**
 
-`Regicide` in this case refers strictly to the `"kings"` of the current operating system marketplace: Microsoft, unsafe programming languages, and human-centric system administration, and has no further social or political ramifications
-implied.
+### Core Principles
 
-Motivational slogan:
-
-> "The commits will keep coming until every single Red Hat Enterprise customer cancels their subscription."
-
----
-
-## 🎯 Core Principles
-
-### 🔧 Rust-First Philosophy
-- **System-wide Rust adoption**: Every component that can be replaced with Rust binaries will be migrated
-- **Memory safety**: Eliminate entire classes of vulnerabilities through Rust's ownership model
-- **Performance**: Leverage Rust's zero-cost abstractions for optimal system performance
-
-### 🤖 AI Integration
-- **Intelligent system management**: AI-driven optimization and resource allocation utilizing Reenforcement Learning
-- **Predictive maintenance**: Proactive system health monitoring and issue resolution 
-- **User assistance**: Context-aware help and automation capabilities
-- **Continual Reinforcement Learning**: Inspired by the techniques listed in [A Survey of Continual Reinforcement Learning
-](https://arxiv.org/abs/2506.21872)
-
-### 🔮 Future-Proof Architecture
-- **Kernel transition**: Readiness for migration to the [Asterinas kernel](https://asterinas.github.io/) as it matures
-- **Immutable system**: Read-only BTRFS filesystem for enhanced security and stability
-- **Container-native**: Built around containerized workflows for application isolation
+- 🦀 **System-wide Rust adoption** — Replace C/C++ system components with memory-safe Rust binaries
+- 🛡️ **Memory safety by default** — Eliminate entire classes of vulnerabilities through Rust's ownership model
+- ⚡ **Zero-cost performance** — Leverage Rust's abstractions without runtime overhead
+- 🤖 **AI-native from day one** — RL-driven optimization, predictive maintenance, and intelligent resource allocation
+- 🔒 **Immutable foundation** — Read-only Btrfs root with atomic updates and instant rollback
 
 ---
 
-## 🏗️ System Architecture
-
-### Core Components
+## 🏗️ Architecture
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **Kernel** | Linux (→ Asterinas) | System foundation |
-| **Init System** | systemd | Service management |
-| **Filesystem** | BTRFS (read-only) | Immutable system image |
-| **Container Runtime** | Distrobox | Application isolation |
-| **Desktop Environment** | Cosmic Desktop | User interface |
-| **Package Management** | Overlays | Software distribution |
+| Kernel | Linux (→ [Asterinas](https://asterinas.github.io/)) | System foundation |
+| Init System | systemd | Service management |
+| Filesystem | Btrfs (read-only) | Immutable system image with overlay writes |
+| Container Runtime | Distrobox | Application isolation and compatibility |
+| Desktop Environment | [Cosmic Desktop](https://github.com/pop-os/cosmic-epoch) | GPU-accelerated, Wayland-native UI |
+| Package Management | Overlays | Community-driven, curated software bundles |
 
-### Filesystem Structure
+### Directory Layout
 
 ```
 /
 ├── boot/efi          # EFI System Partition
 ├── root/             # Read-only system image (squashfs)
 │   ├── usr/          # System binaries
-│   ├── etc/          # Configuration (overlay)
-│   └── var/          # Variable data (overlay)
-├── home/             # User data (separate subvolume)
+│   ├── etc/          # Base configuration
+│   └── var/          # Variable data templates
+├── home/             # User data (separate Btrfs subvolume)
 └── overlay/          # Writable overlays
     ├── etc/          # Configuration overlay
     ├── var/          # Variable data overlay
     └── usr/          # User software overlay
 ```
 
----
+### Key Design Decisions
 
-## 🚀 Key Features
-
-### ✨ Immutable System
-- **Read-only root**: System files protected from accidental modification
-- **Atomic updates**: Safe, transactional system updates
-- **Rollback capability**: Easy system state restoration
-
-### 📦 Container-First Workflow
-- **Distrobox integration**: Seamless containerized application environment
-- **Isolated workspaces**: Clean separation between system and user applications
-- **Compatibility layer**: Run applications from any Linux distribution
-
-### 🎨 Cosmic Desktop
-- **Modern interface**: Built with Iced for a native Rust experience
-- **Wayland native**: Next-generation display protocol
-- **GPU-accelerated**: Hardware-accelerated graphics pipeline
-
-### 🧩 Overlay System
-- **Community-driven**: User-submitted package collections
-- **Curated sets**: Pre-configured application bundles for specific workflows
-- **Easy sharing**: Simple format for distributing software collections
+- **Read-only root** — System files protected from accidental or malicious modification
+- **Atomic updates** — Safe, transactional system updates via Btrfs snapshots
+- **Rollback capability** — Boot into any previous system state instantly
+- **Distrobox integration** — Seamless containerized application environment with full distro compatibility
 
 ---
 
-## 📦 Installation
+## 📥 Installation
 
-### Prerequisites
+### Requirements
+
 - 64-bit x86 processor
 - 12GB disk space minimum (20GB recommended)
 - UEFI or Legacy BIOS firmware
 - Internet connection
 
-### Installation Configuration
+### Quick Install (Recommended)
 
-The installer defaults to minimal packages only (no recommended packages) and BTRFS filesystem. Common configurations:
-
-### Installation Steps
-
-**Step 1: Boot Live Environment**
-
-**⚠️ IMPORTANT**: You must boot into a Linux live CD/USB environment to install RegicideOS. The minimal installer requires Rust toolchain to be available.
-
-**Recommended Live Environments:**
-- **Fedora Workstation Live**: https://getfedora.org/en/workstation/download/
-- **Ubuntu Live**: https://ubuntu.com/download/desktop
-- **Arch Linux Live**: https://archlinux.org/download/
-
-Boot your target machine from the live environment and connect to the internet.
-
-**Step 2: Quick Install (Recommended)**
-
-For the fastest installation, use our pre-built minimal installer binary:
+Boot any modern Linux live environment (Fedora Workstation recommended), then:
 
 ```bash
 # Download the pre-built installer
-curl -L -o regicide-installer https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
+curl -L -o regicide-installer \
+  https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
 
 # Make executable and run
 chmod +x regicide-installer
 sudo ./regicide-installer
 ```
 
-**Step 3: Manual Install (Advanced)**
-
-If you need to build from source or use a custom configuration:
+### Manual Build (Advanced)
 
 ```bash
-# Install required packages in live environment
-# For Fedora:
+# Install build dependencies
 sudo dnf -y install curl gcc btrfs-progs sgdisk rust cargo
 
 # Clone and build
@@ -159,180 +105,71 @@ cargo build --release
 sudo ./target/release/installer
 ```
 
-```
-# For Ubuntu/Debian:
-sudo apt update && sudo apt install git curl gcc btrfs-progs
+### Automated Configuration
 
-# For Arch:
-sudo pacman -S git curl gcc btrfs-progs
-```
-
-#### Interactive Mode (Default)
 ```bash
-sudo ./regicide-installer
-# or for manual build:
-sudo ./target/release/installer
-```
-The installer will guide you through:
-- Disk selection and partitioning
-- Username and password setup
-- Minimal package installation (no recommended packages)
-- BTRFS subvolume configuration
-
-#### Automated Installation
-```bash
-# Create minimal configuration
-cat > regicide-config.toml << EOF
+cat > regicide-config.toml << 'EOF'
 drive = "/dev/sda"
 repository = "https://repo.xenialinux.com/releases/"
-flavour = "minimal"  # Uses minimal packages only
+flavour = "minimal"
 release_branch = "main"
 filesystem = "btrfs"
 username = "your-username"
-applications = "minimal"  # IMPORTANT: No recommended packages
+applications = "minimal"
 EOF
 
-# Run automated installation
 sudo ./regicide-installer -c regicide-config.toml
-```
-
-#### Live Environment Requirements
-- **Live OS**: Any modern Linux live environment (Fedora recommended)
-- **Storage**: Target drive will be completely erased and reformatted
-- **Network**: Required for downloading system image from Xenia repository
-- **Time**: 15-30 minutes depending on internet speed
-
-### Post-Installation
-
-After installation completes:
-
-1. **Reboot** into your new RegicideOS system
-2. **Login** with your created username and password
-3. **Verify Installation**:
-   ```bash
-   # Check system status
-   systemctl status
-   cat /etc/os-release
-
-   # Verify BTRFS setup
-   sudo btrfs filesystem df /
-   sudo btrfs subvolume list /
-
-   # Check BtrMind service (if AI tools installed)
-   systemctl status btrmind
-   ```
-
-### Troubleshooting
-
-#### Rust Toolchain Issues
-If the pre-built installer fails, ensure Rust is properly installed:
-```bash
-# Verify Rust installation
-rustc --version
-cargo --version
-
-# If not installed:
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-```
-
-#### BTRFS Creation Issues
-The installer includes comprehensive BTRFS validation:
-- Subvolume structure verification
-- Proper mount point configuration
-- Compression and optimization settings
-- Read-only root with writable overlays
-
-#### Network Issues
-If downloading from Xenia repository fails:
-```bash
-# Test connectivity
-ping repo.xenialinux.com
-
-# Use alternative mirror if needed
-# In config file, set: repository = "https://mirror.xenialinux.com/releases/"
 ```
 
 ---
 
-## 🔮 Roadmap
+## 🤖 AI Integration Roadmap
 
-### Phase 1: Foundation (Current)
-- [x] Core installer functionality
-- [x] BTRFS read-only system
+| Phase | Feature | Status |
+|-------|---------|--------|
+| Now | BtrMind local AI assistant | 🔄 In Progress |
+| 2026 | Predictive system maintenance | 📋 Planned |
+| 2026 | Intelligent resource allocation | 📋 Planned |
+| 2027 | Natural language system control | 📋 Planned |
+| 2027 | Asterinas kernel migration | 📋 Planned |
+
+---
+
+## 🗺️ Roadmap
+
+- [x] Core installer with Btrfs validation
+- [x] Read-only root filesystem
 - [x] Rust rewrite of installer
 - [ ] Cosmic Desktop integration
-- [ ] Rust replacements of core utilities
-- [ ] Basic local-only Rust-based AI integrations
-
-### Phase 2: Rust Migration
-- [ ] Rust-based system utilities
+- [ ] Rust replacements of core GNU utilities
 - [ ] Memory-safe package manager
-- [ ] Rust-based system components
-
-### Phase 3: AI Integration
-- [ ] Predictive system maintenance
-- [ ] Intelligent resource allocation
-- [ ] Context-aware user assistance
-- [ ] Natural language system control
-
-### Phase 4: Future Architecture
-- [ ] Asterinas kernel integration. Probably in 2026-2027.
-- [ ] Complete Rust system stack
-- [ ] Advanced AI capabilities
-- [ ] Distributed system features
+- [ ] Advanced AI capabilities (predictive maintenance, NL control)
+- [ ] Asterinas kernel integration
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions to RegicideOS! Areas where we particularly need help:
+We particularly need help with:
 
-- **Rust development**: Rewriting system components in Rust
-- **AI integration**: Implementing intelligent system features
-- **Overlay creation**: Developing useful package collections
-- **Documentation**: Improving guides and references
-- **Testing**: Bug reports and verification
-
-See our [Contribution Guidelines](CONTRIBUTING.md) for details.
+- 🦀 **Rust development** — Rewriting system components in Rust
+- 🤖 **AI integration** — Implementing intelligent system features
+- 📦 **Overlay creation** — Developing useful package collections
+- 📝 **Documentation** — Improving guides and references
+- 🧪 **Testing** — Bug reports and verification
 
 ---
 
-## 📊 Comparison with Xenia Linux
+## 📜 License
 
-| Feature | Xenia Linux | RegicideOS |
-|---------|-------------|------------|
-| **Primary Language** | Mixed | Rust-first |
-| **AI Integration** | Limited | Core focus |
-| **Kernel** | Linux | Linux → Asterinas |
-| **Filesystem** | Multiple options | BTRFS (read-only) |
-| **Desktop Environments** | Multiple | Cosmic Desktop only |
-| **Package Management** | Traditional | Overlay-based |
-| **System Philosophy** | General purpose | AI/Rust-focused |
-| **Update Model** | Traditional | Immutable |
+RegicideOS is licensed under the **GNU General Public License v3.0**.
 
----
-
-## 📄 License
-
-RegicideOS is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **Xenia Linux**: For providing the excellent foundation upon which RegicideOS is built
-- **Rust Foundation**: For creating the language that powers our vision
-- **System76**: For the Cosmic Desktop environment
-- **Asterinas Team**: For their groundbreaking kernel research
-- **Container Community**: For the tools that make our container-first approach possible
+Built on the excellent foundation of [Xenia Linux](https://xenialinux.com/).
 
 ---
 
 <div align="center">
 
-**Join us in building the future of operating systems!**
-
-[🌐 Website]() • [💬 Discord]() • [🐙 GitHub](https://github.com/awdemos/RegicideOS)
+**© 2026 Andrew White · RegicideOS Project**
 
 </div>
