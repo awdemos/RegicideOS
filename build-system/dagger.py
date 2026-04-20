@@ -70,7 +70,7 @@ async def build_variant(client: dagger.Client, src: dagger.Directory,
     # Use modern container image
     base_container = (
         client.container()
-        .from(f"ghcr.io/regicideos/build-base:2025.1")
+        .from_(f"ghcr.io/regicideos/build-base:2025.1")
         .with_exec(["rustup", "install", "stable"])
         .with_exec(["rustup", "target", "add", target])
     )
@@ -150,7 +150,7 @@ async def generate_system_image(client: dagger.Client, container: dagger.Contain
     # Save metadata
     metadata_file = (
         client.container()
-        .from("alpine:latest")
+        .from_("alpine:latest")
         .with_new_file("/metadata.json", json.dumps(metadata, indent=2))
         .file("/metadata.json")
     )
@@ -159,7 +159,7 @@ async def generate_system_image(client: dagger.Client, container: dagger.Contain
 
 async def get_file_size(client: dagger.Client, file: dagger.File) -> int:
     """Get file size using modern Docker operations"""
-    container = client.container().from("alpine:latest").with_file("/tmp/file", file)
+    container = client.container().from_("alpine:latest").with_file("/tmp/file", file)
     result = await container.with_exec(["stat", "-c%s", "/tmp/file"]).stdout()
     return int(result.strip())
 
@@ -239,7 +239,7 @@ async def generate_build_report(client: dagger.Client,
     report_content = json.dumps(report, indent=2)
     report_file = (
         client.container()
-        .from("alpine:latest")
+        .from_("alpine:latest")
         .with_new_file("/build-report.json", report_content)
         .file("/build-report.json")
     )

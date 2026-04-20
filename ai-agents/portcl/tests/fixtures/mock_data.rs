@@ -1,10 +1,11 @@
 //! Mock data for testing PortCL components
 
+use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Mock package information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub struct MockPackage {
     pub name: String,
     pub category: String,
@@ -12,12 +13,16 @@ pub struct MockPackage {
     pub description: String,
     pub homepage: Option<String>,
     pub license: String,
-    pub use_flags: Vec<String>,
+    pub use_flags: HashMap<String, String>,
     pub dependencies: Vec<String>,
+    pub repository: String,
+    pub size_bytes: u64,
+    pub installed: bool,
+    pub masked: bool,
 }
 
 /// Mock action for testing - mirrors the actual PortCL Action enum
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub enum MockAction {
     NoOp,
     AdjustParallelism { jobs: u32 },
@@ -28,7 +33,7 @@ pub enum MockAction {
 }
 
 /// ActionType enum for testing
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub enum MockActionType {
     NoOp,
     AdjustParallelism,
@@ -39,7 +44,7 @@ pub enum MockActionType {
 }
 
 /// Mock configuration for testing
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub struct MockConfig {
     pub api_key: String,
     pub base_url: String,
@@ -50,7 +55,7 @@ pub struct MockConfig {
 }
 
 /// Mock RL state for testing
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Arbitrary)]
 pub struct MockRLState {
     pub episode_count: u32,
     pub total_reward: f64,
@@ -59,17 +64,31 @@ pub struct MockRLState {
     pub current_policy: String,
 }
 
-/// Mock PortageConfig for testing PortCL configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MockPortageConfig {
-    pub monitoring: MockMonitoringConfig,
-    pub rl: MockRLConfig,
-    pub actions: MockActionConfig,
-    pub safety: MockSafetyConfig,
-    pub general: MockGeneralConfig,
+/// Mock makeopts for testing
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
+pub struct MockMakeopts {
+    pub jobs: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Mock PortageConfig for testing PortCL configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
+pub struct MockPortageConfig {
+    pub portage_dir: String,
+    pub config_file: String,
+    pub timeout_ms: u64,
+    pub max_retries: u32,
+    pub cache_enabled: bool,
+    pub cache_size_mb: u32,
+    pub use_ebuild_cache: bool,
+    pub verify_checksums: bool,
+    pub profile: String,
+    pub accept_keywords: Vec<String>,
+    pub makeopts: MockMakeopts,
+    pub use_flags: Vec<String>,
+    pub features: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub struct MockMonitoringConfig {
     pub poll_interval: u64,
     pub portage_path: String,
@@ -78,7 +97,7 @@ pub struct MockMonitoringConfig {
     pub enable_event_tracking: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Arbitrary)]
 pub struct MockRLConfig {
     pub learning_rate: f64,
     pub discount_factor: f64,
@@ -92,7 +111,7 @@ pub struct MockRLConfig {
     pub ewc_importance: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub struct MockActionConfig {
     pub enable_dry_run: bool,
     pub max_concurrent_actions: usize,
@@ -101,7 +120,7 @@ pub struct MockActionConfig {
     pub safe_actions_only: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Arbitrary)]
 pub struct MockSafetyConfig {
     pub max_cpu_usage: f64,
     pub max_memory_usage: f64,
@@ -111,7 +130,7 @@ pub struct MockSafetyConfig {
     pub backup_before_actions: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub struct MockGeneralConfig {
     pub log_level: String,
     pub data_directory: String,
@@ -121,7 +140,7 @@ pub struct MockGeneralConfig {
 }
 
 /// Mock learning event for testing
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MockLearningEvent {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub action_id: String,
@@ -156,14 +175,48 @@ impl Default for MockRLState {
     }
 }
 
+impl Default for MockMakeopts {
+    fn default() -> Self {
+        Self { jobs: 4 }
+    }
+}
+
 impl Default for MockPortageConfig {
     fn default() -> Self {
         Self {
-            monitoring: MockMonitoringConfig::default(),
-            rl: MockRLConfig::default(),
-            actions: MockActionConfig::default(),
-            safety: MockSafetyConfig::default(),
-            general: MockGeneralConfig::default(),
+            portage_dir: "/usr/portage".to_string(),
+            config_file: "/etc/portage/make.conf".to_string(),
+            timeout_ms: 30000,
+            max_retries: 3,
+            cache_enabled: true,
+            cache_size_mb: 100,
+            use_ebuild_cache: true,
+            verify_checksums: true,
+            profile: "default/linux/amd64/23.0".to_string(),
+            accept_keywords: vec!["amd64".to_string(), "~amd64".to_string()],
+            makeopts: MockMakeopts::default(),
+            use_flags: vec!["X".to_string(), "gtk".to_string(), "ssl".to_string()],
+            features: vec!["parallel-fetch".to_string(), "buildpkg".to_string()],
+        }
+    }
+}
+
+impl MockPortageConfig {
+    pub fn sample_config() -> Self {
+        Self {
+            portage_dir: "/usr/portage".to_string(),
+            config_file: "/etc/portage/make.conf".to_string(),
+            timeout_ms: 30000,
+            max_retries: 3,
+            cache_enabled: true,
+            cache_size_mb: 100,
+            use_ebuild_cache: true,
+            verify_checksums: true,
+            profile: "default/linux/amd64/23.0".to_string(),
+            accept_keywords: vec!["amd64".to_string()],
+            makeopts: MockMakeopts { jobs: 4 },
+            use_flags: vec!["X".to_string(), "gtk".to_string()],
+            features: vec!["parallel-fetch".to_string()],
         }
     }
 }
@@ -238,7 +291,37 @@ impl Default for MockGeneralConfig {
     }
 }
 
+impl MockPackage {
+    pub fn sample_package() -> Self {
+        let mut use_flags = HashMap::new();
+        use_flags.insert("buildkit".to_string(), "enabled".to_string());
+        use_flags.insert("doc".to_string(), "enabled".to_string());
+        MockPackage {
+            name: "portage".to_string(),
+            category: "sys-apps".to_string(),
+            version: "3.0.30".to_string(),
+            description: "Portage package management system".to_string(),
+            homepage: Some("https://wiki.gentoo.org/wiki/Portage".to_string()),
+            license: "GPL-2".to_string(),
+            use_flags,
+            dependencies: vec!["python".to_string(), "rsync".to_string()],
+            repository: "gentoo".to_string(),
+            size_bytes: 1024 * 1024 * 10,
+            installed: true,
+            masked: false,
+        }
+    }
+}
+
 pub fn sample_packages() -> Vec<MockPackage> {
+    let mut use_flags1 = HashMap::new();
+    use_flags1.insert("buildkit".to_string(), "enabled".to_string());
+    use_flags1.insert("doc".to_string(), "enabled".to_string());
+
+    let mut use_flags2 = HashMap::new();
+    use_flags2.insert("clippy".to_string(), "enabled".to_string());
+    use_flags2.insert("rustfmt".to_string(), "enabled".to_string());
+
     vec![
         MockPackage {
             name: "portage".to_string(),
@@ -247,8 +330,12 @@ pub fn sample_packages() -> Vec<MockPackage> {
             description: "Portage package management system".to_string(),
             homepage: Some("https://wiki.gentoo.org/wiki/Portage".to_string()),
             license: "GPL-2".to_string(),
-            use_flags: vec!["buildkit".to_string(), "doc".to_string()],
+            use_flags: use_flags1,
             dependencies: vec!["python".to_string(), "rsync".to_string()],
+            repository: "gentoo".to_string(),
+            size_bytes: 1024 * 1024 * 10,
+            installed: true,
+            masked: false,
         },
         MockPackage {
             name: "rust".to_string(),
@@ -257,8 +344,12 @@ pub fn sample_packages() -> Vec<MockPackage> {
             description: "Rust programming language".to_string(),
             homepage: Some("https://www.rust-lang.org/".to_string()),
             license: "MIT Apache-2.0".to_string(),
-            use_flags: vec!["clippy".to_string(), "rustfmt".to_string()],
+            use_flags: use_flags2,
             dependencies: vec!["binutils".to_string(), "gcc".to_string()],
+            repository: "gentoo".to_string(),
+            size_bytes: 1024 * 1024 * 50,
+            installed: false,
+            masked: false,
         },
     ]
 }
@@ -326,6 +417,32 @@ impl MockAction {
             },
         }
     }
+
+    pub fn package_name(&self) -> String {
+        match self {
+            MockAction::NoOp => String::new(),
+            MockAction::AdjustParallelism { .. } => String::new(),
+            MockAction::OptimizeBuildOrder { package_list } => {
+                package_list.first().cloned().unwrap_or_default()
+            },
+            MockAction::ScheduleOperation { .. } => String::new(),
+            MockAction::PreFetchDependencies { packages } => {
+                packages.first().cloned().unwrap_or_default()
+            },
+            MockAction::CleanObsoletePackages { .. } => String::new(),
+        }
+    }
+
+    pub fn priority(&self) -> u32 {
+        match self {
+            MockAction::NoOp => 0,
+            MockAction::AdjustParallelism { jobs } => *jobs,
+            MockAction::OptimizeBuildOrder { package_list } => package_list.len() as u32,
+            MockAction::ScheduleOperation { .. } => 1,
+            MockAction::PreFetchDependencies { packages } => packages.len() as u32,
+            MockAction::CleanObsoletePackages { .. } => 2,
+        }
+    }
 }
 
 pub fn sample_learning_events() -> Vec<MockLearningEvent> {
@@ -352,52 +469,19 @@ pub fn sample_learning_events() -> Vec<MockLearningEvent> {
 pub fn sample_portage_configs() -> Vec<MockPortageConfig> {
     vec![
         MockPortageConfig {
-            monitoring: MockMonitoringConfig {
-                poll_interval: 60,
-                portage_path: "/usr/bin/portage".to_string(),
-                log_path: "/var/log/portcl.log".to_string(),
-                metrics_retention_days: 7,
-                enable_event_tracking: false,
-            },
-            rl: MockRLConfig {
-                learning_rate: 0.01,
-                discount_factor: 0.99,
-                exploration_rate: 0.2,
-                exploration_decay: 0.999,
-                memory_size: 50000,
-                batch_size: 64,
-                target_update_freq: 200,
-                model_path: "/var/lib/portcl/advanced_model.pt".to_string(),
-                enable_continual_learning: true,
-                ewc_importance: 5000.0,
-            },
-            actions: MockActionConfig {
-                enable_dry_run: false,
-                max_concurrent_actions: 5,
-                action_timeout: 600,
-                rollback_enabled: false,
-                safe_actions_only: false,
-            },
-            safety: MockSafetyConfig {
-                max_cpu_usage: 95.0,
-                max_memory_usage: 85.0,
-                min_disk_space_gb: 10.0,
-                critical_packages: vec![
-                    "sys-kernel/gentoo-kernel".to_string(),
-                    "sys-apps/systemd".to_string(),
-                    "sys-apps/portage".to_string(),
-                    "net-misc/curl".to_string(),
-                ],
-                enable_system_checks: false,
-                backup_before_actions: false,
-            },
-            general: MockGeneralConfig {
-                log_level: "debug".to_string(),
-                data_directory: "/var/lib/portcl".to_string(),
-                user: "root".to_string(),
-                group: "root".to_string(),
-                enable_metrics_collection: true,
-            },
+            portage_dir: "/usr/portage".to_string(),
+            config_file: "/etc/portage/make.conf".to_string(),
+            timeout_ms: 60000,
+            max_retries: 5,
+            cache_enabled: false,
+            cache_size_mb: 200,
+            use_ebuild_cache: false,
+            verify_checksums: false,
+            profile: "default/linux/amd64/23.0".to_string(),
+            accept_keywords: vec!["amd64".to_string()],
+            makeopts: MockMakeopts { jobs: 8 },
+            use_flags: vec!["X".to_string(), "gtk".to_string()],
+            features: vec!["parallel-fetch".to_string()],
         },
         MockPortageConfig::default(),
     ]

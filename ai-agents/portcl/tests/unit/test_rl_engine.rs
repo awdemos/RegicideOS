@@ -231,7 +231,7 @@ async fn test_mock_agent_buffer_limit() {
 #[tokio::test]
 async fn test_mock_agent_training_requirements() {
     let config = create_test_agent_config();
-    let agent = MockRLAgent::new(config);
+    let mut agent = MockRLAgent::new(config);
 
     // Try training with insufficient experiences
     let result = agent.train_step();
@@ -301,7 +301,7 @@ async fn test_reward_calculation_simulation() {
 
     for (state, action, expected_reward) in test_scenarios {
         let config = create_test_agent_config();
-        let agent = MockRLAgent::new(config);
+        let mut agent = MockRLAgent::new(config);
 
         // Create experience with the given state and action
         let experience = MockExperience {
@@ -345,7 +345,7 @@ async fn test_exploration_exploitation_balance() {
 #[tokio::test]
 async fn test_action_space_coverage() {
     let config = create_test_agent_config();
-    let agent = MockRLAgent::new(config);
+    let mut agent = MockRLAgent::new(config);
 
     // Test that agent can select all available actions
     let test_actions = vec![
@@ -439,7 +439,7 @@ async fn test_concurrent_experience_updates() {
 
 #[tokio::test]
 async fn test_training_performance() {
-    let config = create_test_agent_config();
+    let mut config = create_test_agent_config();
     config.batch_size = 32;
     config.memory_size = 1000;
 
@@ -640,7 +640,7 @@ async fn test_agent_config_validation() {
 
 #[tokio::test]
 async fn test_experience_replay_simulation() {
-    let config = create_test_agent_config();
+    let mut config = create_test_agent_config();
     config.batch_size = 4;
     config.memory_size = 10;
 

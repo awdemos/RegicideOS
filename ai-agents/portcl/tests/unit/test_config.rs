@@ -8,6 +8,7 @@ use portcl::prelude::*;
 use std::path::PathBuf;
 use tempfile::{NamedTempFile, TempDir};
 use std::fs;
+use std::io::Write;
 use std::collections::HashMap;
 
 // Test utilities
@@ -19,6 +20,9 @@ fn create_test_portage_config() -> PortageConfig {
             log_path: PathBuf::from("/var/log/portcl.log"),
             metrics_retention_days: 30,
             enable_event_tracking: true,
+            enable_metrics: true,
+            enable_events: true,
+            max_history_size: 1000,
         },
         rl: RLConfig {
             learning_rate: 0.001,
@@ -31,6 +35,8 @@ fn create_test_portage_config() -> PortageConfig {
             model_path: PathBuf::from("/var/lib/portcl/model.pt"),
             enable_continual_learning: true,
             ewc_importance: 1000.0,
+            save_freq: 100,
+            training_freq: 10,
         },
         actions: ActionConfig {
             enable_dry_run: true,

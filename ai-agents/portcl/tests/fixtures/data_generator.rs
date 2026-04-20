@@ -23,10 +23,10 @@ impl TestDataGenerator {
     }
 
     /// Create a new test data generator with a specific seed
-    pub fn with_seed(seed: u64) -> Self {
-        use rand::SeedableRng;
+    pub fn with_seed(_seed: u64) -> Self {
+        // ThreadRng doesn't support seeding; use thread_rng for now
         Self {
-            rng: rand::rngs::StdRng::seed_from_u64(seed),
+            rng: rand::thread_rng(),
         }
     }
 
@@ -60,6 +60,10 @@ impl TestDataGenerator {
             license: licenses[self.rng.gen_range(0..licenses.len())].to_string(),
             use_flags: self.generate_use_flags(&use_flags),
             dependencies: self.generate_dependencies(),
+            repository: "gentoo".to_string(),
+            size_bytes: self.rng.gen_range(1024..1024 * 1024 * 100),
+            installed: self.rng.gen_bool(0.5),
+            masked: self.rng.gen_bool(0.1),
         }
     }
 
@@ -71,66 +75,43 @@ impl TestDataGenerator {
     /// Generate a random Portage configuration
     pub fn generate_portage_config(&mut self) -> MockPortageConfig {
         MockPortageConfig {
-            monitoring: MockMonitoringConfig {
-                poll_interval: self.rng.gen_range(10..300),
-                portage_path: "/usr/bin/portage".to_string(),
-                log_path: format!("/var/log/portcl-{}.log", self.generate_random_string(8)),
-                metrics_retention_days: self.rng.gen_range(7..365),
-                enable_event_tracking: self.rng.gen_bool(0.8),
-            },
-            rl: MockRLConfig {
-                learning_rate: self.rng.gen_range(0.0001..0.1),
-                discount_factor: self.rng.gen_range(0.8..0.99),
-                exploration_rate: self.rng.gen_range(0.01..0.3),
-                exploration_decay: self.rng.gen_range(0.99..0.9999),
-                memory_size: self.rng.gen_range(1000..100000),
-                batch_size: self.rng.gen_range(16..256),
-                target_update_freq: self.rng.gen_range(50..500),
-                model_path: format!("/var/lib/portcl/model-{}.pt", self.generate_random_string(8)),
-                enable_continual_learning: self.rng.gen_bool(0.7),
-                ewc_importance: self.rng.gen_range(100.0..10000.0),
-            },
-            actions: MockActionConfig {
-                enable_dry_run: self.rng.gen_bool(0.6),
-                max_concurrent_actions: self.rng.gen_range(1..10),
-                action_timeout: self.rng.gen_range(60..1800),
-                rollback_enabled: self.rng.gen_bool(0.8),
-                safe_actions_only: self.rng.gen_bool(0.7),
-            },
-            safety: MockSafetyConfig {
-                max_cpu_usage: self.rng.gen_range(50.0..100.0),
-                max_memory_usage: self.rng.gen_range(60.0..95.0),
-                min_disk_space_gb: self.rng.gen_range(1.0..50.0),
-                critical_packages: self.generate_critical_packages(),
-                enable_system_checks: self.rng.gen_bool(0.9),
-                backup_before_actions: self.rng.gen_bool(0.8),
-            },
-            general: MockGeneralConfig {
-                log_level: self.generate_log_level(),
-                data_directory: format!("/var/lib/portcl-{}", self.generate_random_string(8)),
-                user: if self.rng.gen_bool(0.8) { "portcl".to_string() } else { "root".to_string() },
-                group: if self.rng.gen_bool(0.8) { "portcl".to_string() } else { "root".to_string() },
-                enable_metrics_collection: self.rng.gen_bool(0.9),
-            },
+            portage_dir: format!("/usr/portage-{}", self.generate_random_string(6)),
+            config_file: "/etc/portage/make.conf".to_string(),
+            timeout_ms: self.rng.gen_range(1000..60000),
+            max_retries: self.rng.gen_range(1..10),
+            cache_enabled: self.rng.gen_bool(0.7),
+            cache_size_mb: self.rng.gen_range(50..500),
+            use_ebuild_cache: self.rng.gen_bool(0.6),
+            verify_checksums: self.rng.gen_bool(0.8),
+            profile: "default/linux/amd64/23.0".to_string(),
+            accept_keywords: vec!["amd64".to_string()],
+            makeopts: MockMakeopts { jobs: self.rng.gen_range(1..32) },
+            use_flags: self.generate_use_flags_as_vec(&["X", "gtk", "qt5", "alsa", "ssl", "threads"]),
+            features: vec!["parallel-fetch".to_string(), "buildpkg".to_string()],
         }
     }
 
     /// Generate a random action
     pub fn generate_action(&mut self) -> MockAction {
-        let actions = [
-            MockAction::NoOp,
-            MockAction::AdjustParallelism { jobs: self.rng.gen_range(1..32) },
-            MockAction::OptimizeBuildOrder {
-                package_list: self.generate_package_list(self.rng.gen_range(1..10))
+        match self.rng.gen_range(0..6) {
+            0 => MockAction::NoOp,
+            1 => MockAction::AdjustParallelism { jobs: self.rng.gen_range(1..32) },
+            2 => {
+                let count = self.rng.gen_range(1..10);
+                MockAction::OptimizeBuildOrder {
+                    package_list: self.generate_package_list(count)
+                }
             },
-            MockAction::ScheduleOperation { delay_seconds: self.rng.gen_range(1..3600) },
-            MockAction::PreFetchDependencies {
-                packages: self.generate_package_list(self.rng.gen_range(1..20))
+            3 => MockAction::ScheduleOperation { delay_seconds: self.rng.gen_range(1..3600) },
+            4 => {
+                let count = self.rng.gen_range(1..20);
+                MockAction::PreFetchDependencies {
+                    packages: self.generate_package_list(count)
+                }
             },
-            MockAction::CleanObsoletePackages { force: self.rng.gen_bool(0.3) },
-        ];
-
-        actions[self.rng.gen_range(0..actions.len())].clone()
+            5 => MockAction::CleanObsoletePackages { force: self.rng.gen_bool(0.3) },
+            _ => unreachable!(),
+        }
     }
 
     /// Generate multiple random actions
@@ -148,11 +129,19 @@ impl TestDataGenerator {
         result.status = self.generate_test_status();
         result.duration_ms = self.rng.gen_range(1..30000);
         result.metrics = TestMetrics {
+            coverage_percent: self.rng.gen_range(0.0..100.0),
+            execution_time_ms: result.duration_ms,
+            memory_usage_mb: self.rng.gen_range(1.0..1024.0),
+            memory_usage_percent: self.rng.gen_range(0.0..100.0),
             memory_peak_bytes: self.rng.gen_range(1024..1024 * 1024 * 1024),
             cpu_time_ms: self.rng.gen_range(1..5000),
-            allocations: self.rng.gen_range(10..100000),
+            cpu_usage_percent: self.rng.gen_range(0.0..100.0),
+            disk_usage_percent: self.rng.gen_range(0.0..100.0),
             disk_io_bytes: self.rng.gen_range(0..1024 * 1024 * 100),
             network_io_bytes: self.rng.gen_range(0..1024 * 1024 * 10),
+            allocations: self.rng.gen_range(10..100000),
+            assertions_passed: self.rng.gen_range(0..100),
+            assertions_failed: self.rng.gen_range(0..10),
             custom_metrics: self.generate_custom_metrics(),
         };
 
@@ -162,8 +151,14 @@ impl TestDataGenerator {
     /// Generate a test configuration with random settings
     pub fn generate_test_config(&mut self) -> TestConfig {
         TestConfig {
+            name: self.generate_random_string(10),
             test_suite_name: format!("{} Test Suite", self.generate_random_string(10)),
+            test_type: TestType::Unit,
             test_types: self.generate_test_types(),
+            timeout_ms: self.rng.gen_range(1000..60000),
+            max_parallel_tasks: self.rng.gen_range(1..16),
+            max_retries: self.rng.gen_range(1..5),
+            enable_retry: self.rng.gen_bool(0.7),
             execution_config: TestExecutionConfig {
                 max_concurrent_tests: self.rng.gen_range(1..16),
                 test_timeout_seconds: self.rng.gen_range(30..1800),
@@ -266,7 +261,19 @@ impl TestDataGenerator {
         format!("{} {} {}", adjective, noun, purpose)
     }
 
-    fn generate_use_flags(&mut self, available_flags: &[&str]) -> Vec<String> {
+    fn generate_use_flags(&mut self, available_flags: &[&str]) -> HashMap<String, String> {
+        let count = self.rng.gen_range(0..std::cmp::min(6, available_flags.len()));
+        let mut flags = HashMap::new();
+
+        for _ in 0..count {
+            let flag = available_flags[self.rng.gen_range(0..available_flags.len())];
+            flags.insert(flag.to_string(), "enabled".to_string());
+        }
+
+        flags
+    }
+
+    fn generate_use_flags_as_vec(&mut self, available_flags: &[&str]) -> Vec<String> {
         let count = self.rng.gen_range(0..std::cmp::min(6, available_flags.len()));
         let mut flags = Vec::new();
 
@@ -473,7 +480,7 @@ impl TestDataGenerator {
 
     fn generate_random_string(&mut self, length: usize) -> String {
         use rand::distributions::Alphanumeric;
-        self.rng
+        self.rng.clone()
             .sample_iter(&Alphanumeric)
             .take(length)
             .map(char::from)

@@ -37,6 +37,11 @@ output/
 # Cache
 .cache/
 **/.cache/
+__pycache__/
+**/__pycache__/
+
+# Proptest regressions
+*.proptest-regressions
 
 # AI models (can be large)  
 *.pt

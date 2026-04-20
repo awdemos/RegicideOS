@@ -66,9 +66,11 @@ class TestDestructiveOperationSafety(unittest.TestCase):
     def test_subprocess_safety_wrapper(self):
         """Test safety wrapper for subprocess calls."""
         class SafeSubprocess:
-            def __init__(self):
+            def __init__(self, dangerous_cmds, destructive_ptrns):
                 self.dry_run = False
                 self.calls_made = []
+                self.dangerous_commands = dangerous_cmds
+                self.destructive_patterns = destructive_ptrns
             
             def run(self, command, dry_run=False):
                 """Safe subprocess execution with dry-run support."""
@@ -83,9 +85,18 @@ class TestDestructiveOperationSafety(unittest.TestCase):
                 return Mock(returncode=0, stdout=b"success", stderr=b"")
             
             def _is_dangerous_command(self, command):
-                return self._is_dangerous_command(command)
+                command_lower = command.lower()
+                for dangerous_cmd in self.dangerous_commands:
+                    if dangerous_cmd in command_lower:
+                        return True
+                for pattern in self.destructive_patterns:
+                    if pattern in command_lower:
+                        return True
+                if "of=/dev/" in command_lower:
+                    return True
+                return False
         
-        safe_subprocess = SafeSubprocess()
+        safe_subprocess = SafeSubprocess(self.dangerous_commands, self.destructive_patterns)
         
         # Test dangerous command with dry-run
         result = safe_subprocess.run("dd if=/dev/zero of=/dev/sda", dry_run=True)

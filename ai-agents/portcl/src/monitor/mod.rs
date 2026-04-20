@@ -2,9 +2,9 @@ pub mod portage;
 pub mod metrics;
 pub mod events;
 
-pub use portage::{PortageMonitor, PortageInfo, PackageInfo};
-pub use metrics::{PortageMetrics, SystemMetrics, MetricsCollector};
-pub use events::{PortageEvent, EventTracker, EventType};
+pub use portage::{PortageMonitor, PortageInfo, PackageInfo, PackageQuery};
+pub use metrics::{PortageMetrics, SystemMetrics, MetricsCollector, NetworkIo};
+pub use events::{PortageEvent, EventTracker, EventType, EventSeverity, EventSource};
 
 use crate::config::MonitoringConfig;
 use crate::error::Result;

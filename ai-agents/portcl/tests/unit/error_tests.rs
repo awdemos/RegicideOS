@@ -98,14 +98,7 @@ fn test_error_handling() {
 #[test]
 fn test_retryable_errors() {
     // Network errors should be retryable
-    let network_error = PortCLError::Network(reqwest::Error::from(
-        reqwest::Response::from(
-            http::Response::builder()
-                .status(500)
-                .body("server error".to_string())
-                .unwrap(),
-        ),
-    ));
+    let network_error = PortCLError::Network("server error".to_string());
     assert!(is_retryable_error(&network_error));
 
     // Timeout errors should be retryable
@@ -113,7 +106,7 @@ fn test_retryable_errors() {
     assert!(is_retryable_error(&timeout_error));
 
     // IO errors should be retryable
-    let io_error = PortCLError::Io(io::Error::new(io::ErrorKind::WouldBlock, "would block"));
+    let io_error: PortCLError = io::Error::new(io::ErrorKind::WouldBlock, "would block").into();
     assert!(is_retryable_error(&io_error));
 
     // Portage errors with timeout keyword should be retryable
@@ -151,27 +144,20 @@ fn test_error_severity() {
     let validation_error = PortCLError::Validation("validation error".to_string());
     assert_eq!(error_severity(&validation_error), ErrorSeverity::Medium);
 
-    let io_error = PortCLError::Io(io::Error::new(io::ErrorKind::NotFound, "not found"));
+    let io_error: PortCLError = io::Error::new(io::ErrorKind::NotFound, "not found").into();
     assert_eq!(error_severity(&io_error), ErrorSeverity::Medium);
 
     // Low severity
-    let network_error = PortCLError::Network(reqwest::Error::from(
-        reqwest::Response::from(
-            http::Response::builder()
-                .status(404)
-                .body("not found".to_string())
-                .unwrap(),
-        ),
-    ));
+    let network_error = PortCLError::Network("not found".to_string());
     assert_eq!(error_severity(&network_error), ErrorSeverity::Low);
 
     let timeout_error = PortCLError::Timeout("timeout".to_string());
     assert_eq!(error_severity(&timeout_error), ErrorSeverity::Low);
 
-    let json_error = PortCLError::Json(serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err());
+    let json_error: PortCLError = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err().into();
     assert_eq!(error_severity(&json_error), ErrorSeverity::Low);
 
-    let toml_error = PortCLError::TomlDeserialize(toml::from_str::<toml::Value>("invalid toml").unwrap_err());
+    let toml_error: PortCLError = toml::from_str::<toml::Value>("invalid toml").unwrap_err().into();
     assert_eq!(error_severity(&toml_error), ErrorSeverity::Low);
 }
 

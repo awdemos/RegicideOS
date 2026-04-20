@@ -7,6 +7,7 @@ use crate::actions::Action;
 use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, Instant};
 
 /// Configuration for the action executor
@@ -56,7 +57,7 @@ pub struct ExecutionMetrics {
 #[derive(Debug, Clone)]
 pub struct ActionExecutor {
     config: ExecutorConfig,
-    active_actions: HashMap<String, Instant>,
+    active_actions: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl ActionExecutor {
@@ -69,12 +70,12 @@ impl ActionExecutor {
     pub fn with_config(config: ExecutorConfig) -> Self {
         Self {
             config,
-            active_actions: HashMap::new(),
+            active_actions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Execute an action asynchronously
-    pub async fn execute(&mut self, action: Action) -> Result<ActionResult> {
+    pub async fn execute(&self, action: Action) -> Result<ActionResult> {
         let start_time = Instant::now();
         let action_id = self.generate_action_id(&action);
 
@@ -82,7 +83,7 @@ impl ActionExecutor {
         self.validate_action(&action).await?;
 
         // Record the start time
-        self.active_actions.insert(action_id.clone(), start_time);
+        self.active_actions.lock().unwrap().insert(action_id.clone(), start_time);
 
         // Execute the action with timeout
         let result = tokio::time::timeout(
@@ -92,7 +93,7 @@ impl ActionExecutor {
         .await;
 
         // Clean up active action tracking
-        self.active_actions.remove(&action_id);
+        self.active_actions.lock().unwrap().remove(&action_id);
 
         match result {
             Ok(Ok(action_result)) => Ok(action_result),
@@ -151,7 +152,8 @@ impl ActionExecutor {
     /// Validate that an action can be executed
     async fn validate_action(&self, action: &Action) -> Result<()> {
         // Check if we're at the concurrent action limit
-        if self.active_actions.len() >= self.config.max_concurrent_actions as usize {
+        let active_count = self.active_actions.lock().unwrap().len();
+        if active_count >= self.config.max_concurrent_actions as usize {
             return Err(PortCLError::Resource(format!(
                 "Maximum concurrent actions ({}) reached",
                 self.config.max_concurrent_actions
@@ -236,17 +238,17 @@ impl ActionExecutor {
     /// Generate a unique ID for an action
     fn generate_action_id(&self, action: &Action) -> String {
         use uuid::Uuid;
-        format!("{}_{}", action.action_type(), Uuid::new_v4())
+        format!("{:?}_{}", action.action_type(), Uuid::new_v4())
     }
 
     /// Get the number of currently active actions
     pub fn active_action_count(&self) -> usize {
-        self.active_actions.len()
+        self.active_actions.lock().unwrap().len()
     }
 
     /// Check if a specific action type is currently running
     pub fn is_action_type_active(&self, action_type: &str) -> bool {
-        self.active_actions.keys().any(|id| id.starts_with(action_type))
+        self.active_actions.lock().unwrap().keys().any(|id| id.starts_with(action_type))
     }
 
     /// Get executor configuration
@@ -260,9 +262,10 @@ impl ActionExecutor {
     }
 
     /// Cancel all active actions
-    pub async fn cancel_all_actions(&mut self) -> Result<u32> {
-        let cancelled_count = self.active_actions.len() as u32;
-        self.active_actions.clear();
+    pub async fn cancel_all_actions(&self) -> Result<u32> {
+        let mut actions = self.active_actions.lock().unwrap();
+        let cancelled_count = actions.len() as u32;
+        actions.clear();
         Ok(cancelled_count)
     }
 }
@@ -316,19 +319,20 @@ mod tests {
             max_concurrent_actions: 1,
             ..Default::default()
         };
-        let mut executor = ActionExecutor::with_config(config.clone());
+        let executor = ActionExecutor::with_config(config.clone());
 
         // Start a long-running action
         let long_action = Action::CleanObsoletePackages { force: false };
+        let mut executor1 = executor.clone();
         let handle = tokio::spawn(async move {
-            executor.execute(long_action).await
+            executor1.execute(long_action).await
         });
 
         // Give it time to start
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        // Try to start another action
-        let mut executor2 = ActionExecutor::with_config(config.clone());
+        // Try to start another action on the cloned executor (shares active_actions state)
+        let mut executor2 = executor.clone();
         let result = executor2.execute(Action::NoOp).await;
 
         assert!(result.is_err());

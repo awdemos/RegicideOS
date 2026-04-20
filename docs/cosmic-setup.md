@@ -1,10 +1,10 @@
 # COSMIC Desktop Setup for RegicideOS
 
-This guide explains how to build and deploy RegicideOS with COSMIC Desktop on a pure Gentoo base using the Xenia build system.
+This guide explains how to build and deploy RegicideOS with COSMIC Desktop on a pure Gentoo base.
 
 ## Overview
 
-RegicideOS uses the same architecture as Xenia Linux - a pure Gentoo base with COSMIC Desktop packaged into a read-only SquashFS image that boots with BTRFS overlays for writable layers.
+RegicideOS uses a pure Gentoo base with COSMIC Desktop. The live ISO medium uses SquashFS for compression, while the installed system boots from a native ROOTS partition with BTRFS overlays for writable layers.
 
 ## Prerequisites
 
@@ -13,6 +13,7 @@ RegicideOS uses the same architecture as Xenia Linux - a pure Gentoo base with C
 Any Gentoo system or chroot with the necessary tools:
 
 ```bash
+# For ISO builds (SquashFS is used for the live medium only)
 emerge -av dev-util/catalyst app-arch/pixz sys-fs/squashfs-tools
 ```
 
@@ -181,8 +182,10 @@ git pull
 # Rebuild with catalyst
 catalyst -a -f stage4-systemd-cosmic.spec
 
-# Create new SquashFS
+# Create new system image (SquashFS for ISO, tarball for ROOTS)
 mksquashfs /tmp/cosmic root-cosmic-$(date +%Y%m%d).img -comp zstd -Xcompression-level 19
+# OR for direct ROOTS deployment:
+# tar czf root-cosmic-$(date +%Y%m%d).tar.gz -C /tmp/cosmic .
 ```
 
 ### 3. Live Testing
@@ -304,7 +307,7 @@ RegicideOS with COSMIC Desktop provides:
 - **Immutable system** with BTRFS overlays for safety
 - **Modern Rust-based desktop** with Wayland support
 - **AI-powered optimization** through PortCL
-- **Easy updates and rollbacks** via SquashFS images
+- **Easy updates and rollbacks** via overlay template images
 - **High performance** with Zstd compression and BTRFS optimization
 
 This approach gives you the best of both worlds: Gentoo's flexibility and control, with COSMIC's modern desktop experience and RegicideOS's innovative architecture.

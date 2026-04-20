@@ -346,18 +346,18 @@ impl DQNModel {
 
     pub fn save(&self, path: &Path) -> Result<()> {
         // Save model configuration and training state
-        let model_data = serde_json::to_string_pretty(self).map_err(|e| PortCLError::Json(e))?;
+        let model_data = serde_json::to_string_pretty(self)?;
 
-        std::fs::write(path, model_data).map_err(|e| PortCLError::Io(e))?;
+        std::fs::write(path, model_data)?;
 
         info!("Model saved to {}", path.display());
         Ok(())
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        let model_data = std::fs::read_to_string(path).map_err(|e| PortCLError::Io(e))?;
+        let model_data = std::fs::read_to_string(path)?;
 
-        let model: Self = serde_json::from_str(&model_data).map_err(|e| PortCLError::Json(e))?;
+        let model: Self = serde_json::from_str(&model_data)?;
 
         info!("Model loaded from {}", path.display());
         Ok(model)

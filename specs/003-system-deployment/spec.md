@@ -57,11 +57,11 @@ When creating this spec from a user prompt:
 ## User Scenarios & Testing *(mandatory)*
 
 ### Primary User Story
-As a system administrator, I want the installer to download and deploy the Xenia Linux root image with proper bootloader configuration, so that I can have a bootable system after installation completes.
+As a system administrator, I want the installer to download and deploy the RegicideOS root overlay template with proper bootloader configuration, so that I can have a bootable system after installation completes.
 
 ### Acceptance Scenarios
 1. **Given** a valid root image URL, **When** download starts, **Then** the system must download the .img file to the correct location
-2. **Given** downloaded root image, **When** mounting begins, **Then** the system must mount roots partition and loop-mount the squashfs image
+2. **Given** downloaded root image, **When** mounting begins, **Then** the system must mount the ROOTS partition and extract the overlay template
 3. **Given** mounted root system, **When** bootloader installation starts, **Then** the system must install GRUB with UEFI support
 4. **Given** installed bootloader, **When** post-install runs, **Then** the system must complete any required system configuration
 
@@ -77,7 +77,7 @@ As a system administrator, I want the installer to download and deploy the Xenia
 - **FR-001**: System MUST download root image from specified URL to /mnt/gentoo/root.img
 - **FR-002**: System MUST remove existing root image before downloading new one
 - **FR-003**: System MUST create and mount roots partition on /mnt/gentoo
-- **FR-004**: System MUST loop-mount squashfs root image on /mnt/root
+- **FR-004**: System MUST extract the overlay template to /mnt/root
 - **FR-005**: System MUST mount EFI partition on /mnt/root/boot/efi
 - **FR-006**: System MUST mount virtual filesystems (proc, dev, sys, run) in chroot environment
 - **FR-007**: System MUST install GRUB bootloader with UEFI support and LVM modules
@@ -95,7 +95,7 @@ As a system administrator, I want the installer to download and deploy the Xenia
 - **NFR-005**: System MUST handle network timeouts and retry failed downloads
 
 ### Constraints
-- **CON-001**: Root image must be in squashfs .img format
+- **CON-001**: Root image must be a compressed overlay template (tar.gz) or SquashFS for live media
 - **CON-002**: Only UEFI GRUB installation is supported (no legacy GRUB)
 - **CON-003**: Download URL must use HTTP/HTTPS protocol
 - **CON-004**: System must validate image before mounting

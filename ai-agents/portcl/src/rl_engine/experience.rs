@@ -309,22 +309,18 @@ impl ReplayBuffer {
         let buffer = self.buffer.lock()
             .map_err(|_| PortCLError::RLEngine("Failed to lock experience buffer".to_string()))?;
 
-        let data = serde_json::to_string_pretty(&*buffer)
-            .map_err(|e| PortCLError::Json(e))?;
+        let data = serde_json::to_string_pretty(&*buffer)?;
 
-        std::fs::write(path, data)
-            .map_err(|e| PortCLError::Io(e))?;
+        std::fs::write(path, data)?;
 
         info!("Experience buffer saved to {}", path);
         Ok(())
     }
 
     pub fn load_from_file(&self, path: &str) -> Result<()> {
-        let data = std::fs::read_to_string(path)
-            .map_err(|e| PortCLError::Io(e))?;
+        let data = std::fs::read_to_string(path)?;
 
-        let loaded_buffer: ExperienceBuffer = serde_json::from_str(&data)
-            .map_err(|e| PortCLError::Json(e))?;
+        let loaded_buffer: ExperienceBuffer = serde_json::from_str(&data)?;
 
         let mut buffer = self.buffer.lock()
             .map_err(|_| PortCLError::RLEngine("Failed to lock experience buffer".to_string()))?;
@@ -362,7 +358,7 @@ mod tests {
 
         // Test priority update
         buffer.update_priorities(&[0], &[2.0]).unwrap();
-        assert_eq!(buffer.priorities[0], 2.0);
+        assert!((buffer.priorities[0] - 2.0).abs() < 1e-5, "Expected priority close to 2.0, got {}", buffer.priorities[0]);
     }
 
     #[test]

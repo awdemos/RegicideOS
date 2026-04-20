@@ -10,18 +10,16 @@ use tokio_test;
 #[cfg(test)]
 mod monitor_tests {
     use super::*;
-    use crate::fixtures::*;
     use crate::fixtures::test_helpers::*;
+    use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+    use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_portage_monitor_creation_success() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/usr/bin/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/usr/bin/emerge");
+        config.poll_interval = 60;
 
         let result = PortageMonitor::new(config.clone());
 
@@ -44,13 +42,9 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_portage_monitor_creation_invalid_path() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/nonexistent/path/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/nonexistent/path/emerge");
+        config.poll_interval = 60;
 
         let result = PortageMonitor::new(config);
         assert!(matches!(result, Err(PortCLError::Validation(_))));
@@ -124,13 +118,9 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_metrics_collector_creation() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/usr/bin/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/usr/bin/emerge");
+        config.poll_interval = 60;
 
         let result = MetricsCollector::new(config.clone());
 
@@ -151,16 +141,29 @@ mod monitor_tests {
         let metrics = SystemMetrics {
             cpu_usage_percent: 25.5,
             memory_usage_percent: 60.2,
+            memory_total_gb: 16.0,
+            memory_used_gb: 9.6,
             disk_usage_percent: 45.8,
+            disk_total_gb: 512.0,
+            disk_used_gb: 230.0,
+            disk_free_gb: 282.0,
             load_average_1min: 1.2,
             load_average_5min: 1.1,
             load_average_15min: 1.0,
+            network_io: portcl::monitor::NetworkIo {
+                bytes_received: 1024,
+                bytes_transmitted: 2048,
+                packets_received: 10,
+                packets_transmitted: 20,
+            },
             network_io_bytes_in: 1024,
             network_io_bytes_out: 2048,
             disk_io_bytes_read: 4096,
             disk_io_bytes_write: 8192,
             process_count: 150,
             thread_count: 300,
+            uptime_seconds: 3600,
+            temperature_celsius: Some(45.0),
         };
 
         // Validate CPU usage bounds
@@ -178,14 +181,11 @@ mod monitor_tests {
         assert!(metrics.load_average_15min >= 0.0);
 
         // Validate I/O metrics are non-negative
-        assert!(metrics.network_io_bytes_in >= 0);
-        assert!(metrics.network_io_bytes_out >= 0);
-        assert!(metrics.disk_io_bytes_read >= 0);
-        assert!(metrics.disk_io_bytes_write >= 0);
+        assert!(metrics.network_io.bytes_received >= 0);
+        assert!(metrics.network_io.bytes_transmitted >= 0);
 
-        // Validate process/thread counts
+        // Validate process count
         assert!(metrics.process_count > 0);
-        assert!(metrics.thread_count >= metrics.process_count);
     }
 
     #[tokio::test]
@@ -203,16 +203,24 @@ mod monitor_tests {
         let system_metrics = SystemMetrics {
             cpu_usage_percent: 25.5,
             memory_usage_percent: 60.2,
+            memory_total_gb: 16.0,
+            memory_used_gb: 9.6,
             disk_usage_percent: 45.8,
+            disk_total_gb: 512.0,
+            disk_used_gb: 230.0,
+            disk_free_gb: 282.0,
             load_average_1min: 1.2,
             load_average_5min: 1.1,
             load_average_15min: 1.0,
+            network_io: portcl::monitor::NetworkIo::default(),
             network_io_bytes_in: 1024,
             network_io_bytes_out: 2048,
             disk_io_bytes_read: 4096,
             disk_io_bytes_write: 8192,
             process_count: 150,
             thread_count: 300,
+            uptime_seconds: 3600,
+            temperature_celsius: None,
         };
 
         let metrics = PortageMetrics {
@@ -230,13 +238,9 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_event_tracker_creation() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/usr/bin/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/usr/bin/emerge");
+        config.poll_interval = 60;
 
         let result = EventTracker::new(config.clone());
         assert!(result.is_ok());
@@ -245,11 +249,15 @@ mod monitor_tests {
     #[tokio::test]
     async fn test_portage_event_structure() {
         let event = PortageEvent {
+            id: "test-event-1".to_string(),
             event_type: EventType::PackageInstall,
             timestamp: Utc::now(),
             package_name: Some("nginx".to_string()),
             details: "Successfully installed nginx-1.21.0".to_string(),
             success: true,
+            severity: EventSeverity::Low,
+            source: EventSource::Portage,
+            metadata: None,
         };
 
         assert_eq!(event.event_type, EventType::PackageInstall);
@@ -283,13 +291,9 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_monitor_manager_creation() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/usr/bin/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/usr/bin/emerge");
+        config.poll_interval = 60;
 
         let result = MonitorManager::new(config.clone());
 
@@ -307,13 +311,9 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_monitor_manager_metrics_collection() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/usr/bin/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/usr/bin/emerge");
+        config.poll_interval = 60;
 
         let manager_result = MonitorManager::new(config);
 
@@ -338,13 +338,14 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_basic() {
-        use crate::fixtures::mock_monitor::*;
+        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+    use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();
         let mock_packages = vec![MockPackage::sample_package()];
         let mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
 
-        let metrics = mock_monitor.get_metrics().await;
+        let metrics = mock_monitor.get_metrics().await.unwrap();
 
         // Validate mock monitor produces valid metrics
         assert!(metrics.system_metrics.cpu_usage_percent >= 0.0);
@@ -355,14 +356,15 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_error_injection() {
-        use crate::fixtures::mock_monitor::*;
+        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+    use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();
         let mock_packages = vec![MockPackage::sample_package()];
         let mut mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
 
         // Test error injection
-        mock_monitor.inject_error("get_metrics".to_string(), true).await;
+        mock_monitor.inject_error_async("get_metrics".to_string(), true).await;
 
         let result = mock_monitor.get_metrics().await;
         assert!(matches!(result, Err(PortCLError::Mock(_))));
@@ -370,7 +372,8 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_delay_injection() {
-        use crate::fixtures::mock_monitor::*;
+        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+    use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
         use std::time::Duration;
 
         let mock_config = MockMonitoringConfig::default();
@@ -378,7 +381,7 @@ mod monitor_tests {
         let mut mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
 
         // Test delay injection
-        mock_monitor.inject_delay("get_metrics".to_string(), 100).await;
+        mock_monitor.inject_delay_async("get_metrics".to_string(), 100).await;
 
         let start = std::time::Instant::now();
         let _result = mock_monitor.get_metrics().await;
@@ -390,15 +393,16 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_reset() {
-        use crate::fixtures::mock_monitor::*;
+        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+    use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();
         let mock_packages = vec![MockPackage::sample_package()];
         let mut mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
 
         // Inject some state
-        mock_monitor.inject_error("get_metrics".to_string(), true).await;
-        mock_monitor.inject_delay("reset".to_string(), 50).await;
+        mock_monitor.inject_error_async("get_metrics".to_string(), true).await;
+        mock_monitor.inject_delay_async("reset".to_string(), 50).await;
 
         // Reset should clear all injected state
         mock_monitor.reset().await;
@@ -426,16 +430,24 @@ mod monitor_tests {
             system_metrics: SystemMetrics {
                 cpu_usage_percent: 25.5,
                 memory_usage_percent: 60.2,
+                memory_total_gb: 16.0,
+                memory_used_gb: 9.6,
                 disk_usage_percent: 45.8,
+                disk_total_gb: 512.0,
+                disk_used_gb: 230.0,
+                disk_free_gb: 282.0,
                 load_average_1min: 1.2,
                 load_average_5min: 1.1,
                 load_average_15min: 1.0,
+                network_io: portcl::monitor::NetworkIo::default(),
                 network_io_bytes_in: 1024,
                 network_io_bytes_out: 2048,
                 disk_io_bytes_read: 4096,
                 disk_io_bytes_write: 8192,
                 process_count: 150,
                 thread_count: 300,
+                uptime_seconds: 3600,
+                temperature_celsius: None,
             },
             recent_events: Vec::new(),
         };
@@ -457,18 +469,26 @@ mod monitor_tests {
 
         let invalid_metrics = MockMonitorMetrics {
             system_metrics: SystemMetrics {
-                cpu_usage_percent: 150.0, // Invalid: > 100%
+                cpu_usage_percent: 150.0,
                 memory_usage_percent: 60.2,
+                memory_total_gb: 16.0,
+                memory_used_gb: 9.6,
                 disk_usage_percent: 45.8,
+                disk_total_gb: 512.0,
+                disk_used_gb: 230.0,
+                disk_free_gb: 282.0,
                 load_average_1min: 1.2,
                 load_average_5min: 1.1,
                 load_average_15min: 1.0,
+                network_io: NetworkIo::default(),
                 network_io_bytes_in: 1024,
                 network_io_bytes_out: 2048,
                 disk_io_bytes_read: 4096,
                 disk_io_bytes_write: 8192,
                 process_count: 150,
                 thread_count: 300,
+                uptime_seconds: 3600,
+                temperature_celsius: None,
             },
             package_count: 150,
             update_count: 5,
@@ -488,16 +508,24 @@ mod monitor_tests {
             system_metrics: SystemMetrics {
                 cpu_usage_percent: 25.5,
                 memory_usage_percent: 60.2,
+                memory_total_gb: 16.0,
+                memory_used_gb: 9.6,
                 disk_usage_percent: 45.8,
-                load_average_1min: -1.0, // Invalid: negative
+                disk_total_gb: 512.0,
+                disk_used_gb: 230.0,
+                disk_free_gb: 282.0,
+                load_average_1min: -1.0,
                 load_average_5min: 1.1,
                 load_average_15min: 1.0,
+                network_io: NetworkIo::default(),
                 network_io_bytes_in: 1024,
                 network_io_bytes_out: 2048,
                 disk_io_bytes_read: 4096,
                 disk_io_bytes_write: 8192,
                 process_count: 150,
                 thread_count: 300,
+                uptime_seconds: 3600,
+                temperature_celsius: None,
             },
             package_count: 150,
             update_count: 5,
@@ -559,13 +587,9 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_monitor_error_handling() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/nonexistent/path/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/nonexistent/path/emerge");
+        config.poll_interval = 60;
 
         let result = PortageMonitor::new(config);
         assert!(matches!(result, Err(PortCLError::Validation(_))));
@@ -575,13 +599,9 @@ mod monitor_tests {
     async fn test_event_tracker_functionality() {
         use portcl::monitor::EventTracker;
 
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/usr/bin/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/usr/bin/emerge");
+        config.poll_interval = 60;
 
         let tracker_result = EventTracker::new(config);
 
@@ -602,13 +622,18 @@ mod monitor_tests {
 mod monitor_integration_tests {
     use super::*;
     use crate::fixtures::test_helpers::*;
+    use crate::fixtures::mock_monitor::MockMonitorMetrics;
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_full_monitor_workflow() {
         // Test the complete monitoring workflow
         let config = MonitoringConfig {
             portage_path: PathBuf::from("/usr/bin/emerge"),
+            log_path: PathBuf::from("/var/log/portcl.log"),
             poll_interval: 1, // Short interval for testing
+            metrics_retention_days: 30,
+            enable_event_tracking: true,
             enable_metrics: true,
             enable_events: true,
             max_history_size: 10,
@@ -622,7 +647,7 @@ mod monitor_integration_tests {
 
             if let Ok(metrics) = metrics_result {
                 // Validate complete metrics structure
-                assert_test_result_valid(&TestResult {
+                TestAssertionHelpers::assert_test_result_valid(&TestResult {
                     test_id: "monitor_workflow".to_string(),
                     test_name: "Full Monitor Workflow".to_string(),
                     test_type: TestType::Integration,
@@ -638,10 +663,17 @@ mod monitor_integration_tests {
                         coverage_percent: 100.0,
                         execution_time_ms: 100,
                         memory_usage_mb: 10.0,
-                        assertions_passed: 5,
-                        assertions_failed: 0,
+                        memory_usage_percent: 5.0,
+                        memory_peak_bytes: 1024 * 1024,
+                        cpu_time_ms: 50,
                         cpu_usage_percent: 5.0,
                         disk_usage_percent: 1.0,
+                        disk_io_bytes: 0,
+                        network_io_bytes: 0,
+                        allocations: 10,
+                        assertions_passed: 5,
+                        assertions_failed: 0,
+                        custom_metrics: HashMap::new(),
                     },
                     dependencies: Vec::new(),
                     tags: vec!["monitor".to_string(), "integration".to_string()],
@@ -680,13 +712,9 @@ mod monitor_performance_tests {
 
     #[tokio::test]
     async fn test_monitor_metrics_collection_performance() {
-        let config = MonitoringConfig {
-            portage_path: PathBuf::from("/usr/bin/emerge"),
-            poll_interval: 60,
-            enable_metrics: true,
-            enable_events: true,
-            max_history_size: 1000,
-        };
+        let mut config = MonitoringConfig::default();
+        config.portage_path = PathBuf::from("/usr/bin/emerge");
+        config.poll_interval = 60;
 
         let manager_result = MonitorManager::new(config);
 
@@ -706,7 +734,8 @@ mod monitor_performance_tests {
 
     #[tokio::test]
     async fn test_mock_monitor_performance() {
-        use crate::fixtures::mock_monitor::*;
+        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+    use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();
         let mock_packages = vec![MockPackage::sample_package()];

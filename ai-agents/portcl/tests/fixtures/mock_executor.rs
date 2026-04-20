@@ -4,7 +4,9 @@
 //! simulates Portage action operations without requiring actual system calls.
 
 use crate::fixtures::mock_data::*;
-use crate::error::PortCLError;
+pub use crate::fixtures::mock_data::MockActionConfig;
+pub use crate::fixtures::mock_data::MockAction;
+use portcl::error::PortCLError;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -74,7 +76,7 @@ pub enum ChangeType {
 }
 
 /// Mock execution state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MockExecutionState {
     pub total_actions: u32,
     pub successful_actions: u32,
@@ -84,6 +86,10 @@ pub struct MockExecutionState {
     pub total_cpu_time_ms: u64,
     pub peak_memory_usage: u64,
     pub last_execution_time: Option<DateTime<Utc>>,
+    pub total_executed: u32,
+    pub successful_executions: u32,
+    pub failed_executions: u32,
+    pub active_executions: Vec<String>,
 }
 
 /// Mock ActionExecutor for testing
@@ -101,6 +107,81 @@ pub struct MockActionExecutor {
 impl MockActionExecutor {
     /// Create a new mock ActionExecutor with default configuration
     pub fn new(config: MockActionConfig) -> Self {
+        Self::new_with_config(config).unwrap()
+    }
+
+    pub fn new_with_config(config: MockActionConfig) -> Result<Self, PortCLError> {
+        let dry_run = config.enable_dry_run;
+        Ok(Self {
+            config,
+            state: Arc::new(RwLock::new(MockExecutionState::default())),
+            execution_history: Arc::new(Mutex::new(Vec::new())),
+            active_executions: Arc::new(Mutex::new(HashMap::new())),
+            error_injection: Arc::new(RwLock::new(HashMap::new())),
+            delay_injection: Arc::new(RwLock::new(HashMap::new())),
+            dry_run_mode: Arc::new(RwLock::new(dry_run)),
+        })
+    }
+
+    pub async fn execute_action(&self, _action: &portcl::actions::Action) -> Result<portcl::actions::ActionResult, PortCLError> {
+        if self.should_fail("execute_action") {
+            return Err(PortCLError::Mock("execute_action failed".to_string()));
+        }
+        self.simulate_delay("execute_action").await;
+        Ok(portcl::actions::ActionResult {
+            action: portcl::actions::Action::NoOp,
+            success: true,
+            duration_ms: 1,
+            output: "mock".to_string(),
+            error: None,
+            metrics: portcl::actions::ExecutionMetrics {
+                memory_usage_mb: 0.0,
+                cpu_usage_percent: 0.0,
+                io_operations: 0,
+                network_calls: 0,
+                timestamp: chrono::Utc::now(),
+            },
+        })
+    }
+
+    pub async fn get_state_async(&self) -> MockExecutionState {
+        self.get_state_sync()
+    }
+
+    pub async fn reset(&self) {
+        let mut state = self.state.write().unwrap();
+        *state = MockExecutionState::default();
+        let mut history = self.execution_history.blocking_lock();
+        history.clear();
+        let mut active = self.active_executions.blocking_lock();
+        active.clear();
+        let mut errors = self.error_injection.write().unwrap();
+        errors.clear();
+        let mut delays = self.delay_injection.write().unwrap();
+        delays.clear();
+    }
+
+    pub async fn get_execution_history(&self) -> Vec<MockActionResult> {
+        self.get_history().await
+    }
+
+    pub async fn inject_error_async(&self, operation: String, _value: bool) {
+        let mut errors = self.error_injection.write().unwrap();
+        errors.insert(operation, true);
+    }
+
+    pub async fn inject_delay_async(&self, operation: String, delay_ms: u64) {
+        let mut delays = self.delay_injection.write().unwrap();
+        delays.insert(operation, delay_ms);
+    }
+
+    pub fn get_state_sync(&self) -> MockExecutionState {
+        self.state.read().unwrap().clone()
+    }
+
+    /// Create a new mock ActionExecutor with default configuration
+    pub fn new_original(config: MockActionConfig) -> Self {
+        let dry_run = config.enable_dry_run;
         Self {
             config,
             state: Arc::new(RwLock::new(MockExecutionState::default())),
@@ -108,7 +189,7 @@ impl MockActionExecutor {
             active_executions: Arc::new(Mutex::new(HashMap::new())),
             error_injection: Arc::new(RwLock::new(HashMap::new())),
             delay_injection: Arc::new(RwLock::new(HashMap::new())),
-            dry_run_mode: Arc::new(RwLock::new(config.enable_dry_run)),
+            dry_run_mode: Arc::new(RwLock::new(dry_run)),
         }
     }
 
@@ -143,11 +224,6 @@ impl MockActionExecutor {
     pub fn set_dry_run(&self, dry_run: bool) {
         let mut mode = self.dry_run_mode.write().unwrap();
         *mode = dry_run;
-    }
-
-    /// Get current execution state
-    pub fn get_state(&self) -> MockExecutionState {
-        self.state.read().unwrap().clone()
     }
 
     /// Get execution history
@@ -288,8 +364,9 @@ impl MockActionExecutor {
                 ExecutionStatus::Cancelled => state.cancelled_actions += 1,
                 _ => {}
             }
+            let total = state.total_actions as u64;
             state.average_duration_ms =
-                (state.average_duration_ms * (state.total_actions - 1) + result.duration_ms) / state.total_actions;
+                (state.average_duration_ms * (total - 1) + result.duration_ms) / total;
             state.total_cpu_time_ms += result.metrics.cpu_time_ms;
             state.peak_memory_usage = state.peak_memory_usage.max(result.metrics.memory_used_bytes);
             state.last_execution_time = Some(Utc::now());
@@ -426,7 +503,7 @@ impl MockActionExecutorTrait for MockActionExecutor {
     }
 
     async fn get_execution_stats(&self) -> MockExecutionState {
-        self.get_state()
+        self.get_state_sync()
     }
 
     async fn validate_action(&self, action: &MockAction) -> Result<(), PortCLError> {
@@ -518,6 +595,10 @@ impl Default for MockExecutionState {
             total_cpu_time_ms: 0,
             peak_memory_usage: 0,
             last_execution_time: None,
+            total_executed: 0,
+            successful_executions: 0,
+            failed_executions: 0,
+            active_executions: Vec::new(),
         }
     }
 }
@@ -544,7 +625,7 @@ mod tests {
         let config = MockActionConfig::default();
         let executor = MockActionExecutor::new(config);
 
-        let state = executor.get_state();
+        let state = executor.get_state_sync();
         assert_eq!(state.total_actions, 0);
     }
 

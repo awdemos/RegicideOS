@@ -232,8 +232,7 @@ impl PortageAgent {
         let path = std::path::Path::new(&self.config.model_path);
 
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await
-                .map_err(|e| PortCLError::Io(e))?;
+            tokio::fs::create_dir_all(parent).await?;
         }
 
         model.save(path)?;

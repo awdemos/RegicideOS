@@ -88,14 +88,12 @@ fn load_config(path: &str) -> Result<PortageConfig> {
         let config_content = toml::to_string_pretty(&default_config)
             .map_err(|e| PortCLError::Configuration(format!("Failed to serialize default config: {}", e)))?;
 
-        std::fs::write(path, config_content)
-            .map_err(|e| PortCLError::Io(e))?;
+        std::fs::write(path, config_content)?;
 
         println!("Created default configuration at: {}", path);
         Ok(default_config)
     } else {
-        let config_content = std::fs::read_to_string(path)
-            .map_err(|e| PortCLError::Io(e))?;
+        let config_content = std::fs::read_to_string(path)?;
 
         let config: PortageConfig = toml::from_str(&config_content)
             .map_err(|e| PortCLError::Configuration(format!("Failed to parse config: {}", e)))?;

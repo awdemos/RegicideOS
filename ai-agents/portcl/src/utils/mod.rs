@@ -12,16 +12,13 @@ use tokio::fs;
 
 pub async fn ensure_directory_exists(path: &Path) -> Result<()> {
     if !path.exists() {
-        fs::create_dir_all(path).await
-            .map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(path).await?;
     }
     Ok(())
 }
 
 pub async fn read_file_content(path: &Path) -> Result<String> {
-    fs::read_to_string(path)
-        .await
-        .map_err(|e| PortCLError::Io(e))
+    Ok(fs::read_to_string(path).await?)
 }
 
 pub async fn write_file_content(path: &Path, content: &str) -> Result<()> {
@@ -29,9 +26,7 @@ pub async fn write_file_content(path: &Path, content: &str) -> Result<()> {
         ensure_directory_exists(parent).await?;
     }
 
-    fs::write(path, content)
-        .await
-        .map_err(|e| PortCLError::Io(e))
+    Ok(fs::write(path, content).await?)
 }
 
 pub fn format_duration(seconds: u64) -> String {
@@ -87,6 +82,10 @@ pub fn validate_package_name(package: &str) -> bool {
 
     let category = parts[0];
     let name = parts[1];
+
+    if category.is_empty() || name.is_empty() {
+        return false;
+    }
 
     // Category should be lowercase alphanumeric with hyphens
     if !category.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {

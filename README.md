@@ -49,7 +49,7 @@
 ```
 /
 ├── boot/efi          # EFI System Partition
-├── root/             # Read-only system image (squashfs)
+├── root/             # Native ROOTS partition (read-only base system)
 │   ├── usr/          # System binaries
 │   ├── etc/          # Base configuration
 │   └── var/          # Variable data templates
@@ -110,7 +110,7 @@ sudo ./target/release/installer
 ```bash
 cat > regicide-config.toml << 'EOF'
 drive = "/dev/sda"
-repository = "https://repo.xenialinux.com/releases/"
+repository = "https://repo.regicideos.org/releases/"
 flavour = "minimal"
 release_branch = "main"
 filesystem = "btrfs"
@@ -164,7 +164,7 @@ We particularly need help with:
 
 RegicideOS is licensed under the **GNU General Public License v3.0**.
 
-Built on the excellent foundation of [Xenia Linux](https://xenialinux.com/).
+Built on the excellent foundation of Gentoo Linux and the COSMIC Desktop ecosystem.
 
 ---
 

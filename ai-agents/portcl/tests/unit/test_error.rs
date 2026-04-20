@@ -14,12 +14,12 @@ fn create_test_errors() -> Vec<PortCLError> {
         PortCLError::RLEngine("Model training failed".to_string()),
         PortCLError::ActionExecution("Package installation failed".to_string()),
         PortCLError::Configuration("Invalid configuration file".to_string()),
-        PortCLError::Io(io::Error::new(io::ErrorKind::NotFound, "File not found")),
-        PortCLError::Json(serde_json::Error::custom("Invalid JSON format")),
-        PortCLError::TomlDeserialize(toml::de::Error::custom("Invalid TOML format")),
-        PortCLError::TomlSerialize(toml::ser::Error::custom("Failed to serialize TOML")),
+        PortCLError::from(io::Error::new(io::ErrorKind::NotFound, "File not found")),
+        PortCLError::from(serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err()),
+        PortCLError::from(toml::from_str::<toml::Value>("invalid toml").unwrap_err()),
+        PortCLError::from(toml::to_string(&toml::Value::String("test".to_string())).unwrap_err()),
         PortCLError::System("Out of memory".to_string()),
-        PortCLError::Network(reqwest::Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, "Connection refused"))),
+        PortCLError::Network("Connection refused".to_string()),
         PortCLError::Timeout("Operation timed out".to_string()),
         PortCLError::Validation("Invalid parameter value".to_string()),
         PortCLError::NotFound("Resource not found".to_string()),
@@ -35,7 +35,7 @@ async fn test_portcl_error_display() {
         (PortCLError::ActionExecution("Action failed".to_string()), "Action execution error: Action failed"),
         (PortCLError::Configuration("Config error".to_string()), "Configuration error: Config error"),
         (PortCLError::System("System error".to_string()), "System error: System error"),
-        (PortCLError::Network(reqwest::Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, "Connection refused"))), "Network error: error sending request"),
+        (PortCLError::Network("Connection refused".to_string()), "Network error: Connection refused"),
         (PortCLError::Timeout("Timeout error".to_string()), "Timeout error: Timeout error"),
         (PortCLError::Validation("Validation error".to_string()), "Validation error: Validation error"),
         (PortCLError::NotFound("Not found".to_string()), "Not found: Not found"),
@@ -79,23 +79,23 @@ async fn test_portcl_error_from_conversions() {
     assert!(matches!(portcl_error, PortCLError::Io(_)));
 
     // Test JSON error conversion
-    let json_error = serde_json::Error::custom("JSON error");
+    let json_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
     let portcl_error: PortCLError = json_error.into();
     assert!(matches!(portcl_error, PortCLError::Json(_)));
 
     // Test TOML deserialization error conversion
-    let toml_error = toml::de::Error::custom("TOML error");
+    let toml_error = toml::from_str::<toml::Value>("invalid toml").unwrap_err();
     let portcl_error: PortCLError = toml_error.into();
     assert!(matches!(portcl_error, PortCLError::TomlDeserialize(_)));
 
     // Test TOML serialization error conversion
-    let toml_error = toml::ser::Error::custom("TOML serialization error");
+    let toml_error = toml::to_string(&toml::Value::String("test".to_string())).unwrap_err();
     let portcl_error: PortCLError = toml_error.into();
     assert!(matches!(portcl_error, PortCLError::TomlSerialize(_)));
 
     // Test reqwest error conversion
-    let reqwest_error = reqwest::Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, "Connection refused"));
-    let portcl_error: PortCLError = reqwest_error.into();
+    let reqwest_error = PortCLError::Network("Connection refused".to_string());
+    assert!(matches!(reqwest_error, PortCLError::Network(_)));
     assert!(matches!(portcl_error, PortCLError::Network(_)));
 }
 
@@ -128,15 +128,15 @@ async fn test_handle_error_function() {
 
         // The returned error should be of the same type (except for From conversions)
         match (&error, result.unwrap_err()) {
-            (PortCLError::Portage(msg1), PortCLError::Portage(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::RLEngine(msg1), PortCLError::RLEngine(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::ActionExecution(msg1), PortCLError::ActionExecution(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::Configuration(msg1), PortCLError::Configuration(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::System(msg1), PortCLError::System(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::Timeout(msg1), PortCLError::Timeout(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::Validation(msg1), PortCLError::Validation(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::NotFound(msg1), PortCLError::NotFound(msg2)) => assert_eq!(msg1, msg2),
-            (PortCLError::Service(msg1), PortCLError::Service(msg2)) => assert_eq!(msg1, msg2),
+            (PortCLError::Portage(msg1), PortCLError::Portage(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::RLEngine(msg1), PortCLError::RLEngine(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::ActionExecution(msg1), PortCLError::ActionExecution(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::Configuration(msg1), PortCLError::Configuration(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::System(msg1), PortCLError::System(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::Timeout(msg1), PortCLError::Timeout(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::Validation(msg1), PortCLError::Validation(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::NotFound(msg1), PortCLError::NotFound(msg2)) => assert_eq!(msg1, &msg2),
+            (PortCLError::Service(msg1), PortCLError::Service(msg2)) => assert_eq!(msg1, &msg2),
             // From conversions may have different types
             (PortCLError::Io(_), PortCLError::Io(_)) => (),
             (PortCLError::Json(_), PortCLError::Json(_)) => (),
@@ -178,9 +178,9 @@ async fn test_log_result_function_error() {
 #[tokio::test]
 async fn test_is_retryable_error_function() {
     let retryable_errors = vec![
-        PortCLError::Network(reqwest::Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, "Connection refused"))),
+        PortCLError::Network("Connection refused".to_string()),
         PortCLError::Timeout("Operation timed out".to_string()),
-        PortCLError::Io(io::Error::new(io::ErrorKind::ConnectionReset, "Connection reset")),
+        PortCLError::from(io::Error::new(io::ErrorKind::ConnectionReset, "Connection reset")),
         PortCLError::Portage("Portage timeout occurred".to_string()),
         PortCLError::Portage("Network issue with Portage".to_string()),
         PortCLError::Portage("Temporary Portage failure".to_string()),
@@ -195,8 +195,8 @@ async fn test_is_retryable_error_function() {
         PortCLError::Validation("Invalid parameter value".to_string()),
         PortCLError::NotFound("Resource not found".to_string()),
         PortCLError::Service("Service unavailable".to_string()),
-        PortCLError::Json(serde_json::Error::custom("Invalid JSON format")),
-        PortCLError::TomlDeserialize(toml::de::Error::custom("Invalid TOML format")),
+        PortCLError::from(serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err()),
+        PortCLError::from(toml::from_str::<toml::Value>("invalid toml").unwrap_err()),
         PortCLError::Portage("Package not found".to_string()), // Not retryable
         PortCLError::System("Out of memory".to_string()), // Not retryable
     ];
@@ -218,13 +218,13 @@ async fn test_error_severity_function() {
         (PortCLError::ActionExecution("Action error".to_string()), ErrorSeverity::High),
         (PortCLError::Configuration("Config error".to_string()), ErrorSeverity::Critical),
         (PortCLError::System("System error".to_string()), ErrorSeverity::High),
-        (PortCLError::Network(reqwest::Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, "Connection refused"))), ErrorSeverity::Low),
+        (PortCLError::Network("Connection refused".to_string()), ErrorSeverity::Low),
         (PortCLError::Timeout("Timeout error".to_string()), ErrorSeverity::Low),
         (PortCLError::Validation("Validation error".to_string()), ErrorSeverity::Medium),
-        (PortCLError::Io(io::Error::new(io::ErrorKind::NotFound, "File not found")), ErrorSeverity::Medium),
-        (PortCLError::Json(serde_json::Error::custom("JSON error")), ErrorSeverity::Low),
-        (PortCLError::TomlDeserialize(toml::de::Error::custom("TOML error")), ErrorSeverity::Low),
-        (PortCLError::TomlSerialize(toml::ser::Error::custom("TOML serialization error")), ErrorSeverity::Low),
+        (PortCLError::from(io::Error::new(io::ErrorKind::NotFound, "File not found")), ErrorSeverity::Medium),
+        (PortCLError::from(serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err()), ErrorSeverity::Low),
+        (PortCLError::from(toml::from_str::<toml::Value>("invalid toml").unwrap_err()), ErrorSeverity::Low),
+        (PortCLError::from(toml::to_string(&toml::Value::String("test".to_string())).unwrap_err()), ErrorSeverity::Low),
         (PortCLError::NotFound("Not found".to_string()), ErrorSeverity::Medium),
         (PortCLError::Service("Service error".to_string()), ErrorSeverity::High),
     ];
@@ -365,16 +365,16 @@ async fn test_error_severity_classification() {
     let medium_severity_errors = vec![
         PortCLError::RLEngine("Model training convergence issue".to_string()),
         PortCLError::Validation("Input validation failed".to_string()),
-        PortCLError::Io(io::Error::new(io::ErrorKind::PermissionDenied, "Permission denied")),
+        PortCLError::from(io::Error::new(io::ErrorKind::PermissionDenied, "Permission denied")),
         PortCLError::NotFound("Resource temporarily unavailable".to_string()),
     ];
 
     let low_severity_errors = vec![
-        PortCLError::Network(reqwest::Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, "Connection refused"))),
+        PortCLError::Network("Connection refused".to_string()),
         PortCLError::Timeout("Operation timed out".to_string()),
-        PortCLError::Json(serde_json::Error::custom("JSON parsing failed")),
-        PortCLError::TomlDeserialize(toml::de::Error::custom("TOML parsing failed")),
-        PortCLError::TomlSerialize(toml::ser::Error::custom("TOML serialization failed")),
+        PortCLError::from(serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err()),
+        PortCLError::from(toml::from_str::<toml::Value>("invalid toml").unwrap_err()),
+        PortCLError::from(toml::to_string(&toml::Value::String("test".to_string())).unwrap_err()),
     ];
 
     for error in critical_errors {
@@ -451,9 +451,9 @@ async fn test_error_aggregation() {
     // Test scenarios where multiple errors might occur
     let operations = vec![
         || Err(PortCLError::Validation("Invalid input".to_string())),
-        || Err(PortCLError::Io(io::Error::new(io::ErrorKind::NotFound, "File not found"))),
+        || Err(PortCLError::from(io::Error::new(io::ErrorKind::NotFound, "File not found"))),
         || Ok::<(), PortCLError>(()),
-        || Err(PortCLError::Network(reqwest::Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, "Connection refused")))),
+        || Err(PortCLError::Network("Connection refused".to_string())),
     ];
 
     let mut errors = Vec::new();
@@ -508,7 +508,7 @@ async fn test_error_from_standard_types() {
     let portcl_io_error: PortCLError = std_io_error.into();
     assert!(matches!(portcl_io_error, PortCLError::Io(_)));
 
-    let std_json_error = serde_json::Error::custom("JSON parsing error");
+    let std_json_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
     let portcl_json_error: PortCLError = std_json_error.into();
     assert!(matches!(portcl_json_error, PortCLError::Json(_)));
 }

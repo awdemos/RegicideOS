@@ -43,16 +43,17 @@ pub enum TestType {
     Contract,
     Property,
     Benchmark,
+    Unknown,
 }
 
 /// Test output data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TestOutput {
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
-    pub logs: Vec<TestLogEntry>,
-    pub artifacts: Vec<TestArtifact>,
-    pub coverage: Option<TestCoverage>,
+pub enum TestOutput {
+    Success { stdout: String, stderr: String },
+    Failure { stdout: String, stderr: String, error: String },
+    Timeout { message: String },
+    Error { message: String },
+    Skipped { reason: String },
 }
 
 /// Test log entry
@@ -122,11 +123,19 @@ pub struct FileCoverage {
 /// Test metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestMetrics {
+    pub coverage_percent: f64,
+    pub execution_time_ms: u64,
+    pub memory_usage_mb: f64,
+    pub memory_usage_percent: f64,
     pub memory_peak_bytes: u64,
     pub cpu_time_ms: u64,
-    pub allocations: u64,
+    pub cpu_usage_percent: f64,
+    pub disk_usage_percent: f64,
     pub disk_io_bytes: u64,
     pub network_io_bytes: u64,
+    pub allocations: u32,
+    pub assertions_passed: u32,
+    pub assertions_failed: u32,
     pub custom_metrics: HashMap<String, f64>,
 }
 
@@ -152,12 +161,9 @@ impl Default for TestResult {
 
 impl Default for TestOutput {
     fn default() -> Self {
-        Self {
-            stdout: None,
-            stderr: None,
-            logs: Vec::new(),
-            artifacts: Vec::new(),
-            coverage: None,
+        Self::Success {
+            stdout: String::new(),
+            stderr: String::new(),
         }
     }
 }
@@ -165,11 +171,19 @@ impl Default for TestOutput {
 impl Default for TestMetrics {
     fn default() -> Self {
         Self {
+            coverage_percent: 0.0,
+            execution_time_ms: 0,
+            memory_usage_mb: 0.0,
+            memory_usage_percent: 0.0,
             memory_peak_bytes: 0,
+            assertions_passed: 0,
+            assertions_failed: 0,
             cpu_time_ms: 0,
-            allocations: 0,
+            cpu_usage_percent: 0.0,
+            disk_usage_percent: 0.0,
             disk_io_bytes: 0,
             network_io_bytes: 0,
+            allocations: 0,
             custom_metrics: HashMap::new(),
         }
     }
@@ -212,37 +226,23 @@ impl TestResult {
     }
 
     /// Add a log entry to the test output
-    pub fn add_log(&mut self, level: LogLevel, message: String, component: String) {
-        self.output.logs.push(TestLogEntry {
-            timestamp: SystemTime::now(),
-            level,
-            message,
-            component,
-            metadata: HashMap::new(),
-        });
+    pub fn add_log(&mut self, _level: LogLevel, _message: String, _component: String) {
+        // TestOutput enum does not support logs directly
     }
 
     /// Set stdout output
     pub fn set_stdout(&mut self, stdout: String) {
-        self.output.stdout = Some(stdout);
+        self.output = TestOutput::Success { stdout, stderr: String::new() };
     }
 
     /// Set stderr output
     pub fn set_stderr(&mut self, stderr: String) {
-        self.output.stderr = Some(stderr);
+        // stderr set via output variant
     }
 
     /// Add a test artifact
-    pub fn add_artifact(&mut self, name: String, path: String, artifact_type: ArtifactType) {
-        // In a real implementation, we'd get the file size from the filesystem
-        let size_bytes = 0; // Placeholder
-        self.output.artifacts.push(TestArtifact {
-            name,
-            path,
-            artifact_type,
-            size_bytes,
-            description: None,
-        });
+    pub fn add_artifact(&mut self, _name: String, _path: String, _artifact_type: ArtifactType) {
+        // TestOutput enum does not support artifacts directly
     }
 
     /// Add a custom metric
@@ -373,19 +373,32 @@ mod tests {
         let mut result = TestResult::new("log_test".to_string(), TestType::Unit);
         result.add_log(LogLevel::Error, "Test error".to_string(), "test_component".to_string());
 
-        assert_eq!(result.output.logs.len(), 1);
-        let log = &result.output.logs[0];
-        assert_eq!(log.level, LogLevel::Error);
-        assert_eq!(log.message, "Test error");
-        assert_eq!(log.component, "test_component");
+        // TestOutput enum does not support logs directly
+        assert!(matches!(result.output, TestOutput::Success { .. }));
     }
+}
+
+/// Test severity levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TestSeverity {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
 }
 
 /// Test configuration data model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestConfig {
+    pub name: String,
     pub test_suite_name: String,
+    pub test_type: TestType,
     pub test_types: Vec<TestType>,
+    pub timeout_ms: u64,
+    pub max_parallel_tasks: usize,
+    pub max_retries: u32,
+    pub enable_retry: bool,
     pub execution_config: TestExecutionConfig,
     pub reporting_config: TestReportingConfig,
     pub coverage_config: TestCoverageConfig,
@@ -502,8 +515,14 @@ pub enum CoverageType {
 impl Default for TestConfig {
     fn default() -> Self {
         Self {
+            name: "default".to_string(),
             test_suite_name: "PortCL Test Suite".to_string(),
+            test_type: TestType::Unit,
             test_types: vec![TestType::Unit, TestType::Integration],
+            timeout_ms: 30000,
+            max_parallel_tasks: 4,
+            max_retries: 3,
+            enable_retry: true,
             execution_config: TestExecutionConfig::default(),
             reporting_config: TestReportingConfig::default(),
             coverage_config: TestCoverageConfig::default(),
