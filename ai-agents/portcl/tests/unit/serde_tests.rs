@@ -179,8 +179,8 @@ fn test_complex_structures() {
     }
 
     let mut map = std::collections::HashMap::new();
-    map.insert("pi".to_string(), 3.14159);
-    map.insert("e".to_string(), 2.71828);
+    map.insert("pi".to_string(), std::f64::consts::PI);
+    map.insert("e".to_string(), std::f64::consts::E);
 
     let complex_data = ComplexStruct {
         nested: TestStruct::default(),

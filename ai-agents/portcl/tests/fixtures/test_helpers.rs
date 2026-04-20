@@ -1128,9 +1128,7 @@ impl TestDataValidator {
             return Err("Package count cannot be zero".to_string());
         }
 
-        if metrics.update_count < 0 {
-            return Err("Update count cannot be negative".to_string());
-        }
+        // update_count is u32, inherently non-negative
 
         Ok(())
     }
@@ -1166,17 +1164,7 @@ impl TestDataValidator {
 
     /// Validate mock agent state
     pub fn validate_agent_state(state: &MockModelState) -> Result<(), String> {
-        if state.episode_count < 0 {
-            return Err("Episode count cannot be negative".to_string());
-        }
-
-        if state.training_step < 0 {
-            return Err("Training step cannot be negative".to_string());
-        }
-
-        if state.experience_count < 0 {
-            return Err("Experience count cannot be negative".to_string());
-        }
+        // episode_count, training_step, and experience_count are unsigned, inherently non-negative
 
         if state.epsilon < 0.0 || state.epsilon > 1.0 {
             return Err("Epsilon must be between 0 and 1".to_string());
