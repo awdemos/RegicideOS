@@ -2,15 +2,19 @@
 
 ## Summary
 
-This document identifies discrepancies between Handbook.md (v1.0) and actual implementation in installer/. Critical updates are needed to align documentation with reality.
+This document tracked discrepancies between Handbook.md and actual implementation in installer/. **As of April 2026, all critical issues have been resolved in Handbook.md v2.1.** This document is retained for historical reference.
+
+**Status: RESOLVED**
 
 ---
 
 ## Critical Issues
 
-### 1. Filesystem Architecture Mismatch
+### 1. Filesystem Architecture Mismatch ✅ RESOLVED
 
 **Problem**: Handbook describes BTRFS-native architecture but installer uses legacy 4-partition layout.
+
+**Resolution (v2.1)**: Section 4.1 now clearly documents the 4-Partition Overlayfs layout as the current implementation. Section 4.4 documents BTRFS-native as a future roadmap item (2026-2027). All SquashFS references replaced with `root.img` tarball.
 
 **Handbook states (Section 4.1)**:
 - BTRFS-native architecture with sub-volumes
@@ -33,7 +37,9 @@ This document identifies discrepancies between Handbook.md (v1.0) and actual imp
 
 ---
 
-### 2. Package Management Unclear
+### 2. Package Management Unclear ✅ RESOLVED
+
+**Resolution (v2.1)**: Section 6.1 explicitly states Foxmerge is not implemented. FAQ Q6 clarifies Foxmerge was planned but not built. All Xenia Linux repository references replaced with RegicideOS repositories.
 
 **Problem**: Handbook describes Foxmerge integration but no such implementation exists.
 
@@ -59,7 +65,9 @@ RegicideOS uses a hybrid package management approach:
 
 ---
 
-### 3. Missing Recent Changes
+### 3. Missing Recent Changes ✅ RESOLVED
+
+**Resolution (v2.1)**: Changelog documents v2.0 LUKS improvements (dynamic partition detection, UUID handling, initramfs configuration order). Section 9.1.2 contains LUKS-specific troubleshooting. Version bumped to 2.1.
 
 **Problem**: LUKS boot fixes and code reduction not documented.
 
@@ -85,7 +93,9 @@ RegicideOS uses a hybrid package management approach:
 
 ---
 
-### 4. Troubleshooting Outdated
+### 4. Troubleshooting Outdated ✅ RESOLVED
+
+**Resolution (v2.1)**: Section 9 troubleshooting reviewed and updated. LUKS manual workaround uses correct partition (`/dev/sdX4`) and mapper name (`ROOTS_HOME`). Removed `btrfs subvolume show /overlay/etc` (invalid for flat overlays).
 
 **Problem**: Some issues mentioned may no longer be relevant.
 
@@ -101,7 +111,9 @@ RegicideOS uses a hybrid package management approach:
 
 ---
 
-### 5. Installation Flow Mismatch
+### 5. Installation Flow Mismatch ✅ RESOLVED
+
+**Resolution (v2.1)**: Section 3.3 updated to match actual installer flow: ROOTS/OVERLAY/HOME partition roles clarified, LUKS on HOME (not ROOTS), tarball download instead of SquashFS.
 
 **Problem**: Handbook describes steps that may not match actual installer flow.
 
@@ -132,41 +144,41 @@ RegicideOS uses a hybrid package management approach:
 
 ## Action Items
 
-### High Priority
+### High Priority — ALL COMPLETE
 
-1. **Clarify Architecture Decision**
-   - [ ] Document whether 4-partition or BTRFS-native is primary
-   - [ ] Remove contradiction about "DEPRECATED" architecture
-   - [ ] Ensure all sections align with reality
+1. **Clarify Architecture Decision** ✅
+   - [x] Document whether 4-partition or BTRFS-native is primary
+   - [x] Remove contradiction about "DEPRECATED" architecture
+   - [x] Ensure all sections align with reality
 
-2. **Audit Package Management**
-   - [ ] Identify actual package management implementation
-   - [ ] Document Foxmerge status (planned, deprecated, or alternative approach)
-   - [ ] Update Sections 7.1 and 7.2 to match reality
+2. **Audit Package Management** ✅
+   - [x] Identify actual package management implementation
+   - [x] Document Foxmerge status (planned, deprecated, or alternative approach)
+   - [x] Update Sections 6.1 and 6.2 to match reality
 
-3. **Update Version Number**
-   - [ ] Bump to v1.1 or v1.2
-   - [ ] Document all changes made since v1.0
-   - [ ] Add changelog section to Handbook
+3. **Update Version Number** ✅
+   - [x] Bump to v2.1
+   - [x] Document all changes made since v1.0
+   - [x] Changelog section present in Handbook
 
-### Medium Priority
+### Medium Priority — ALL COMPLETE
 
-4. **Document LUKS Boot Fixes**
-   - [ ] Add section explaining dynamic LUKS partition detection
-   - [ ] Document UUID-based boot parameters
-   - [ ] Update troubleshooting section with LUKS-specific guidance
+4. **Document LUKS Boot Fixes** ✅
+   - [x] Add section explaining dynamic LUKS partition detection
+   - [x] Document UUID-based boot parameters
+   - [x] Update troubleshooting section with LUKS-specific guidance
 
-5. **Synchronize Installation Documentation**
-   - [ ] Ensure Handbook steps match actual installer behavior
-   - [ ] Verify all commands shown work as documented
-   - [ ] Add example outputs and expected results
+5. **Synchronize Installation Documentation** ✅
+   - [x] Ensure Handbook steps match actual installer behavior
+   - [x] Verify all commands shown work as documented
+   - [x] Add example outputs and expected results
 
-### Low Priority
+### Low Priority — ALL COMPLETE
 
-6. **Code Quality Documentation**
-   - [ ] Document redundant function removals
-   - [ ] Explain architectural improvements for maintainability
-   - [ ] Note reduction from ~4000 to ~3600 lines
+6. **Code Quality Documentation** ✅
+   - [x] Document redundant function removals (v2.0 changelog)
+   - [x] Explain architectural improvements for maintainability
+   - [x] Code reduction noted in changelog
 
 ---
 

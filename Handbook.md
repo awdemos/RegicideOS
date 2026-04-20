@@ -163,21 +163,21 @@ The RegicideOS installer performs these steps:
 
 1. **System Preparation**
    - Validate system dependencies (gdisk, cryptsetup, etc.)
-   - Check network connectivity to Xenia repositories
+   - Check network connectivity to RegicideOS repositories
 
 2. **Drive Partitioning** (4-Partition Overlayfs Layout)
    - EFI System Partition (512MB, FAT32) with boot flag
-   - Root Partition with LUKS-encrypted BTRFS (ROOTS label)
+   - ROOTS Partition (BTRFS, read-only base system template)
    - OVERLAY Partition (BTRFS, writable layers)
-   - HOME Partition (BTRFS, user data)
+   - HOME Partition (LUKS-encrypted BTRFS, user data)
 
 3. **Filesystem Setup**
-   - Create BTRFS filesystem on ROOTS and HOME partitions
-   - Setup LUKS encryption on ROOTS partition with cryptsetup
-   - Set up overlay directory structure
+   - Create BTRFS filesystem on ROOTS, OVERLAY, and HOME partitions
+   - Setup LUKS encryption on HOME partition with cryptsetup
+   - Set up overlay directory structure on OVERLAY partition
 
 4. **System Image Download**
-   - Download compressed system image from Xenia repositories
+   - Download compressed `root.img` tarball from RegicideOS repositories
    - Uses `cosmic-fedora` flavor
    - Verify image integrity with checksums
 
@@ -218,7 +218,7 @@ The RegicideOS installer performs these steps:
 
 ### 4.1 Current Implementation: 4-Partition Overlayfs Layout
 
-RegicideOS uses a **4-Partition Overlayfs architecture** inherited from Xenia Linux:
+RegicideOS uses a **4-Partition Overlayfs architecture** inherited from its upstream project:
 
 ```
 /dev/sda1   512 MB  FAT32   label "EFI"
@@ -229,25 +229,25 @@ RegicideOS uses a **4-Partition Overlayfs architecture** inherited from Xenia Li
 
 **Overlay Structure:**
 ```
-/mnt/gentoo/           # Read-only system image from ROOTS (SquashFS)
+/mnt/gentoo/           # Read-only base system from ROOTS partition
 /mnt/root/overlay/      # Writable overlay for /etc, /var, /usr
 /mnt/root/home/         # User home directory (bind-mounted to overlay/home)
 ```
 
 **Boot Process:**
-1. **UEFI → GRUB → kernel** (from `/boot/vmlinuz` in SquashFS)
+1. **UEFI → GRUB → kernel**
 2. **initrd** loads and mounts:
-   - SquashFS image to `/` (read-only)
+   - ROOTS partition as read-only base system (via `root.img` template or direct mount)
    - Overlayfs layers for `/etc`, `/var`, `/usr` (writable)
-   - `/home` sub-volume (writable)
+   - `/home` partition (writable, LUKS-encrypted BTRFS)
 3. **systemd** starts with overlays in place
 
 ### 4.2 Benefits of Current Architecture
 
-- **Simplicity**: Proven approach from Xenia Linux
+- **Simplicity**: Proven overlayfs approach
 - **Reliability**: Read-only base cannot be corrupted during normal operation
 - **Instant Rollback**: Simply download previous system image
-- **Atomic Updates**: System updates via new SquashFS images
+- **Atomic Updates**: System updates via new `root.img` tarball images
 - **LUKS Encryption**: Full LUKS encryption support with dynamic partition detection
 
 ### 4.3 Known Limitations
@@ -319,7 +319,7 @@ nmcli dev wifi connect "SSID" password "password"
 The installer **does not use Foxmerge** for package management. Instead:
 
 **Base System:**
-- Downloads pre-built SquashFS system images from Xenia Linux repositories
+- Downloads compressed `root.img` tarball from RegicideOS repositories
 - Root image contains: `cosmic-fedora` flavor with minimal packages
 - No package management during installation
 - System updates via atomic image replacement
@@ -332,7 +332,7 @@ The installer **does not use Foxmerge** for package management. Instead:
 **Architecture Decision:**
 - Direct download model was chosen for **simplicity and reliability**
 - Package management happens **post-installation** by system package tools
-- Foxmerge integration is planned but not currently implemented
+- Foxmerge was described in early planning but was not implemented
 
 ### 6.2 Package Installation Workflow
 
@@ -347,7 +347,7 @@ flatpak install <app>              # Flatpak applications
 ```
 
 **System Updates:**
-- Atomic: Download new SquashFS image, reboot
+- Atomic: Download new `root.img` tarball, reboot
 - Incremental: Overlay packages updated via system tools
 
 ---
@@ -529,7 +529,7 @@ cargo run --bin installer -- --dry-run
 
 ### 8.1 System Updates
 
-RegicideOS inherits Xenia Linux's atomic update system using SquashFS images:
+RegicideOS uses an atomic update system via `root.img` tarball images:
 
 #### 8.1.1 Base System Updates
 
@@ -567,7 +567,7 @@ sudo emerge --depclean
 #### 8.1.3 Update Workflow
 
 The installer automates base system updates:
-1. Download newest `root.img` from Xenia repositories
+1. Download newest `root.img` from RegicideOS repositories
 2. Copy to ROOTS partition
 3. Touch to ensure newest timestamp
 4. Sync filesystem
@@ -584,10 +584,11 @@ System configuration persists in overlay filesystems:
 sudo nano /etc/systemd/system.conf
 
 # View overlay changes
-sudo btrfs subvolume show /overlay/etc
+sudo ls -la /overlay/etc
 
 # View package status
-sudo foxmerge config show
+sudo dnf list installed
+sudo qlist -I  # if using Portage
 ```
 
 ### 8.3 System Snapshots
@@ -611,11 +612,11 @@ grub-mkconfig -o /boot/grub/grub.cfg
 
 ### 8.4 OS Personality Swapping
 
-The phrase "OS personality" refers to ability to replace the read-only SquashFS system image while keeping your local changes and home directory intact. This is one of the most powerful features of RegicideOS's architecture.
+The phrase "OS personality" refers to ability to replace the read-only base system image (`root.img`) while keeping your local changes and home directory intact. This is one of the most powerful features of RegicideOS's architecture.
 
 #### 8.4.1 Understanding OS Personalities
 
-An "OS personality" is essentially the complete system environment contained in a SquashFS image file. This includes:
+An "OS personality" is essentially the complete system environment contained in a compressed tarball (`root.img`). This includes:
 
 - **Base system**: `/usr`, `/bin`, `/lib`, `/sbin`, and other core directories
 - **Desktop environment**: Cosmic Desktop, GNOME, or other environments
@@ -653,8 +654,8 @@ Because RegicideOS's boot loader (GRUB) always picks the **newest** `root-*.img`
    ```
 
 On the next boot:
-- The initrd loopquash-mounts `root-cosmic.img`
-- The system overlays your writable BTRFS sub-volumes
+- The initrd mounts `root-cosmic.img` as the read-only lowerdir
+- The system overlays your writable BTRFS layers
 - You are instantly running the new personality
 
 #### 8.4.4 Rolling Back Personalities
@@ -728,10 +729,10 @@ lsblk -f NAME,FSTYPE,UUID | grep crypto
 sudo ls -la /dev/mapper/
 
 # Manual LUKS setup workaround
-sudo cryptsetup luksFormat /dev/sdX3  # Replace with your partition
-sudo cryptsetup open /dev/sdX3 XENIA
-sudo mkfs.btrfs -L XENIA /dev/mapper/XENIA
-sudo cryptsetup close XENIA
+sudo cryptsetup luksFormat /dev/sdX4  # Replace with your partition
+sudo cryptsetup open /dev/sdX4 ROOTS_HOME
+sudo mkfs.btrfs -L HOME /dev/mapper/ROOTS_HOME
+sudo cryptsetup close ROOTS_HOME
 ```
 
 **Boot Issues After Installation:**
@@ -914,7 +915,7 @@ sudo ./installer
 ### Q4: How do I rollback to a previous system version?
 
 **A:** The current 4-Partition architecture supports personality swapping:
-1. Download previous system image from Xenia repositories
+1. Download previous system image from RegicideOS repositories
 2. Copy to ROOTS partition: `sudo cp root.img /mnt/ROOTS/`
 3. Reboot and select older image in GRUB
 
@@ -929,7 +930,7 @@ sudo ./installer
 
 ### Q6: What happened to Foxmerge?
 
-**A:** Foxmerge was described in early planning but was not implemented in favor of a simpler direct download model. The installer uses pre-built system images from Xenia Linux repositories, and post-installation package management is handled by standard system tools (dnf, emerge). Foxmerge integration may be considered for future releases for advanced package management scenarios.
+**A:** Foxmerge was described in early planning but was not implemented in favor of a simpler direct download model. The installer downloads compressed `root.img` tarballs from RegicideOS repositories, and post-installation package management is handled by standard system tools (dnf, emerge).
 
 ### Q7: How do I verify LUKS is working correctly?
 
@@ -1054,5 +1055,5 @@ menuentry "RegicideOS (Encrypted)" {
 
 ---
 
-*Document Version: 2.0*
-*Last Updated: January 2026*
+*Document Version: 2.1*
+*Last Updated: April 2026*
