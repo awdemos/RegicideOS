@@ -67,20 +67,18 @@ impl OpenRCServiceManager {
         let target_path = format!("/etc/init.d/{}", service_name);
 
         // Read service file template
-        let service_content = fs::read_to_string(&source_path).map_err(|e| PortCLError::Io(e))?;
+        let service_content = fs::read_to_string(&source_path)?;
 
         // Replace placeholders if needed
         let final_content = service_content;
 
         // Write to init.d directory
-        fs::write(&target_path, final_content).map_err(|e| PortCLError::Io(e))?;
+        fs::write(&target_path, final_content)?;
 
         // Make executable
-        let mut perms = fs::metadata(&target_path)
-            .map_err(|e| PortCLError::Io(e))?
-            .permissions();
+        let mut perms = fs::metadata(&target_path)?.permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&target_path, perms).map_err(|e| PortCLError::Io(e))?;
+        fs::set_permissions(&target_path, perms)?;
 
         println!("Installed service file: {}", target_path);
         Ok(())
@@ -88,13 +86,13 @@ impl OpenRCServiceManager {
 
     fn create_config_directory(&self, _config: &PortageConfig) -> Result<()> {
         let config_dir = Path::new("/etc/portcl");
-        fs::create_dir_all(config_dir).map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(config_dir)?;
 
         let log_dir = "/var/log/portcl";
-        fs::create_dir_all(log_dir).map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(log_dir)?;
 
         let lib_dir = "/var/lib/portcl";
-        fs::create_dir_all(lib_dir).map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(lib_dir)?;
 
         Ok(())
     }
@@ -151,7 +149,7 @@ impl ServiceManager for OpenRCServiceManager {
             // Remove service file
             let service_path = format!("/etc/init.d/{}", service_name);
             if Path::new(&service_path).exists() {
-                fs::remove_file(&service_path).map_err(|e| PortCLError::Io(e))?;
+                fs::remove_file(&service_path)?;
                 println!("Removed service file: {}", service_path);
             }
         }

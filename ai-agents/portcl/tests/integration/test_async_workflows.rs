@@ -17,7 +17,8 @@ mod tests {
     use portcl::utils::logging;
     use std::time::Duration;
     use tokio::time::{sleep, timeout, Instant};
-    use tokio::sync::{Semaphore, Mutex, Arc};
+    use std::sync::Arc;
+use tokio::sync::{Semaphore, Mutex};
     use tokio::task::{JoinHandle, JoinSet};
     use futures::future::join_all;
     use std::collections::HashMap;
@@ -26,6 +27,29 @@ mod tests {
     use std::fs;
     use tracing::{info, warn, error, span, Level};
     use serial_test::serial;
+
+    // Helper structs for testing
+    #[derive(Debug, Clone)]
+    struct WorkflowStep {
+        name: String,
+        action: Action,
+        timeout: Duration,
+        retry_count: usize,
+    }
+
+    #[derive(Debug)]
+    struct WorkflowResult {
+        completed_steps: usize,
+        failed_steps: usize,
+        retried_steps: usize,
+    }
+
+    #[derive(Debug)]
+    struct LoadTestResult {
+        stable_throughput: bool,
+        no_deadlocks: bool,
+        max_throughput: f64,
+    }
 
     /// Test concurrent test execution workflows
     #[tokio::test]
@@ -186,7 +210,7 @@ mod tests {
 
         // Test error propagation through async call chains
         let error_chain = vec![
-            Action::ScheduleOperation { delay_seconds: -1 }, // Invalid delay
+            Action::ScheduleOperation { delay_seconds: 0 }, // Invalid delay (was -1)
             Action::AdjustParallelism { jobs: 0 },          // Invalid parallelism
             Action::CleanObsoletePackages { force: true },   // Should work
         ];
@@ -670,35 +694,16 @@ mod tests {
     }
 }
 
-// Helper structs for testing
-#[derive(Debug, Clone)]
-struct WorkflowStep {
-    name: String,
-    action: Action,
-    timeout: Duration,
-    retry_count: usize,
-}
-
-#[derive(Debug)]
-struct WorkflowResult {
-    completed_steps: usize,
-    failed_steps: usize,
-    retried_steps: usize,
-}
-
-#[derive(Debug)]
-struct LoadTestResult {
-    stable_throughput: bool,
-    no_deadlocks: bool,
-    max_throughput: f64,
-}
-
 // Additional test utilities
 #[cfg(test)]
 mod async_test_utils {
     use super::*;
     use std::future::Future;
     use tokio::select;
+    use portcl::error::PortCLError;
+    use std::time::Duration;
+    use tokio::time::sleep;
+    use futures::future::join_all;
 
     /// Helper for testing async operations with cancellation
     pub async fn test_with_cancellation<F, T>(future: F, cancel_after: Duration) -> Result<T, PortCLError>

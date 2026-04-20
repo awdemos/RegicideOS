@@ -18,6 +18,9 @@ pub struct MonitoringConfig {
     pub log_path: PathBuf,
     pub metrics_retention_days: u32,
     pub enable_event_tracking: bool,
+    pub max_history_size: usize,
+    pub enable_metrics: bool,
+    pub enable_events: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +87,9 @@ impl Default for MonitoringConfig {
             log_path: PathBuf::from("/var/log/portcl.log"),
             metrics_retention_days: 30,
             enable_event_tracking: true,
+            max_history_size: 1000,
+            enable_metrics: true,
+            enable_events: true,
         }
     }
 }

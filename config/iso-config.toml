@@ -24,7 +24,8 @@ compression_level = 6
 
 # Filesystem settings
 [filesystem]
-# Root filesystem configuration
+# Root filesystem configuration for the live ISO medium
+# (The installed system uses native ROOTS partition + overlay template)
 rootfs_type = "squashfs"
 rootfs_compression = "xz"
 rootfs_block_size = 131072
@@ -76,7 +77,7 @@ required = [
     "grub",
     "efibootmgr",
     "btrfs-progs",
-    "squashfs-tools",
+    "squashfs-tools",  # Required for live ISO medium compression
     "networkmanager",
     "cosmic-desktop",
     "xorg-server",
@@ -218,7 +219,7 @@ graphics_drivers = ["modesetting", "intel", "amd", "nvidia"]
 gpu_min_memory = 512  # MB
 
 # Storage support
-storage_drivers = ["btrfs", "squashfs"]
+storage_drivers = ["btrfs", "squashfs"]  # squashfs for live ISO medium only
 required_features = ["uefi", "gpt"]
 
 # Validation configuration

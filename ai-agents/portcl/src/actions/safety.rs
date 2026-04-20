@@ -95,7 +95,7 @@ pub struct PackageState {
 pub struct RollbackManager {
     _config: SafetyConfig,
     snapshots: HashMap<String, SystemSnapshot>,
-    current_snapshot: Option<String>,
+    pub current_snapshot: Option<String>,
 }
 
 impl RollbackManager {

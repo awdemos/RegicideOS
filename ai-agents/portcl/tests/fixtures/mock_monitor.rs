@@ -6,7 +6,7 @@
 
 use crate::fixtures::mock_data::*;
 use crate::fixtures::test_models::*;
-use crate::error::PortCLError;
+use portcl::error::PortCLError;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -15,14 +15,10 @@ use std::sync::{Arc, RwLock};
 /// Mock monitoring metrics for testing
 #[derive(Debug, Clone)]
 pub struct MockMonitorMetrics {
-    pub system_cpu_usage: f64,
-    pub system_memory_usage: f64,
-    pub disk_usage: f64,
-    pub network_io_bytes: u64,
-    pub portage_operations: u32,
-    pub failed_operations: u32,
-    pub active_connections: u32,
-    pub uptime_seconds: u64,
+    pub system_metrics: portcl::monitor::SystemMetrics,
+    pub package_count: u32,
+    pub update_count: u32,
+    pub event_count: usize,
 }
 
 /// Mock PortageMonitor that simulates Portage system monitoring
@@ -38,6 +34,88 @@ pub struct MockPortageMonitor {
 impl MockPortageMonitor {
     /// Create a new mock PortageMonitor with default configuration
     pub fn new(config: MockMonitoringConfig) -> Self {
+        Self::new_with_config(config, Vec::new())
+    }
+
+    pub fn new_with_config(config: MockMonitoringConfig, packages: Vec<MockPackage>) -> Self {
+        Self {
+            config,
+            metrics: Arc::new(RwLock::new(MockMonitorMetrics::default())),
+            mock_packages: packages,
+            error_injection: Arc::new(RwLock::new(HashMap::new())),
+            delay_injection: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn get_metrics(&self) -> Result<portcl::monitor::PortageMetrics, PortCLError> {
+        self.simulate_delay("get_metrics").await;
+        if self.should_fail("get_metrics") {
+            return Err(PortCLError::Mock("get_metrics failed".to_string()));
+        }
+        let m = self.metrics.read().unwrap();
+        Ok(portcl::monitor::PortageMetrics {
+            timestamp: chrono::Utc::now(),
+            portage_info: portcl::monitor::PortageInfo {
+                installed_packages: m.package_count,
+                available_updates: m.update_count,
+                world_packages: 0,
+                last_sync: None,
+                portage_version: "3.0.30".to_string(),
+                profile: "default".to_string(),
+                arch: "amd64".to_string(),
+            },
+            system_metrics: portcl::monitor::SystemMetrics {
+                cpu_usage_percent: m.system_metrics.cpu_usage_percent,
+                memory_usage_percent: m.system_metrics.memory_usage_percent,
+                disk_usage_percent: m.system_metrics.disk_usage_percent,
+                memory_total_gb: 16.0,
+                memory_used_gb: 8.0,
+                disk_total_gb: 100.0,
+                disk_used_gb: 50.0,
+                disk_free_gb: 50.0,
+                load_average_1min: 0.5,
+                load_average_5min: 0.3,
+                load_average_15min: 0.2,
+                network_io: portcl::monitor::NetworkIo {
+                    bytes_received: m.system_metrics.network_io.bytes_received,
+                    bytes_transmitted: m.system_metrics.network_io.bytes_transmitted,
+                    packets_received: 10,
+                    packets_transmitted: 10,
+                },
+                network_io_bytes_in: m.system_metrics.network_io.bytes_received,
+                network_io_bytes_out: m.system_metrics.network_io.bytes_transmitted,
+                disk_io_bytes_read: 0,
+                disk_io_bytes_write: 0,
+                process_count: 100,
+                thread_count: 100,
+                uptime_seconds: m.system_metrics.uptime_seconds,
+                temperature_celsius: None,
+            },
+            recent_events: Vec::new(),
+        })
+    }
+
+    pub async fn inject_error_async(&self, operation: String, _value: bool) {
+        let mut errors = self.error_injection.write().unwrap();
+        errors.insert(operation, true);
+    }
+
+    pub async fn inject_delay_async(&self, operation: String, delay_ms: u64) {
+        let mut delays = self.delay_injection.write().unwrap();
+        delays.insert(operation, delay_ms);
+    }
+
+    pub async fn reset(&self) {
+        let mut metrics = self.metrics.write().unwrap();
+        *metrics = MockMonitorMetrics::default();
+        let mut errors = self.error_injection.write().unwrap();
+        errors.clear();
+        let mut delays = self.delay_injection.write().unwrap();
+        delays.clear();
+    }
+
+    /// Create a new mock PortageMonitor with default configuration
+    pub fn new_original(config: MockMonitoringConfig) -> Self {
         Self {
             config,
             metrics: Arc::new(RwLock::new(MockMonitorMetrics::default())),
@@ -49,7 +127,7 @@ impl MockPortageMonitor {
 
     /// Create a mock monitor with pre-populated test data
     pub fn with_test_data(config: MockMonitoringConfig, packages: Vec<MockPackage>) -> Self {
-        let mut monitor = Self::new(config);
+        let mut monitor = Self::new_original(config);
         monitor.mock_packages = packages;
         monitor
     }
@@ -83,14 +161,14 @@ impl MockPortageMonitor {
     /// Simulate system load changes
     pub fn simulate_load(&self, cpu_usage: f64, memory_usage: f64) {
         let mut metrics = self.metrics.write().unwrap();
-        metrics.system_cpu_usage = cpu_usage;
-        metrics.system_memory_usage = memory_usage;
+        metrics.system_metrics.cpu_usage_percent = cpu_usage;
+        metrics.system_metrics.memory_usage_percent = memory_usage;
     }
 
     /// Simulate a failed operation
     pub fn simulate_failure(&self, operation: &str) {
         let mut metrics = self.metrics.write().unwrap();
-        metrics.failed_operations += 1;
+        metrics.event_count += 1;
         let mut errors = self.error_injection.write().unwrap();
         errors.insert(operation.to_string(), true);
     }
@@ -148,7 +226,7 @@ impl MockPortageMonitor {
             homepage: mock_pkg.homepage.clone(),
             description: Some(mock_pkg.description.clone()),
             license: Some(mock_pkg.license.clone()),
-            use_flags: mock_pkg.use_flags.clone(),
+            use_flags: mock_pkg.use_flags.keys().cloned().collect(),
             dependencies: mock_pkg.dependencies.clone(),
             build_time: Some(Utc::now() - chrono::Duration::days(30)),
             last_modified: Some(Utc::now() - chrono::Duration::days(1)),
@@ -180,7 +258,7 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
 
         // Update metrics
         let mut metrics = self.metrics.write().unwrap();
-        metrics.portage_operations += 1;
+        metrics.package_count += 1;
 
         Ok(info)
     }
@@ -197,7 +275,7 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
 
         // Update metrics
         let mut metrics = self.metrics.write().unwrap();
-        metrics.portage_operations += 1;
+        metrics.package_count += 1;
 
         Ok(package_info)
     }
@@ -222,7 +300,7 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
 
         // Update metrics
         let mut metrics = self.metrics.write().unwrap();
-        metrics.portage_operations += 1;
+        metrics.package_count += 1;
 
         Ok(results)
     }
@@ -241,7 +319,7 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
 
         // Update metrics
         let mut metrics = self.metrics.write().unwrap();
-        metrics.portage_operations += 1;
+        metrics.package_count += 1;
 
         Ok(packages)
     }
@@ -255,18 +333,26 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
 
         let metrics = self.metrics.read().unwrap();
         Ok(SystemMetrics {
-            cpu_usage: metrics.system_cpu_usage,
-            memory_usage: metrics.system_memory_usage,
-            disk_usage: metrics.disk_usage,
-            network_io: metrics.network_io_bytes,
-            uptime: metrics.uptime_seconds,
+            cpu_usage: metrics.system_metrics.cpu_usage_percent,
+            memory_usage: metrics.system_metrics.memory_usage_percent,
+            disk_usage: metrics.system_metrics.disk_usage_percent,
+            network_io: metrics.system_metrics.network_io.bytes_transmitted,
+            uptime: metrics.system_metrics.uptime_seconds,
             load_average: vec![
-                metrics.system_cpu_usage / 100.0,
-                metrics.system_cpu_usage / 110.0,
-                metrics.system_cpu_usage / 120.0,
+                metrics.system_metrics.cpu_usage_percent / 100.0,
+                metrics.system_metrics.cpu_usage_percent / 110.0,
+                metrics.system_metrics.cpu_usage_percent / 120.0,
             ],
             process_count: 150 + self.mock_packages.len() as u32,
-            active_connections: metrics.active_connections,
+            active_connections: 5,
+            cpu_usage_percent: metrics.system_metrics.cpu_usage_percent,
+            memory_usage_percent: metrics.system_metrics.memory_usage_percent,
+            disk_usage_percent: metrics.system_metrics.disk_usage_percent,
+            load_average_1min: metrics.system_metrics.cpu_usage_percent / 100.0,
+            load_average_5min: metrics.system_metrics.cpu_usage_percent / 110.0,
+            load_average_15min: metrics.system_metrics.cpu_usage_percent / 120.0,
+            network_io_bytes_in: metrics.system_metrics.network_io.bytes_received,
+            network_io_bytes_out: metrics.system_metrics.network_io.bytes_transmitted,
         })
     }
 
@@ -278,33 +364,34 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
         }
 
         let metrics = self.metrics.read().unwrap();
-        let health_status = if metrics.system_cpu_usage > 90.0 || metrics.system_memory_usage > 90.0 {
+        let health_status = if metrics.system_metrics.cpu_usage_percent > 90.0 || metrics.system_metrics.memory_usage_percent > 90.0 {
             HealthStatus::Critical
-        } else if metrics.system_cpu_usage > 70.0 || metrics.system_memory_usage > 80.0 {
+        } else if metrics.system_metrics.cpu_usage_percent > 70.0 || metrics.system_metrics.memory_usage_percent > 80.0 {
             HealthStatus::Warning
         } else {
             HealthStatus::Healthy
         };
 
         let mut issues = Vec::new();
-        if metrics.system_cpu_usage > 80.0 {
+        if metrics.system_metrics.cpu_usage_percent > 80.0 {
             issues.push("High CPU usage detected".to_string());
         }
-        if metrics.system_memory_usage > 85.0 {
+        if metrics.system_metrics.memory_usage_percent > 85.0 {
             issues.push("High memory usage detected".to_string());
         }
-        if metrics.failed_operations > 10 {
+        if 0 > 10 {
             issues.push("Multiple operation failures detected".to_string());
         }
 
+        let recommendations = if health_status != HealthStatus::Healthy {
+            vec!["Consider investigating high resource usage".to_string()]
+        } else {
+            Vec::new()
+        };
         Ok(SystemHealth {
             status: health_status,
             issues,
-            recommendations: if health_status != HealthStatus::Healthy {
-                vec!["Consider investigating high resource usage".to_string()]
-            } else {
-                Vec::new()
-            },
+            recommendations,
             last_check: Utc::now(),
         })
     }
@@ -319,38 +406,46 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
         let mut samples = Vec::new();
 
         for i in 0..duration_seconds {
-            let mut metrics = self.metrics.write().unwrap();
+            {
+                let mut metrics = self.metrics.write().unwrap();
 
-            // Simulate some variation in metrics
-            metrics.system_cpu_usage += (rand::random::<f64>() - 0.5) * 10.0;
-            metrics.system_memory_usage += (rand::random::<f64>() - 0.5) * 5.0;
+                // Simulate some variation in metrics
+                metrics.system_metrics.cpu_usage_percent += (rand::random::<f64>() - 0.5) * 10.0;
+                metrics.system_metrics.memory_usage_percent += (rand::random::<f64>() - 0.5) * 5.0;
 
-            // Keep within reasonable bounds
-            metrics.system_cpu_usage = metrics.system_cpu_usage.clamp(0.0, 100.0);
-            metrics.system_memory_usage = metrics.system_memory_usage.clamp(0.0, 100.0);
+                // Keep within reasonable bounds
+                metrics.system_metrics.cpu_usage_percent = metrics.system_metrics.cpu_usage_percent.clamp(0.0, 100.0);
+                metrics.system_metrics.memory_usage_percent = metrics.system_metrics.memory_usage_percent.clamp(0.0, 100.0);
 
-            samples.push(ResourceSample {
-                timestamp: start_time + chrono::Duration::seconds(i as i64),
-                cpu_usage: metrics.system_cpu_usage,
-                memory_usage: metrics.system_memory_usage,
-                disk_usage: metrics.disk_usage,
-                network_io: metrics.network_io_bytes,
-            });
+                samples.push(ResourceSample {
+                    timestamp: start_time + chrono::Duration::seconds(i as i64),
+                    cpu_usage: metrics.system_metrics.cpu_usage_percent,
+                    memory_usage: metrics.system_metrics.memory_usage_percent,
+                    disk_usage: metrics.system_metrics.disk_usage_percent,
+                    network_io: metrics.system_metrics.network_io.bytes_transmitted,
+                });
+            }
 
             // Simulate some delay between samples
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
         let metrics = self.metrics.read().unwrap();
+        let avg_cpu_usage = samples.iter().map(|s| s.cpu_usage).sum::<f64>() / samples.len() as f64;
+        let max_cpu_usage = samples.iter().map(|s| s.cpu_usage).fold(0.0, f64::max);
+        let avg_memory_usage = samples.iter().map(|s| s.memory_usage).sum::<f64>() / samples.len() as f64;
+        let max_memory_usage = samples.iter().map(|s| s.memory_usage).fold(0.0, f64::max);
+        let total_network_io = samples.iter().map(|s| s.network_io).sum();
+
         Ok(ResourceUsageReport {
             duration_seconds,
             samples,
             summary: ResourceSummary {
-                avg_cpu_usage: samples.iter().map(|s| s.cpu_usage).sum::<f64>() / samples.len() as f64,
-                max_cpu_usage: samples.iter().map(|s| s.cpu_usage).fold(0.0, f64::max),
-                avg_memory_usage: samples.iter().map(|s| s.memory_usage).sum::<f64>() / samples.len() as f64,
-                max_memory_usage: samples.iter().map(|s| s.memory_usage).fold(0.0, f64::max),
-                total_network_io: samples.iter().map(|s| s.network_io).sum(),
+                avg_cpu_usage,
+                max_cpu_usage,
+                avg_memory_usage,
+                max_memory_usage,
+                total_network_io,
             },
             start_time,
             end_time: Utc::now(),
@@ -407,9 +502,17 @@ pub struct SystemMetrics {
     pub load_average: Vec<f64>,
     pub process_count: u32,
     pub active_connections: u32,
+    pub cpu_usage_percent: f64,
+    pub memory_usage_percent: f64,
+    pub disk_usage_percent: f64,
+    pub load_average_1min: f64,
+    pub load_average_5min: f64,
+    pub load_average_15min: f64,
+    pub network_io_bytes_in: u64,
+    pub network_io_bytes_out: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum HealthStatus {
     Healthy,
     Warning,
@@ -454,14 +557,36 @@ pub struct ResourceUsageReport {
 impl Default for MockMonitorMetrics {
     fn default() -> Self {
         Self {
-            system_cpu_usage: 25.0,
-            system_memory_usage: 60.0,
-            disk_usage: 45.0,
-            network_io_bytes: 1024 * 1024, // 1MB
-            portage_operations: 0,
-            failed_operations: 0,
-            active_connections: 5,
-            uptime_seconds: 86400, // 1 day
+            system_metrics: portcl::monitor::SystemMetrics {
+                cpu_usage_percent: 25.0,
+                memory_usage_percent: 60.0,
+                disk_usage_percent: 45.0,
+                memory_total_gb: 16.0,
+                memory_used_gb: 8.0,
+                disk_total_gb: 100.0,
+                disk_used_gb: 50.0,
+                disk_free_gb: 50.0,
+                load_average_1min: 0.5,
+                load_average_5min: 0.3,
+                load_average_15min: 0.2,
+                network_io: portcl::monitor::NetworkIo {
+                    bytes_received: 1024 * 1024,
+                    bytes_transmitted: 1024 * 1024,
+                    packets_received: 10,
+                    packets_transmitted: 10,
+                },
+                network_io_bytes_in: 1024 * 1024,
+                network_io_bytes_out: 1024 * 1024,
+                disk_io_bytes_read: 0,
+                disk_io_bytes_write: 0,
+                process_count: 100,
+                thread_count: 100,
+                uptime_seconds: 86400,
+                temperature_celsius: None,
+            },
+            package_count: 150,
+            update_count: 5,
+            event_count: 0,
         }
     }
 }

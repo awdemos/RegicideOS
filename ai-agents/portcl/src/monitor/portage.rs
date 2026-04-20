@@ -44,7 +44,7 @@ pub struct PackageQuery {
 }
 
 pub struct PortageMonitor {
-    _config: MonitoringConfig,
+    pub config: MonitoringConfig,
 }
 
 impl PortageMonitor {
@@ -57,7 +57,7 @@ impl PortageMonitor {
             )));
         }
 
-        Ok(Self { _config: config })
+        Ok(Self { config })
     }
 
     pub async fn get_portage_info(&self) -> Result<PortageInfo> {

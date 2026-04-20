@@ -101,13 +101,11 @@ fn default_output_format() -> OutputFormat {
 }
 
 // Mock API client for testing
-mock! {
-    pub ApiClient {}
+use mockall::automock;
 
-    impl ApiClient {
-        pub fn new(base_url: &str) -> Self;
-        pub async fn run_tests(&self, request: &TestExecutionRequest) -> Result<TestExecutionResponse>;
-    }
+#[automock]
+pub trait ApiClient {
+    async fn run_tests(&self, params: &TestExecutionRequest) -> Result<TestExecutionResponse>;
 }
 
 // Test utilities

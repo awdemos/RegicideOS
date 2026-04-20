@@ -14,7 +14,9 @@ pub struct PortageEvent {
     pub id: String,
     pub event_type: EventType,
     pub timestamp: DateTime<Utc>,
+    pub package_name: Option<String>,
     pub details: String,
+    pub success: bool,
     pub severity: EventSeverity,
     pub source: EventSource,
     pub metadata: Option<serde_json::Value>,
@@ -31,6 +33,11 @@ pub enum EventType {
     CompileStart,
     CompileSuccess,
     CompileFailed,
+    BuildStart,
+    BuildComplete,
+    BuildFailed,
+    ConfigChange,
+    SystemReboot,
     DependencyResolution,
     ConfigurationChange,
     SystemStateChange,
@@ -79,7 +86,9 @@ impl EventTracker {
             id: Uuid::new_v4().to_string(),
             event_type: event_type.clone(),
             timestamp: Utc::now(),
+            package_name: None,
             details,
+            success: true,
             severity: self.determine_severity(&event_type),
             source: self.determine_source(&event_type),
             metadata: None,
@@ -209,23 +218,19 @@ impl EventTracker {
 
         // Create directory if it doesn't exist
         if let Some(parent) = std::path::Path::new(log_file).parent() {
-            tokio::fs::create_dir_all(parent).await
-                .map_err(|e| PortCLError::Io(e))?;
+            tokio::fs::create_dir_all(parent).await?;
         }
 
         // Serialize event to JSON
-        let event_json = serde_json::to_string(event)
-            .map_err(|e| PortCLError::Json(e))?;
+        let event_json = serde_json::to_string(event)?;
 
         // Append to log file
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_file)
-            .map_err(|e| PortCLError::Io(e))?;
+            .open(log_file)?;
 
-        writeln!(file, "{}", event_json)
-            .map_err(|e| PortCLError::Io(e))?;
+        writeln!(file, "{}", event_json)?;
 
         Ok(())
     }
@@ -245,7 +250,12 @@ impl EventTracker {
             EventType::SyncComplete |
             EventType::DependencyResolution |
             EventType::ConfigurationChange |
-            EventType::SystemStateChange => EventSeverity::Info,
+            EventType::SystemStateChange |
+            EventType::BuildStart |
+            EventType::BuildComplete |
+            EventType::ConfigChange |
+            EventType::SystemReboot => EventSeverity::Info,
+            EventType::BuildFailed => EventSeverity::Medium,
             EventType::UserAction |
             EventType::AgentAction => EventSeverity::Low,
             EventType::Info => EventSeverity::Info,
@@ -263,9 +273,14 @@ impl EventTracker {
             EventType::CompileStart |
             EventType::CompileSuccess |
             EventType::CompileFailed |
-            EventType::DependencyResolution => EventSource::Portage,
+            EventType::DependencyResolution |
+            EventType::BuildStart |
+            EventType::BuildComplete |
+            EventType::BuildFailed => EventSource::Portage,
             EventType::ConfigurationChange |
-            EventType::SystemStateChange => EventSource::System,
+            EventType::SystemStateChange |
+            EventType::ConfigChange |
+            EventType::SystemReboot => EventSource::System,
             EventType::UserAction => EventSource::User,
             EventType::AgentAction => EventSource::Agent,
             EventType::Error |
@@ -326,7 +341,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_tracking() {
-        let config = MonitoringConfig::default();
+        let mut config = MonitoringConfig::default();
+        config.log_path = std::env::temp_dir().join("portcl_test_event_tracking.log");
         let tracker = EventTracker::new(config).unwrap();
 
         let event_id = tracker.track_event(EventType::Info, "Test event".to_string()).await.unwrap();
@@ -339,7 +355,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_statistics() {
-        let config = MonitoringConfig::default();
+        let mut config = MonitoringConfig::default();
+        config.log_path = std::env::temp_dir().join("portcl_test_event_statistics.log");
         let tracker = EventTracker::new(config).unwrap();
 
         // Track some test events

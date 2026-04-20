@@ -55,13 +55,11 @@ pub struct TestListResponse {
 }
 
 // Mock API client for testing
-mock! {
-    pub ApiClient {}
+use mockall::automock;
 
-    impl ApiClient {
-        pub fn new(base_url: &str) -> Self;
-        pub async fn list_tests(&self, params: &TestListParams) -> Result<TestListResponse>;
-    }
+#[automock]
+pub trait ApiClient {
+    async fn list_tests(&self, params: &TestListParams) -> Result<TestListResponse>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -10,7 +10,7 @@ This document accurately reflects the current RegicideOS installer implementatio
 
 ### 1.1 Current Implementation: 4-Partition Layout
 
-The installer uses a **legacy 4-partition overlayfs layout** inherited from Xenia Linux:
+The installer uses a **4-partition overlayfs layout** with native ROOTS mounting:
 
 ```
 /dev/sda1   512 MB  FAT32   label "EFI"
@@ -21,25 +21,25 @@ The installer uses a **legacy 4-partition overlayfs layout** inherited from Xeni
 
 **Overlay Structure:**
 ```
-/mnt/gentoo/           # Read-only system image from ROOTS (SquashFS)
+/mnt/gentoo/           # Native ROOTS partition mount point
 /mnt/root/overlay/      # Writable overlay for /etc, /var, /usr
 /mnt/root/home/         # User home directory (bind-mounted to overlay/home)
 ```
 
 **Boot Process:**
-1. **UEFI → GRUB → kernel** (from `/boot/vmlinuz` in SquashFS)
+1. **UEFI → GRUB → kernel** (from `/boot/vmlinuz` on ROOTS)
 2. **initrd** loads and mounts:
-   - SquashFS image to `/` (read-only)
+   - ROOTS partition to `/` (read-only base system)
    - BTRFS sub-volumes for `/etc`, `/var`, `/usr` (writable overlays)
    - `/home` sub-volume (writable)
 3. **systemd** starts with overlays in place
 
 ### 1.2 Benefits of Current Architecture
 
-- **Simplicity**: Proven approach from Xenia Linux
+- **Simplicity**: Proven overlayfs approach on native partition
 - **Reliability**: Read-only base cannot be corrupted during normal operation
-- **Instant Rollback**: Simply download previous system image
-- **Atomic Updates**: System updates via new SquashFS images
+- **Instant Rollback**: Simply replace the root overlay template image
+- **Atomic Updates**: System updates via new overlay template images
 
 ### 1.3 Known Limitations
 
@@ -317,8 +317,8 @@ update-initramfs -u -k all
 3. Filesystem Formatting (mkfs.btrfs, mkfs.vfat, cryptsetup)
 4. ROOTS Partition Mount (read-only)
 5. Overlay Setup (create overlay directories)
-6. System Image Download (wget/curl from Xenia repositories)
-7. Image Extraction (unsquashfs to /mnt/gentoo)
+6. System Image Download (wget/curl from RegicideOS repositories)
+7. Overlay Template Extraction (to /mnt/gentoo)
 8. LUKS Initramfs Configuration (for encrypted installs)
 9. GRUB Installation (with crypto modules for LUKS)
 10. Overlay Filesystem Setup (mount overlayfs layers)
@@ -598,7 +598,7 @@ lsinitramfs /boot/initrd.img-* | grep cryptsetup
 - `iso-config.toml` - ISO build configuration
 
 ### External Documentation
-- [Xenia Linux Documentation](https://xenialinux.org/docs/)
+- [Gentoo Linux Documentation](https://wiki.gentoo.org/wiki/Main_Page)
 - [GRUB Documentation](https://www.gnu.org/software/grub/manual/)
 - [BTRFS Documentation](https://btrfs.wiki.kernel.org/)
 - [LUKS/cryptsetup Documentation](https://gitlab.com/cryptsetup/cryptsetup/-/wikis/home)

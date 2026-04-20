@@ -68,13 +68,13 @@ impl SystemdServiceManager {
         let target_path = format!("/etc/systemd/system/{}", service_name);
 
         // Read service file template
-        let service_content = fs::read_to_string(&source_path).map_err(|e| PortCLError::Io(e))?;
+        let service_content = fs::read_to_string(&source_path)?;
 
         // Replace placeholders if needed
         let final_content = service_content;
 
         // Write to systemd directory
-        fs::write(&target_path, final_content).map_err(|e| PortCLError::Io(e))?;
+        fs::write(&target_path, final_content)?;
 
         println!("Installed service file: {}", target_path);
         Ok(())
@@ -82,13 +82,13 @@ impl SystemdServiceManager {
 
     fn create_config_directory(&self, _config: &PortageConfig) -> Result<()> {
         let config_dir = Path::new("/etc/portcl");
-        fs::create_dir_all(config_dir).map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(config_dir)?;
 
         let log_dir = "/var/log/portcl";
-        fs::create_dir_all(log_dir).map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(log_dir)?;
 
         let lib_dir = "/var/lib/portcl";
-        fs::create_dir_all(lib_dir).map_err(|e| PortCLError::Io(e))?;
+        fs::create_dir_all(lib_dir)?;
 
         Ok(())
     }
@@ -133,7 +133,7 @@ impl ServiceManager for SystemdServiceManager {
             // Remove service file
             let service_path = format!("/etc/systemd/system/{}", service_name);
             if Path::new(&service_path).exists() {
-                fs::remove_file(&service_path).map_err(|e| PortCLError::Io(e))?;
+                fs::remove_file(&service_path)?;
                 println!("Removed service file: {}", service_path);
             }
         }

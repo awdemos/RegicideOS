@@ -8,7 +8,8 @@ use tempfile::{tempdir, TempDir};
 use serde::{Serialize, Deserialize};
 use tokio::time::sleep;
 use uuid::Uuid;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use futures::future;
 
 use crate::fixtures::mock_data::*;
@@ -16,6 +17,7 @@ use crate::fixtures::test_models::*;
 use crate::fixtures::mock_monitor::*;
 use crate::fixtures::mock_executor::*;
 use crate::fixtures::mock_agent::*;
+use portcl::monitor::PortageMetrics;
 
 pub mod test_assertions;
 pub mod mock_environment;
@@ -28,6 +30,7 @@ pub use mock_environment::*;
 pub use test_runner::*;
 pub use data_validator::*;
 pub use benchmark_helpers::*;
+pub use crate::fixtures::test_models::*;
 
 /// Creates a temporary directory for tests
 pub fn create_temp_dir() -> TempDir {
@@ -295,8 +298,8 @@ impl TestAssertionHelpers {
 
         let mut has_improvement = false;
 
-        for (metric, improvement) in improvements {
-            if improvement > min_improvement {
+        for (_metric, improvement) in &improvements {
+            if *improvement > min_improvement {
                 has_improvement = true;
                 break;
             }
@@ -341,13 +344,13 @@ impl TestAssertionHelpers {
         expected_content: &str,
     ) -> Result<(), String> {
         let content = match output {
-            TestOutput::Success { stdout, stderr: _ } => stdout,
+            TestOutput::Success { stdout, stderr: _ } => stdout.clone(),
             TestOutput::Failure { stdout, stderr, error: _ } => {
                 format!("{}: {}", stdout, stderr)
             },
-            TestOutput::Timeout { message } => message,
-            TestOutput::Error { message } => message,
-            TestOutput::Skipped { reason } => reason,
+            TestOutput::Timeout { message } => message.clone(),
+            TestOutput::Error { message } => message.clone(),
+            TestOutput::Skipped { reason } => reason.clone(),
         };
 
         if !content.contains(expected_content) {
@@ -366,16 +369,16 @@ impl TestAssertionHelpers {
         expected_learning_mode: bool,
         min_experience_count: usize,
     ) -> Result<(), String> {
-        let state = agent.state.blocking_read();
+        let state = agent.state.read().unwrap();
 
-        if state.learning_mode != expected_learning_mode {
+        if state.learning_active != expected_learning_mode {
             return Err(format!(
                 "Expected learning mode {}, got {}",
-                expected_learning_mode, state.learning_mode
+                expected_learning_mode, state.learning_active
             ));
         }
 
-        if state.experience_count < min_experience_count {
+        if state.experience_count < min_experience_count as u64 {
             return Err(format!(
                 "Expected at least {} experiences, got {}",
                 min_experience_count, state.experience_count
@@ -542,16 +545,16 @@ impl MockEnvironmentBuilder {
         let agent_config = self.agent_config.unwrap_or_else(|| MockRLConfig::default());
 
         Ok(MockTestEnvironment {
-            packages: self.packages,
+            packages: self.packages.clone(),
             config,
             actions: self.actions,
             monitor: Arc::new(RwLock::new(MockPortageMonitor::new_with_config(
                 monitor_config,
-                self.packages.clone(),
+                self.packages,
             ))),
             executor: Arc::new(RwLock::new(MockActionExecutor::new_with_config(
                 executor_config,
-            ))),
+            ).unwrap())),
             agent: Arc::new(RwLock::new(MockPortageAgent::new_with_config(
                 agent_config,
             ))),
@@ -592,7 +595,7 @@ impl MockTestEnvironment {
         executor.reset().await;
 
         let mut agent = self.agent.write().await;
-        agent.reset().await;
+        agent.clear_injections();
 
         Ok(())
     }
@@ -618,9 +621,22 @@ impl MockTestEnvironment {
             packages: self.packages.clone(),
             config: self.config.clone(),
             actions: self.actions.clone(),
-            monitor_metrics: monitor.get_metrics().await,
-            executor_state: executor.get_state().await,
-            agent_state: agent.get_state().await,
+            monitor_metrics: monitor.get_metrics().await.unwrap_or_else(|_| PortageMetrics {
+                timestamp: chrono::Utc::now(),
+                portage_info: portcl::monitor::PortageInfo {
+                    installed_packages: 0,
+                    available_updates: 0,
+                    world_packages: 0,
+                    last_sync: None,
+                    portage_version: "0.0.0".to_string(),
+                    profile: "default".to_string(),
+                    arch: "unknown".to_string(),
+                },
+                system_metrics: portcl::monitor::SystemMetrics::default(),
+                recent_events: Vec::new(),
+            }),
+            executor_state: executor.get_state_async().await,
+            agent_state: agent.get_state(),
             created_at: self.created_at,
             current_time: SystemTime::now(),
         }
@@ -728,7 +744,7 @@ impl TestRunner {
             .as_millis() as u64;
 
         let output = TestOutput::Success {
-            stdout: format!("Test {} completed successfully", config.name),
+            stdout: format!("Test {} completed successfully", config.test_suite_name),
             stderr: String::new(),
         };
 
@@ -736,25 +752,32 @@ impl TestRunner {
             coverage_percent: 85.0,
             execution_time_ms: duration_ms,
             memory_usage_mb: 50.0,
+            memory_usage_percent: 10.0,
+            memory_peak_bytes: 50 * 1024 * 1024,
             assertions_passed: 10,
             assertions_failed: 0,
+            cpu_time_ms: duration_ms / 2,
             cpu_usage_percent: 25.0,
             disk_usage_percent: 15.0,
+            disk_io_bytes: 0,
+            network_io_bytes: 0,
+            allocations: 1000,
+            custom_metrics: std::collections::HashMap::new(),
         };
 
         TestResult {
             test_id,
-            test_name: config.name.clone(),
-            test_type: config.test_type.clone(),
+            test_name: config.test_suite_name.clone(),
+            test_type: config.test_types.first().cloned().unwrap_or(TestType::Unit),
             status: TestStatus::Passed,
             duration_ms,
             start_time,
             end_time: start_time + Duration::from_millis(duration_ms),
             output,
             metrics,
-            dependencies: config.dependencies.clone(),
-            tags: config.tags.clone(),
-            metadata: config.metadata.clone(),
+            dependencies: Vec::new(),
+            tags: Vec::new(),
+            metadata: std::collections::HashMap::new(),
         }
     }
 
@@ -764,12 +787,9 @@ impl TestRunner {
         if self.config.parallel_execution {
             // Run tests in parallel with limited concurrency
             for chunk in test_configs.chunks(self.config.max_concurrent_tests) {
-                let chunk_results: Vec<_> = future::join_all(
-                    chunk.iter().map(|config| self.run_test(config))
-                ).await;
-
-                for result in chunk_results {
-                    match result {
+                // Sequential execution to avoid FnMut borrowing issues
+                for config in chunk {
+                    match self.run_test(config).await {
                         Ok(test_result) => results.push(test_result),
                         Err(e) => {
                             // Create a failure result for the error
@@ -1116,7 +1136,7 @@ impl TestDataValidator {
     }
 
     /// Validate system metrics
-    pub fn validate_system_metrics(metrics: &SystemMetrics) -> Result<(), String> {
+    pub fn validate_system_metrics(metrics: &portcl::monitor::SystemMetrics) -> Result<(), String> {
         if metrics.cpu_usage_percent < 0.0 || metrics.cpu_usage_percent > 100.0 {
             return Err("CPU usage must be between 0 and 100".to_string());
         }
@@ -1349,16 +1369,18 @@ impl BenchmarkHelpers {
     {
         let benchmark1 = Self::benchmark(name1, f1);
         let benchmark2 = Self::benchmark(name2, f2);
+        let improvement_percent = Self::calculate_improvement(&benchmark1, &benchmark2);
+        let winner = if benchmark1.duration_ms < benchmark2.duration_ms {
+            name1.to_string()
+        } else {
+            name2.to_string()
+        };
 
         BenchmarkComparison {
             benchmark1,
             benchmark2,
-            improvement_percent: Self::calculate_improvement(&benchmark1, &benchmark2),
-            winner: if benchmark1.duration_ms < benchmark2.duration_ms {
-                name1.to_string()
-            } else {
-                name2.to_string()
-            },
+            improvement_percent,
+            winner,
         }
     }
 
@@ -1374,7 +1396,7 @@ impl BenchmarkHelpers {
         let mut results = Vec::with_capacity(iterations);
 
         for i in 0..iterations {
-            let result = Self::benchmark(&format!("{}_{}", name, i), f);
+            let result = Self::benchmark(&format!("{}_{}", name, i), &f);
             results.push(result);
         }
 
@@ -1398,7 +1420,7 @@ impl BenchmarkHelpers {
         let memory_diff = end_memory.saturating_sub(start_memory);
 
         BenchmarkResult {
-            name: config.name.clone(),
+            name: config.test_suite_name.clone(),
             duration_ms: duration.as_millis() as u64,
             memory_usage_bytes: memory_diff,
             success: result.is_ok(),

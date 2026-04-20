@@ -2,7 +2,7 @@ use crate::config::MonitoringConfig;
 use crate::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use sysinfo::System;
+use sysinfo::{Disks, Networks, System};
 use std::path::Path;
 use std::fs;
 use tracing::debug;
@@ -15,7 +15,7 @@ pub struct PortageMetrics {
     pub recent_events: Vec<super::events::PortageEvent>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SystemMetrics {
     pub cpu_usage_percent: f64,
     pub memory_usage_percent: f64,
@@ -29,12 +29,17 @@ pub struct SystemMetrics {
     pub load_average_5min: f64,
     pub load_average_15min: f64,
     pub network_io: NetworkIo,
+    pub network_io_bytes_in: u64,
+    pub network_io_bytes_out: u64,
+    pub disk_io_bytes_read: u64,
+    pub disk_io_bytes_write: u64,
     pub process_count: u32,
+    pub thread_count: u32,
     pub uptime_seconds: u64,
     pub temperature_celsius: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NetworkIo {
     pub bytes_received: u64,
     pub bytes_transmitted: u64,
@@ -67,6 +72,8 @@ pub struct DiskMetrics {
 pub struct MetricsCollector {
     _config: MonitoringConfig,
     system: System,
+    disks: Disks,
+    networks: Networks,
 }
 
 impl MetricsCollector {
@@ -74,6 +81,8 @@ impl MetricsCollector {
         Ok(Self {
             _config: config,
             system: System::new_all(),
+            disks: Disks::new_with_refreshed_list(),
+            networks: Networks::new_with_refreshed_list(),
         })
     }
 
@@ -81,6 +90,8 @@ impl MetricsCollector {
         debug!("Collecting system metrics");
 
         self.system.refresh_all();
+        self.disks.refresh_list();
+        self.networks.refresh_list();
 
         let cpu_usage = self.get_cpu_usage();
         let memory_usage = self.get_memory_usage();
@@ -103,8 +114,13 @@ impl MetricsCollector {
             load_average_1min: load_average.0,
             load_average_5min: load_average.1,
             load_average_15min: load_average.2,
+            network_io_bytes_in: network_io.bytes_received,
+            network_io_bytes_out: network_io.bytes_transmitted,
             network_io,
+            disk_io_bytes_read: 0,
+            disk_io_bytes_write: 0,
             process_count,
+            thread_count: process_count,
             uptime_seconds: uptime,
             temperature_celsius: temperature,
         })
@@ -194,28 +210,50 @@ impl MetricsCollector {
     }
 
     fn get_disk_usage(&self) -> DiskUsage {
-        // TODO: Fix sysinfo 0.30 API compatibility
-        // Temporary placeholder implementation
+        let mut total = 0u64;
+        let mut available = 0u64;
+        for disk in &self.disks {
+            total += disk.total_space();
+            available += disk.available_space();
+        }
+        let used = total.saturating_sub(available);
+        let total_gb = total as f64 / (1024.0 * 1024.0 * 1024.0);
+        let used_gb = used as f64 / (1024.0 * 1024.0 * 1024.0);
+        let free_gb = available as f64 / (1024.0 * 1024.0 * 1024.0);
+        let percent = if total > 0 {
+            (used as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
         DiskUsage {
-            total: 100.0,
-            used: 50.0,
-            free: 50.0,
-            percent: 50.0,
+            total: total_gb,
+            used: used_gb,
+            free: free_gb,
+            percent,
         }
     }
 
     fn get_load_average(&self) -> (f64, f64, f64) {
-        // TODO: Fix sysinfo 0.30 API compatibility
-        (0.5, 0.3, 0.2)
+        let load = System::load_average();
+        (load.one, load.five, load.fifteen)
     }
 
     fn get_network_io(&self) -> NetworkIo {
-        // TODO: Fix sysinfo 0.30 API compatibility
+        let mut bytes_received = 0u64;
+        let mut bytes_transmitted = 0u64;
+        let mut packets_received = 0u64;
+        let mut packets_transmitted = 0u64;
+        for (_, network) in &self.networks {
+            bytes_received += network.total_received();
+            bytes_transmitted += network.total_transmitted();
+            packets_received += network.packets_received();
+            packets_transmitted += network.packets_transmitted();
+        }
         NetworkIo {
-            bytes_received: 1024,
-            bytes_transmitted: 2048,
-            packets_received: 10,
-            packets_transmitted: 15,
+            bytes_received,
+            bytes_transmitted,
+            packets_received,
+            packets_transmitted,
         }
     }
 
@@ -224,8 +262,7 @@ impl MetricsCollector {
     }
 
     fn get_uptime(&self) -> u64 {
-        // TODO: Fix sysinfo 0.30 API compatibility
-        3600
+        System::uptime()
     }
 
     fn get_temperature(&self) -> Option<f64> {

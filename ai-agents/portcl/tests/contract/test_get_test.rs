@@ -76,13 +76,11 @@ impl std::fmt::Display for TestStatus {
 }
 
 // Mock API client for testing
-mock! {
-    pub ApiClient {}
+use mockall::automock;
 
-    impl ApiClient {
-        pub fn new(base_url: &str) -> Self;
-        pub async fn get_test(&self, test_id: &str) -> Result<TestDetail>;
-    }
+#[automock]
+pub trait ApiClient {
+    async fn get_test(&self, params: &str) -> Result<TestDetail>;
 }
 
 // Test utilities

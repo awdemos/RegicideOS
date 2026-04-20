@@ -10,6 +10,7 @@
 use portcl::utils::serde_utils::*;
 use portcl::error::{PortCLError, Result};
 use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use tempfile::TempDir;
 

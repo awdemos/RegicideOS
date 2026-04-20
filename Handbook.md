@@ -142,7 +142,7 @@ For scripted deployments, create a configuration file:
 # Create configuration
 cat > regicide-config.toml << EOF
 drive = "/dev/sda"
-repository = "https://repo.xenialinux.com/releases/"
+repository = "https://repo.regicideos.org/releases/"
 flavour = "cosmic-fedora"
 release_branch = "main"
 filesystem = "btrfs_encryption_dev"
@@ -534,19 +534,12 @@ RegicideOS inherits Xenia Linux's atomic update system using SquashFS images:
 #### 8.1.1 Base System Updates
 
 ```bash
-# First-time setup (one-time)
-sudo emerge --sync xenia
-
 # Check for available updates
-curl -s https://repo.xenialinux.com/releases/Manifest.toml
-
-# Automated update process
-sudo xenia-update  # Updates base system image
-sudo foxmerge update  # Updates overlay packages (when implemented)
+curl -s https://repo.regicideos.org/releases/Manifest.toml
 
 # Manual update process
 sudo mount -L ROOTS /mnt/roots
-sudo wget https://repo.xenialinux.com/releases/amd64/main/root.img
+sudo wget https://repo.regicideos.org/releases/amd64/main/root.img
 sudo umount /mnt/roots
 sudo reboot
 ```
@@ -711,7 +704,8 @@ You can create your own personalities:
 
 ```bash
 # Create a custom personality from current system
-sudo mksquashfs /tmp/rootfs /mnt/root-custom.img -comp zstd -Xcompression-level 19
+# Create a custom overlay template from current system
+sudo tar czf /mnt/root-custom.img -C /tmp/rootfs .
 
 # Ensure it's newest for next boot
 sudo touch /mnt/root-custom.img
@@ -971,7 +965,7 @@ lsinitramfs /boot/initrd.img-* | grep cryptsetup
 - [iso-config.toml](iso-config.toml) - ISO build configuration
 
 ### External Documentation
-- [Xenia Linux Documentation](https://xenialinux.org/docs/)
+- [Gentoo Linux Handbook](https://wiki.gentoo.org/wiki/Handbook:AMD64)
 - [GRUB Documentation](https://www.gnu.org/software/grub/manual/)
 - [BTRFS Documentation](https://btrfs.wiki.kernel.org/)
 - [LUKS/cryptsetup Documentation](https://gitlab.com/cryptsetup/cryptsetup/-/wikis/home)

@@ -5,11 +5,11 @@
 //! actual neural network computations or model training.
 
 use crate::fixtures::mock_data::*;
+pub use crate::fixtures::mock_data::MockAction;
 use crate::fixtures::mock_monitor::*;
-use crate::error::PortCLError;
+use portcl::error::PortCLError;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use ndarray::Array1;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
@@ -61,6 +61,10 @@ pub struct MockModelState {
     pub learning_active: bool,
     pub model_accuracy: f64,
     pub convergence_rate: f64,
+    pub episode_count: u64,
+    pub experience_count: u64,
+    pub learning_rate: f64,
+    pub discount_factor: f64,
 }
 
 /// Mock training statistics
@@ -92,7 +96,7 @@ pub struct MockTaskContext {
 #[derive(Debug, Clone)]
 pub struct MockPortageAgent {
     config: MockRLConfig,
-    state: Arc<RwLock<MockModelState>>,
+    pub state: Arc<RwLock<MockModelState>>,
     policy: Arc<RwLock<MockLearningPolicy>>,
     experience_buffer: Arc<Mutex<Vec<MockExperience>>>,
     training_stats: Arc<RwLock<MockTrainingStats>>,
@@ -132,12 +136,18 @@ impl MockPortageAgent {
         let agent = Self::new(config);
 
         // Initialize Q-values with provided knowledge
-        let mut policy = agent.policy.write().unwrap();
-        for (action_key, q_value) in knowledge {
-            policy.q_values.insert(action_key, q_value);
+        {
+            let mut policy = agent.policy.write().unwrap();
+            for (action_key, q_value) in knowledge {
+                policy.q_values.insert(action_key, q_value);
+            }
         }
 
         agent
+    }
+
+    pub fn new_with_config(config: MockRLConfig) -> Self {
+        Self::new(config)
     }
 
     /// Inject an error for a specific operation
@@ -333,9 +343,9 @@ impl MockPortageAgent {
 
         // Adjust action preferences based on task performance
         for (action, performance) in &context.performance_metrics {
-            if performance > 0.7 { // Good performance
+            if *performance > 0.7 { // Good performance
                 *policy.action_preferences.entry(action.clone()).or_insert(0.5) += 0.1;
-            } else if performance < 0.3 { // Poor performance
+            } else if *performance < 0.3 { // Poor performance
                 *policy.action_preferences.entry(action.clone()).or_insert(0.5) -= 0.1;
             }
         }
@@ -552,8 +562,12 @@ impl Default for MockModelState {
             last_training_loss: 0.0,
             epsilon: 0.1,
             learning_active: true,
-            model_accuracy: 0.1, // Start with low accuracy
+            model_accuracy: 0.1,
             convergence_rate: 0.01,
+            episode_count: 0,
+            experience_count: 0,
+            learning_rate: 0.001,
+            discount_factor: 0.95,
         }
     }
 }
@@ -601,6 +615,14 @@ mod tests {
             load_average: vec![1.0, 1.1, 1.2],
             process_count: 100,
             active_connections: 5,
+            cpu_usage_percent: 50.0,
+            memory_usage_percent: 60.0,
+            disk_usage_percent: 40.0,
+            load_average_1min: 1.0,
+            load_average_5min: 1.1,
+            load_average_15min: 1.2,
+            network_io_bytes_in: 512,
+            network_io_bytes_out: 512,
         };
 
         let action = agent.select_action(&metrics).await.unwrap();
@@ -647,6 +669,14 @@ mod tests {
             load_average: vec![1.0],
             process_count: 100,
             active_connections: 5,
+            cpu_usage_percent: 50.0,
+            memory_usage_percent: 60.0,
+            disk_usage_percent: 40.0,
+            load_average_1min: 1.0,
+            load_average_5min: 1.0,
+            load_average_15min: 1.0,
+            network_io_bytes_in: 512,
+            network_io_bytes_out: 512,
         };
 
         let result = agent.select_action(&metrics).await;
@@ -671,7 +701,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_continual_learning() {
-        let config = MockRLConfig::default();
+        let mut config = MockRLConfig::default();
         config.enable_continual_learning = true;
         let agent = MockPortageAgent::new(config);
 

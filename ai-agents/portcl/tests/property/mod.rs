@@ -78,6 +78,11 @@ mod config_properties {
                 cache_size_mb: 100,
                 use_ebuild_cache: true,
                 verify_checksums: true,
+                profile: "default/linux/amd64/23.0".to_string(),
+                accept_keywords: vec!["amd64".to_string()],
+                makeopts: MockMakeopts { jobs: 4 },
+                use_flags: vec!["X".to_string()],
+                features: vec!["parallel-fetch".to_string()],
             };
 
             // Configuration should either be valid or fail gracefully
@@ -117,9 +122,7 @@ mod action_properties {
             let deserialized: MockAction = serde_json::from_str(&json).unwrap();
 
             // Verify roundtrip preserves the action
-            assert_eq!(action_strategy.action_type, deserialized.action_type);
-            assert_eq!(action_strategy.package_name, deserialized.package_name);
-            assert_eq!(action_strategy.priority, deserialized.priority);
+            assert_eq!(action_strategy, deserialized);
         }
 
         #[test]
@@ -188,7 +191,7 @@ mod error_properties {
             // Test error chaining properties
             let mut errors = Vec::new();
             for i in 0..error_depth {
-                errors.push(PortCLError::Portage(format!("Error at depth {}", i)));
+                errors.push(portcl::error::PortCLError::Portage(format!("Error at depth {}", i)));
             }
 
             assert_eq!(errors.len() as u8, error_depth);
@@ -262,11 +265,15 @@ mod data_model_properties {
                 name: name.clone(),
                 version: version.clone(),
                 category: category.clone(),
+                description: format!("Package {}/{}", category, name),
+                homepage: Some(format!("https://example.com/{}", name)),
+                license: "MIT".to_string(),
                 size_bytes: rand::random::<u64>() % 1_000_000_000,
                 installed: rand::random(),
                 masked: rand::random(),
                 dependencies: vec![format!("{}/{}", category, name)],
-                use_flags: HashMap::new(),
+                use_flags: std::collections::HashMap::new(),
+                repository: "gentoo".to_string(),
             };
 
             // Package data should be consistent
