@@ -180,9 +180,7 @@ mod monitor_tests {
         assert!(metrics.load_average_5min >= 0.0);
         assert!(metrics.load_average_15min >= 0.0);
 
-        // Validate I/O metrics are non-negative
-        assert!(metrics.network_io.bytes_received >= 0);
-        assert!(metrics.network_io.bytes_transmitted >= 0);
+        // network_io bytes are u64, inherently non-negative
 
         // Validate process count
         assert!(metrics.process_count > 0);
@@ -324,7 +322,7 @@ mod monitor_tests {
                 Ok(metrics) => {
                     // Validate metrics structure
                     assert!(metrics.timestamp <= Utc::now());
-                    assert!(metrics.portage_info.installed_packages >= 0);
+                    // installed_packages is u32, inherently non-negative
                     assert!(metrics.system_metrics.cpu_usage_percent >= 0.0);
                     assert!(metrics.system_metrics.cpu_usage_percent <= 100.0);
                 },
