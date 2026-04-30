@@ -1416,6 +1416,12 @@ fn chroot_with_output(command: &str) -> Result<String> {
 async fn get_manifest(repository: &str) -> Result<toml::Value> {
     let manifest_url = format!("{repository}Manifest.toml");
     let response = reqwest::get(&manifest_url).await?;
+    if !response.status().is_success() {
+        bail!(
+            "Repository returned HTTP {} for Manifest.toml",
+            response.status()
+        );
+    }
     let content = response.text().await?;
     let manifest: toml::Value = toml::from_str(&content)?;
     Ok(manifest)
@@ -3207,25 +3213,67 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     validate_flavour(&config.flavour)?;
 
     // Verify the cosmic-desktop flavour is available in the repository
-    let flavours = get_flavours(&config.repository).await?;
-    if !flavours.contains(&config.flavour) {
-        die(&format!(
-            "The {} flavour is not available in the repository",
-            config.flavour
-        ));
+    match get_flavours(&config.repository).await {
+        Ok(flavours) => {
+            if !flavours.contains(&config.flavour) {
+                if interactive {
+                    warn(&format!(
+                        "The {} flavour is not listed in the remote repository. Continuing anyway.",
+                        config.flavour
+                    ));
+                } else {
+                    die(&format!(
+                        "The {} flavour is not available in the repository",
+                        config.flavour
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            if interactive {
+                warn(&format!(
+                    "Could not verify flavours from repository: {}. Continuing with defaults.",
+                    e
+                ));
+            } else {
+                die(&format!(
+                    "Failed to fetch flavours from repository: {}",
+                    e
+                ));
+            }
+        }
     }
 
     // Validate release branch
-    let releases = get_releases(&config.repository, &config.flavour).await?;
-    if config.release_branch.is_empty() || !releases.contains(&config.release_branch) {
-        if interactive {
-            println!("Available releases: {releases:?}");
-            config.release_branch = get_input(
-                "Enter release branch",
-                releases.first().unwrap_or(&"main".to_string()),
-            );
-        } else {
-            die("Invalid or missing release branch in config");
+    match get_releases(&config.repository, &config.flavour).await {
+        Ok(releases) => {
+            if config.release_branch.is_empty() || !releases.contains(&config.release_branch) {
+                if interactive {
+                    println!("Available releases: {releases:?}");
+                    config.release_branch = get_input(
+                        "Enter release branch",
+                        releases.first().unwrap_or(&"main".to_string()),
+                    );
+                } else {
+                    die("Invalid or missing release branch in config");
+                }
+            }
+        }
+        Err(e) => {
+            if interactive {
+                warn(&format!(
+                    "Could not fetch releases from repository: {}. Using 'main' as default.",
+                    e
+                ));
+                if config.release_branch.is_empty() {
+                    config.release_branch = "main".to_string();
+                }
+            } else {
+                die(&format!(
+                    "Failed to fetch releases from repository: {}",
+                    e
+                ));
+            }
         }
     }
 
