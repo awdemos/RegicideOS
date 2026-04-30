@@ -8,7 +8,7 @@ source_subpath: default/stage3-amd64-systemd-mergedusr
 compression_mode: pixz
 portage_confdir: /var/tmp/catalyst/config/stages
 portage_prefix: releng
-repos: /var/db/repos/guru /var/db/repos/regicide-rust
+repos: /var/db/repos/cosmic-overlay /var/db/repos/regicide-rust
 stage4/use:
 	wayland
 	dist-kernel
@@ -44,29 +44,32 @@ stage4/packages:
 	app-emulation/spice-vdagent
 	app-eselect/eselect-repository
 	app-shells/bash-completion
-	cosmic-de/cosmic-meta
+	cosmic-base/cosmic-meta
+	cosmic-base/cosmic-applets
+	cosmic-base/cosmic-bg
+	cosmic-base/cosmic-comp
+	cosmic-base/cosmic-edit
+	cosmic-base/cosmic-files
+	cosmic-base/cosmic-greeter
+	cosmic-base/cosmic-icons
+	cosmic-base/cosmic-launcher
+	cosmic-base/cosmic-notifications
+	cosmic-base/cosmic-osd
+	cosmic-base/cosmic-panel
+	cosmic-base/cosmic-randr
+	cosmic-base/cosmic-screenshot
+	cosmic-base/cosmic-session
+	cosmic-base/cosmic-settings
+	cosmic-base/cosmic-settings-daemon
+	cosmic-base/cosmic-store
+	cosmic-base/cosmic-term
+	cosmic-base/cosmic-wallpapers
+	cosmic-base/cosmic-workspaces-epoch
+	cosmic-base/pop-launcher
+	cosmic-base/xdg-desktop-portal-cosmic
 	dev-util/glib-utils
 	dev-util/wayland-scanner
 	dev-vcs/git
-	gui-apps/cosmic-edit
-	gui-apps/cosmic-files
-	gui-apps/cosmic-settings
-	gui-apps/cosmic-store
-	gui-apps/cosmic-term
-	gui-apps/cosmic-workspaces
-	gui-libs/cosmic-applets
-	gui-libs/cosmic-bg
-	gui-libs/cosmic-comp
-	gui-libs/cosmic-greeter
-	gui-libs/cosmic-icons
-	gui-libs/cosmic-osd
-	gui-libs/cosmic-panel
-	gui-libs/cosmic-randr
-	gui-libs/cosmic-screenshot
-	gui-libs/cosmic-session
-	gui-libs/cosmic-settings-daemon
-	gui-libs/cosmic-wallpapers
-	gui-wm/cosmic-workspaces
 	media-fonts/fonts-meta
 	media-libs/gstreamer
 	media-libs/mesa
