@@ -97,14 +97,19 @@ cargo build --release
 
 #### 3.2.1 Using Pre-built Installer (Recommended)
 
-The easiest installation method is to use the pre-built installer binary:
+The easiest installation method is to download the pre-built installer binary from GitHub releases:
 
 ```bash
-# Download and run the pre-built installer
-sudo ./binaries/regicide-installer
+# Download the pre-built installer
+curl -L -o regicide-installer \
+  https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
+
+# Make executable and run
+chmod +x regicide-installer
+sudo ./regicide-installer
 
 # Or run with configuration file
-sudo ./binaries/regicide-installer -c regicide-config.toml
+sudo ./regicide-installer -c regicide-config.toml
 ```
 
 The installer will guide you through:
