@@ -1,0 +1,38 @@
+[Unit]
+Description=BtrMind AI Storage Monitoring Agent
+Documentation=https://github.com/awdemos/RegicideOS/tree/main/ai-agents/btrmind
+After=multi-user.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=btrmind
+Group=btrmind
+ExecStart=/usr/local/bin/btrmind run --config /etc/btrmind/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/btrmind /var/log
+CapabilityBoundingSet=
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=20%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=btrmind
+
+# Environment
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+
+[profile.test]
+opt-level = 1
+debug = true
+split-debuginfo = "unpacked"
+
+[profile.bench]
+opt-level = 3
+debug = false
+lto = true
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true

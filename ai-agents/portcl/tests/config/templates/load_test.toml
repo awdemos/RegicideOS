@@ -1,0 +1,62 @@
+# Load Test Template
+# For stress testing and load testing scenarios
+
+[test_template]
+name = "load_test"
+description = "Load test template for stress testing"
+
+[execution]
+timeout_seconds = 3600
+max_parallel_tests = 50
+retry_count = 0
+fail_fast = false
+randomize_order = false
+
+[filtering]
+include_patterns = ["test_load_*", "*_load*"]
+exclude_patterns = []
+test_tags = ["load", "stress"]
+
+[logging]
+level = "info"
+format = "json"
+show_skipped = false
+show_output = false
+
+[coverage]
+enabled = false
+
+[load_testing]
+ramp_up_duration_seconds = 300
+peak_duration_seconds = 600
+ramp_down_duration_seconds = 300
+users_per_second = 10
+max_users = 1000
+
+[performance]
+enabled = true
+sample_size = 1000
+warmup_runs = 5
+measure_memory = true
+measure_cpu = true
+measure_disk_io = true
+measure_network = true
+
+[monitoring]
+enabled = true
+metrics_collection_rate_ms = 1000
+system_metrics = true
+application_metrics = true
+database_metrics = true
+
+[thresholds]
+error_rate_percentage = 1.0
+response_time_ms = 1000
+memory_usage_mb = 1024
+cpu_usage_percentage = 80.0
+
+[output]
+directory = "target/load-test-results"
+formats = ["json", "html", "csv"]
+preserve_artifacts = true
+generate_dashboard = true

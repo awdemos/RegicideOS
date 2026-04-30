@@ -1,0 +1,30 @@
+[package]
+name = "btrmind"
+version = "0.1.0"
+edition = "2021"
+description = "AI-powered BTRFS storage monitoring and optimization for RegicideOS"
+license = "GPL-3.0"
+authors = ["RegicideOS Team"]
+
+[[bin]]
+name = "btrmind"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.0", features = ["derive"] }
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+
+# System integration
+nix = "0.27"
+
+[dev-dependencies]
+tempfile = "3.0"

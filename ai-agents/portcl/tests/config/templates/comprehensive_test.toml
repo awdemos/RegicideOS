@@ -1,0 +1,46 @@
+# Comprehensive Test Template
+# For full test suite execution
+
+[test_template]
+name = "comprehensive_test"
+description = "Comprehensive test template for full test suite execution"
+
+[execution]
+timeout_seconds = 1800
+max_parallel_tests = 8
+retry_count = 2
+fail_fast = false
+randomize_order = false
+
+[filtering]
+include_patterns = ["test_*"]
+exclude_patterns = []
+test_tags = []
+
+[logging]
+level = "info"
+format = "pretty"
+show_skipped = true
+show_output = true
+
+[coverage]
+enabled = true
+report_formats = ["json", "html", "lcov"]
+exclude_paths = ["tests/*", "target/*"]
+threshold_percentage = 80.0
+
+[performance]
+enabled = true
+sample_size = 20
+warmup_runs = 3
+
+[output]
+directory = "target/comprehensive-test-results"
+formats = ["json", "junit", "html"]
+preserve_artifacts = true
+generate_report = true
+
+[monitoring]
+enabled = true
+metrics_enabled = true
+tracing_enabled = true
