@@ -1,0 +1,635 @@
+openapi: 3.0.0
+info:
+  title: PortCL Test Suite API
+  description: API for managing and executing PortCL test suite operations
+  version: 1.0.0
+  contact:
+    name: RegicideOS Team
+    url: https://github.com/awdemos/RegicideOS
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+
+paths:
+  /tests:
+    get:
+      summary: List all tests
+      description: Retrieve a comprehensive list of all available tests with their status and metadata
+      operationId: listTests
+      tags:
+        - Test Management
+      parameters:
+        - name: test_type
+          in: query
+          description: Filter tests by type
+          schema:
+            type: string
+            enum: [unit, integration, performance, property]
+        - name: status
+          in: query
+          description: Filter tests by status
+          schema:
+            type: string
+            enum: [passed, failed, skipped, not_run]
+        - name: module
+          in: query
+          description: Filter tests by module
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response with test list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tests:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TestInfo'
+                  total_count:
+                    type: integer
+                  filters:
+                    type: object
+        '400':
+          description: Invalid query parameters
+        '500':
+          description: Internal server error
+
+  /tests/run:
+    post:
+      summary: Execute tests
+      description: Run specified tests with given configuration
+      operationId: runTests
+      tags:
+        - Test Execution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                test_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Specific test IDs to run (empty for all tests)
+                config:
+                  $ref: '#/components/schemas/TestExecutionConfig'
+                parallel:
+                  type: boolean
+                  default: false
+                  description: Whether to run tests in parallel
+      responses:
+        '200':
+          description: Test execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestExecutionResponse'
+        '400':
+          description: Invalid request parameters
+        '500':
+          description: Internal server error
+
+  /tests/{test_id}:
+    get:
+      summary: Get test details
+      description: Retrieve detailed information about a specific test
+      operationId: getTest
+      tags:
+        - Test Management
+      parameters:
+        - name: test_id
+          in: path
+          required: true
+          description: Unique identifier for the test
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Test details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestDetail'
+        '404':
+          description: Test not found
+        '500':
+          description: Internal server error
+
+  /tests/{test_id}/results:
+    get:
+      summary: Get test results
+      description: Retrieve historical results for a specific test
+      operationId: getTestResults
+      tags:
+        - Test Results
+      parameters:
+        - name: test_id
+          in: path
+          required: true
+          description: Unique identifier for the test
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of results to return
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          description: Offset for pagination
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Test results retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TestResult'
+                  total_count:
+                    type: integer
+                  pagination:
+                    $ref: '#/components/schemas/PaginationInfo'
+        '404':
+          description: Test not found
+        '500':
+          description: Internal server error
+
+  /coverage:
+    get:
+      summary: Get coverage report
+      description: Retrieve comprehensive code coverage report
+      operationId: getCoverage
+      tags:
+        - Coverage Reports
+      parameters:
+        - name: module
+          in: query
+          description: Filter coverage by module
+          schema:
+            type: string
+        - name: format
+          in: query
+          description: Output format
+          schema:
+            type: string
+            enum: [json, html, xml]
+            default: json
+      responses:
+        '200':
+          description: Coverage report generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoverageReport'
+        '500':
+          description: Internal server error
+
+  /benchmarks:
+    get:
+      summary: Get benchmark results
+      description: Retrieve performance benchmark results
+      operationId: getBenchmarks
+      tags:
+        - Performance
+      parameters:
+        - name: benchmark_name
+          in: query
+          description: Filter by specific benchmark name
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Benchmark results retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  benchmarks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BenchmarkResult'
+                  summary:
+                    $ref: '#/components/schemas/BenchmarkSummary'
+        '500':
+          description: Internal server error
+
+  /config:
+    get:
+      summary: Get test configuration
+      description: Retrieve current test configuration
+      operationId: getConfig
+      tags:
+        - Configuration
+      responses:
+        '200':
+          description: Configuration retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestConfig'
+        '500':
+          description: Internal server error
+
+    put:
+      summary: Update test configuration
+      description: Update test configuration settings
+      operationId: updateConfig
+      tags:
+        - Configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestConfig'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestConfig'
+        '400':
+          description: Invalid configuration
+        '500':
+          description: Internal server error
+
+  /health:
+    get:
+      summary: Health check
+      description: Check the health status of the test suite service
+      operationId: healthCheck
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded, unhealthy]
+                  version:
+                    type: string
+                  uptime_seconds:
+                    type: number
+                  services:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum: [healthy, unhealthy]
+        '503':
+          description: Service is unhealthy
+
+components:
+  schemas:
+    TestInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique test identifier
+        name:
+          type: string
+          description: Human-readable test name
+        module:
+          type: string
+          description: Module this test belongs to
+        test_type:
+          type: string
+          enum: [unit, integration, performance, property]
+          description: Type of test
+        status:
+          type: string
+          enum: [passed, failed, skipped, not_run]
+          description: Current test status
+        last_run:
+          type: string
+          format: date-time
+          description: When the test was last run
+        duration_ms:
+          type: integer
+          description: Execution duration in milliseconds
+        coverage_percentage:
+          type: number
+          description: Coverage percentage for this test
+
+    TestDetail:
+      allOf:
+        - $ref: '#/components/schemas/TestInfo'
+        - type: object
+          properties:
+            description:
+              type: string
+              description: Detailed test description
+            steps:
+              type: array
+              items:
+                type: string
+              description: Test execution steps
+            prerequisites:
+              type: array
+              items:
+                type: string
+              description: Test prerequisites
+            expected_results:
+              type: array
+              items:
+                type: string
+              description: Expected test results
+            dependencies:
+              type: array
+              items:
+                type: string
+              description: Test dependencies
+            tags:
+              type: array
+              items:
+                type: string
+              description: Test tags for filtering
+
+    TestExecutionConfig:
+      type: object
+      properties:
+        timeout_seconds:
+          type: integer
+          default: 300
+          description: Test execution timeout in seconds
+        retry_count:
+          type: integer
+          default: 0
+          description: Number of retries on failure
+        log_level:
+          type: string
+          enum: [debug, info, warn, error]
+          default: info
+          description: Logging level for test execution
+        enable_coverage:
+          type: boolean
+          default: true
+          description: Whether to collect coverage data
+        enable_profiling:
+          type: boolean
+          default: false
+          description: Whether to enable performance profiling
+        output_format:
+          type: string
+          enum: [json, junit, html]
+          default: json
+          description: Output format for test results
+
+    TestExecutionResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+          description: Unique execution identifier
+        status:
+          type: string
+          enum: [running, completed, failed]
+          description: Execution status
+        started_at:
+          type: string
+          format: date-time
+          description: When execution started
+        estimated_duration_ms:
+          type: integer
+          description: Estimated total duration in milliseconds
+        test_count:
+          type: integer
+          description: Number of tests being executed
+        parallel_workers:
+          type: integer
+          description: Number of parallel test workers
+
+    TestResult:
+      type: object
+      properties:
+        test_id:
+          type: string
+          description: Test identifier
+        execution_id:
+          type: string
+          description: Execution identifier
+        status:
+          type: string
+          enum: [passed, failed, skipped, timeout]
+          description: Test result status
+        start_time:
+          type: string
+          format: date-time
+          description: When the test started
+        end_time:
+          type: string
+          format: date-time
+          description: When the test ended
+        duration_ms:
+          type: integer
+          description: Test execution duration
+        error_message:
+          type: string
+          description: Error message if test failed
+        assertions_count:
+          type: integer
+          description: Number of assertions
+        assertions_passed:
+          type: integer
+          description: Number of passed assertions
+        coverage_lines:
+          type: integer
+          description: Number of lines covered
+        coverage_total_lines:
+          type: integer
+          description: Total number of lines
+        memory_usage_mb:
+          type: number
+          description: Memory usage during test
+
+    CoverageReport:
+      type: object
+      properties:
+        overall_percentage:
+          type: number
+          description: Overall coverage percentage
+        modules:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Module name
+              percentage:
+                type: number
+                description: Coverage percentage
+              lines_covered:
+                type: integer
+                description: Number of lines covered
+              total_lines:
+                type: integer
+                description: Total number of lines
+        generated_at:
+          type: string
+          format: date-time
+          description: When the report was generated
+        format:
+          type: string
+          description: Report format
+
+    BenchmarkResult:
+      type: object
+      properties:
+        benchmark_name:
+          type: string
+          description: Name of the benchmark
+        sample_size:
+          type: integer
+          description: Number of samples
+        mean_time_ns:
+          type: integer
+          description: Mean execution time in nanoseconds
+        std_deviation_ns:
+          type: integer
+          description: Standard deviation in nanoseconds
+        min_time_ns:
+          type: integer
+          description: Minimum execution time in nanoseconds
+        max_time_ns:
+          type: integer
+          description: Maximum execution time in nanoseconds
+        median_time_ns:
+          type: integer
+          description: Median execution time in nanoseconds
+        throughput_per_second:
+          type: number
+          description: Operations per second
+        memory_allocated_bytes:
+          type: integer
+          description: Memory allocated during benchmark
+        timestamp:
+          type: string
+          format: date-time
+          description: When the benchmark was run
+
+    BenchmarkSummary:
+      type: object
+      properties:
+        total_benchmarks:
+          type: integer
+          description: Total number of benchmarks
+        average_mean_time_ns:
+          type: integer
+          description: Average mean time across all benchmarks
+        fastest_benchmark:
+          type: string
+          description: Name of the fastest benchmark
+        slowest_benchmark:
+          type: string
+          description: Name of the slowest benchmark
+        total_memory_mb:
+          type: number
+          description: Total memory used across all benchmarks
+
+    TestConfig:
+      type: object
+      properties:
+        default_timeout_seconds:
+          type: integer
+          default: 300
+          description: Default test timeout in seconds
+        max_parallel_tests:
+          type: integer
+          default: 4
+          description: Maximum number of parallel tests
+        enable_coverage_by_default:
+          type: boolean
+          default: true
+          description: Whether to enable coverage by default
+        log_level:
+          type: string
+          enum: [debug, info, warn, error]
+          default: info
+          description: Default logging level
+        test_output_dir:
+          type: string
+          description: Directory for test outputs
+        coverage_report_formats:
+          type: array
+          items:
+            type: string
+          description: Coverage report formats
+        performance_thresholds:
+          type: object
+          properties:
+            max_test_duration_ms:
+              type: integer
+            max_memory_usage_mb:
+              type: integer
+            min_coverage_percentage:
+              type: number
+
+    PaginationInfo:
+      type: object
+      properties:
+        total_count:
+          type: integer
+          description: Total number of items
+        limit:
+          type: integer
+          description: Number of items per page
+        offset:
+          type: integer
+          description: Offset for current page
+        total_pages:
+          type: integer
+          description: Total number of pages
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Test Management
+    description: Test discovery and management operations
+  - name: Test Execution
+    description: Test execution and control operations
+  - name: Test Results
+    description: Test result retrieval and analysis
+  - name: Coverage Reports
+    description: Code coverage reporting
+  - name: Performance
+    description: Performance benchmarking
+  - name: Configuration
+    description: Test configuration management
+  - name: System
+    description: System health and monitoring
