@@ -2979,8 +2979,8 @@ fn validate_url(url: &str) -> Result<()> {
 
     // Only allow official repositories
     let allowed_domains = [
-        "repo.regicideoslinux.com",
-        "regicideoslinux.com",
+        "repo.xenialinux.org",
+        "xenialinux.org",
         "repo.xenialinux.com",
         "xenialinux.com",
     ];
@@ -3164,7 +3164,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     validate_device_path(&config.drive)?;
 
     // RegicideOS only supports the official RegicideOS repository
-    const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.com/releases/";
+    const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.org/releases/";
     if config.repository.is_empty() {
         config.repository = REGICIDE_REPOSITORY.to_string();
     } else if config.repository != REGICIDE_REPOSITORY {
