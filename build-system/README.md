@@ -74,8 +74,8 @@ dagger run python build-system/dagger_pipeline.py
 The `stage4-systemd-cosmic.spec` defines:
 
 - **Profile**: `default/linux/amd64/23.0/desktop/systemd`
-- **Overlays**: GURU (for COSMIC packages), regicide-rust (for RegicideOS tools)
-- **Desktop**: COSMIC Desktop from GURU overlay
+- **Overlays**: fsvm88/cosmic-overlay (for COSMIC packages), regicide-rust (for RegicideOS tools)
+- **Desktop**: COSMIC Desktop from cosmic-overlay
 - **RegicideOS tools**: btrmind, portcl, regicide-installer, regicide-ai-tools
 - **Post-build**: Enables cosmic-greeter, NetworkManager, PipeWire, Flatpak
 
