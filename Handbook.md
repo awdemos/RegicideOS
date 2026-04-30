@@ -122,7 +122,63 @@ The installer will guide you through:
 
 #### 3.2.2 Building from Source
 
-If you prefer to build the installer from source or need to customize it:
+RegicideOS can be built entirely from Gentoo source using the Catalyst build system. This produces a SquashFS image that can be installed with the `--image` flag.
+
+**Prerequisites:**
+- A Gentoo host or container with Portage
+- `catalyst` and `squashfs-tools` installed
+- At least 50GB free disk space
+- The RegicideOS repository cloned locally
+
+**Build the OS image:**
+
+```bash
+# Navigate to the build system
+cd build-system/catalyst
+
+# Run the Catalyst build (this will take several hours)
+./build.sh
+
+# The output will be at:
+#   build-system/catalyst/output/regicide-cosmic.img
+```
+
+The build process:
+1. Downloads a Gentoo stage3 tarball
+2. Applies the RegicideOS Catalyst spec (stage4-systemd-cosmic.spec)
+3. Installs COSMIC desktop from the cosmic-base overlay
+4. Enables systemd services (cosmic-greeter, NetworkManager, PipeWire)
+5. Produces a SquashFS image ready for installation
+
+**Install from the locally-built image:**
+
+```bash
+# Build the installer
+cd ../../installer
+cargo build --release
+
+# Install using the local image
+sudo ./target/release/installer \
+    --image ../build-system/catalyst/output/regicide-cosmic.img \
+    /dev/sdX
+```
+
+Or use a configuration file:
+
+```toml
+# regicide-local.toml
+drive = "/dev/sda"
+image_path = "/path/to/regicide-cosmic.img"
+filesystem = "btrfs"
+username = "regicide"
+applications = ""
+```
+
+```bash
+sudo ./target/release/installer -c regicide-local.toml
+```
+
+**Build the installer from source (if you need to customize it):**
 
 ```bash
 # Build the installer from source
@@ -131,7 +187,7 @@ cargo build --release
 # Verify build completed successfully
 ./target/release/installer --version
 
-# Run interactive installation
+# Run interactive installation (requires remote repository)
 sudo ./target/release/installer
 
 # Or run with configuration file

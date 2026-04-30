@@ -2559,10 +2559,17 @@ menuentry "RegicideOS (Verbose)" {{
 }
 
 async fn post_install(config: &Config) -> Result<()> {
-    // Download root.img as overlay template AFTER native mount is ready
-    info("Downloading root image for overlay template");
-    let root_url = get_url(config).await?;
-    download_root(&root_url).await?;
+    // Determine root image path: local or downloaded
+    let root_img_path = if let Some(ref local_path) = config.image_path {
+        info(&format!("Using local root image: {local_path}"));
+        local_path.clone()
+    } else {
+        // Download root.img as overlay template AFTER native mount is ready
+        info("Downloading root image for overlay template");
+        let root_url = get_url(config).await?;
+        download_root(&root_url).await?;
+        "/mnt/gentoo/root.img".to_string()
+    };
 
     let layout_name = &config.filesystem;
     info("Mounting overlays & home");
@@ -2629,11 +2636,11 @@ async fn post_install(config: &Config) -> Result<()> {
         }
     }
 
-    // Mount downloaded root.img as overlay lowerdir template
+    // Mount root image as overlay lowerdir template
     info("Mounting root image as overlay template");
     safe_create_dir_all("/mnt/rootimg", "/mnt")?;
-    execute("losetup -f /mnt/gentoo/root.img")?;
-    execute("mount -o ro,loop /mnt/gentoo/root.img /mnt/rootimg")?;
+    execute(&format!("losetup -f {root_img_path}"))?;
+    execute(&format!("mount -o ro,loop {root_img_path} /mnt/rootimg"))?;
     info("Root image mounted at /mnt/rootimg");
 
     // Use mounted root.img as overlay lowerdir (template from squashfs)
@@ -3163,7 +3170,26 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     // Validate drive path security
     validate_device_path(&config.drive)?;
 
-    // RegicideOS only supports the official RegicideOS repository
+    // If using a local image, skip all remote repository checks
+    let use_local_image = config.image_path.is_some();
+    if use_local_image {
+        let image_path = config.image_path.as_ref().unwrap();
+        if !Path::new(image_path).exists() {
+            die(&format!("Local image file does not exist: {image_path}"));
+        }
+        info(&format!(
+            "Using local image: {image_path}. Skipping remote repository checks."
+        ));
+        if config.flavour.is_empty() {
+            config.flavour = "cosmic-fedora".to_string();
+        }
+        if config.release_branch.is_empty() {
+            config.release_branch = "main".to_string();
+        }
+    }
+
+    if !use_local_image {
+        // RegicideOS only supports the official RegicideOS repository
     const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.org/releases/";
     if config.repository.is_empty() {
         config.repository = REGICIDE_REPOSITORY.to_string();
@@ -3276,6 +3302,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             }
         }
     }
+    }
 
     // Validate filesystem
     let filesystems = get_fs();
@@ -3366,10 +3393,18 @@ async fn main() -> Result<()> {
                 .value_name("FILE")
                 .help("Run the installer automated from a toml config file"),
         )
+        .arg(
+            Arg::new("image")
+                .short('i')
+                .long("image")
+                .value_name("PATH")
+                .help("Install from a local SquashFS image instead of downloading from a remote repository"),
+        )
         .get_matches();
 
     let config_file = matches.get_one::<String>("config");
-    let interactive = config_file.is_none();
+    let image_path = matches.get_one::<String>("image").cloned();
+    let interactive = config_file.is_none() && image_path.is_none();
 
     print_banner();
 
@@ -3386,6 +3421,7 @@ async fn main() -> Result<()> {
         filesystem: String::new(),
         username: String::new(),
         applications: String::new(),
+        image_path,
     };
 
     if let Some(config_path) = config_file {
@@ -3431,6 +3467,10 @@ async fn main() -> Result<()> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        config.image_path = config_toml
+            .get("image")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
     }
 
     if interactive {

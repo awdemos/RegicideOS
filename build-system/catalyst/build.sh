@@ -38,15 +38,28 @@ catalyst -a -f "${CATALYST_TMP}/config/stages/stage4-systemd-cosmic.spec"
 TARBALL=$(ls -t "${CATALYST_TMP}/builds/default/"stage4-amd64-systemd-cosmic-*.tar.xz 2>/dev/null | head -n1)
 if [[ -f "${TARBALL}" ]]; then
     echo ""
-    echo "Build complete: ${TARBALL}"
+    echo "Stage4 tarball complete: ${TARBALL}"
     echo ""
-    echo "To create a SquashFS image for live ISO:"
-    echo "  mkdir /tmp/cosmic-root"
-    echo "  tar -C /tmp/cosmic-root -xpJf ${TARBALL}"
-    echo "  mksquashfs /tmp/cosmic-root regicide-cosmic.img -comp zstd -Xcompression-level 19"
+    echo "Creating SquashFS image..."
+    
+    IMG_DIR="${REGICIDE_DIR}/build-system/catalyst/output"
+    mkdir -p "${IMG_DIR}"
+    
+    ROOT_DIR=$(mktemp -d)
+    tar -C "${ROOT_DIR}" -xpJf "${TARBALL}"
+    
+    IMG_PATH="${IMG_DIR}/regicide-cosmic.img"
+    mksquashfs "${ROOT_DIR}" "${IMG_PATH}" -comp zstd -Xcompression-level 19 -noappend
+    rm -rf "${ROOT_DIR}"
+    
     echo ""
-    echo "To deploy to ROOTS partition:"
-    echo "  cp regicide-cosmic.img /mnt/roots/"
+    echo "SquashFS image created: ${IMG_PATH}"
+    echo ""
+    echo "To install to a drive:"
+    echo "  ./target/release/installer --image ${IMG_PATH} /dev/sdX"
+    echo ""
+    echo "To deploy to ROOTS partition manually:"
+    echo "  cp ${IMG_PATH} /mnt/roots/"
 else
     echo "Build may have failed. Check logs:"
     echo "  ${CATALYST_TMP}/logs/"

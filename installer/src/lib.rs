@@ -24,6 +24,7 @@ pub struct Config {
     pub filesystem: String,
     pub username: String,
     pub applications: String,
+    pub image_path: Option<String>,
 }
 
 pub fn check_username(username: &str) -> bool {
