@@ -77,14 +77,16 @@ RegicideOS requires installation from a Linux live environment. We recommend Fed
 Once booted into the live environment:
 
 ```bash
-# Install dependencies
-sudo dnf install -y git curl gcc sgdisk rust cargo
-
 # Clone RegicideOS repository
 git clone https://github.com/awdemos/RegicideOS.git
-cd RegicideOS/installer
+cd RegicideOS
+
+# Install all build dependencies (git, gcc, rust, btrfs-progs, cryptsetup, etc.)
+# This auto-detects your distro and uses the correct package manager
+./scripts/install-dependencies.sh
 
 # Build installer (now without warnings)
+cd installer
 cargo build --release
 
 # Verify build completed successfully
@@ -156,7 +158,10 @@ applications = "recommended"
 EOF
 
 # Run with pre-built installer (recommended)
-sudo ./binaries/regicide-installer -c regicide-config.toml
+curl -L -o regicide-installer \
+  https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
+chmod +x regicide-installer
+sudo ./regicide-installer -c regicide-config.toml
 
 # Or run with source-built installer
 sudo ./target/release/installer -c regicide-config.toml

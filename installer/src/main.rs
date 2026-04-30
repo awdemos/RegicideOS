@@ -3157,19 +3157,19 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     // Validate drive path security
     validate_device_path(&config.drive)?;
 
-    // RegicideOS only supports the official Xenia Linux repository
+    // RegicideOS only supports the official RegicideOS repository
     const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.com/releases/";
     if config.repository.is_empty() {
         config.repository = REGICIDE_REPOSITORY.to_string();
     } else if config.repository != REGICIDE_REPOSITORY {
         if interactive {
             warn(&format!(
-                "RegicideOS only supports the official Xenia repository. Using: {REGICIDE_REPOSITORY}"
+                "RegicideOS only supports the official RegicideOS repository. Using: {REGICIDE_REPOSITORY}"
             ));
             config.repository = REGICIDE_REPOSITORY.to_string();
         } else {
             die(&format!(
-                "RegicideOS only supports the official Xenia repository: {REGICIDE_REPOSITORY}"
+                "RegicideOS only supports the official RegicideOS repository: {REGICIDE_REPOSITORY}"
             ));
         }
     }
@@ -3179,10 +3179,14 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
 
     // Validate repository accessibility
     if !check_url(&config.repository).await {
-        die("Cannot access the Xenia Linux repository");
+        if interactive {
+            warn("Cannot access the RegicideOS repository. Installation may fail if the repository remains unreachable.");
+        } else {
+            die("Cannot access the RegicideOS repository");
+        }
     }
 
-    // RegicideOS only supports cosmic-fedora flavour (available in Xenia repository)
+    // RegicideOS only supports cosmic-fedora flavour
     const REGICIDE_FLAVOUR: &str = "cosmic-fedora";
     if config.flavour.is_empty() {
         config.flavour = REGICIDE_FLAVOUR.to_string();
