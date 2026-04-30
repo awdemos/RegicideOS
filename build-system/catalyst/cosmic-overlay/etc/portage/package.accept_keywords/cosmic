@@ -1,0 +1,24 @@
+# COSMIC Desktop packages from GURU - often keyworded ~amd64
+cosmic-de/cosmic-meta ~amd64
+cosmic-de/cosmic-applets ~amd64
+cosmic-de/cosmic-bg ~amd64
+cosmic-de/cosmic-comp ~amd64
+cosmic-de/cosmic-edit ~amd64
+cosmic-de/cosmic-files ~amd64
+cosmic-de/cosmic-greeter ~amd64
+cosmic-de/cosmic-icons ~amd64
+cosmic-de/cosmic-launcher ~amd64
+cosmic-de/cosmic-notifications ~amd64
+cosmic-de/cosmic-osd ~amd64
+cosmic-de/cosmic-panel ~amd64
+cosmic-de/cosmic-randr ~amd64
+cosmic-de/cosmic-screenshot ~amd64
+cosmic-de/cosmic-session ~amd64
+cosmic-de/cosmic-settings ~amd64
+cosmic-de/cosmic-settings-daemon ~amd64
+cosmic-de/cosmic-store ~amd64
+cosmic-de/cosmic-term ~amd64
+cosmic-de/cosmic-wallpapers ~amd64
+cosmic-de/cosmic-workspaces ~amd64
+cosmic-de/pop-launcher ~amd64
+cosmic-de/xdg-desktop-portal-cosmic ~amd64
