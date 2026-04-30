@@ -1,0 +1,135 @@
+# Rust bash completion for RegicideOS enhanced toolchain
+
+_rust_targets() {
+    local targets=(
+        "x86_64-unknown-linux-gnu"
+        "aarch64-unknown-linux-gnu"
+        "arm-unknown-linux-gnueabihf"
+        "riscv64gc-unknown-linux-gnu"
+        "thumbv6m-none-eabi"
+        "thumbv7m-none-eabi"
+        "thumbv7em-none-eabi"
+        "thumbv7em-none-eabihf"
+        "thumbv8m.base-none-eabi"
+        "thumbv8m.main-none-eabi"
+        "riscv32i-unknown-none-elf"
+        "riscv32imc-unknown-none-elf"
+        "riscv64gc-unknown-none-elf"
+        "wasm32-unknown-unknown"
+        "wasm32-wasi"
+        "x86_64-pc-windows-gnu"
+    )
+    printf '%s\n' "${targets[@]}"
+}
+
+_regicide_cross_compile() {
+    local cur prev words cword
+    _init_completion || return
+
+    case $prev in
+        --target)
+            COMPREPLY=($(compgen -W "$(_rust_targets)" -- "$cur"))
+            return
+            ;;
+        --install-tools|--remove-tools)
+            COMPREPLY=($(compgen -W "$(_rust_targets)" -- "$cur"))
+            return
+            ;;
+        --help|--version|--list-targets|--list-tools|--validate)
+            return
+            ;;
+    esac
+
+    if [[ $cur == -* ]]; then
+        COMPREPLY=($(compgen -W '
+            --target
+            --release
+            --debug
+            --install-tools
+            --remove-tools
+            --list-targets
+            --list-tools
+            --validate
+            --help
+            --version
+        ' -- "$cur"))
+    fi
+}
+
+_cargo() {
+    local cur prev words cword
+    _init_completion || return
+
+    # RegicideOS enhanced cargo completion
+    if [[ $prev == --target ]]; then
+        COMPREPLY=($(compgen -W "$(_rust_targets)" -- "$cur"))
+        return
+    fi
+
+    # Standard cargo completion with RegicideOS enhancements
+    if [[ $cur == -* ]]; then
+        COMPREPLY=($(compgen -W '
+            --target
+            --release
+            --debug
+            --features
+            --all-features
+            --no-default-features
+            --profile
+            --offline
+            --locked
+            --frozen
+            --verbose
+            --quiet
+            --color
+            --message-format
+            --regicide-embedded
+            --regicide-ai
+            --regicide-cross
+        ' -- "$cur"))
+    else
+        # Standard cargo commands
+        local commands='build check clean doc new init run test bench install publish update search'
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    fi
+}
+
+_rustc() {
+    local cur prev words cword
+    _init_completion || return
+
+    case $prev in
+        --target)
+            COMPREPLY=($(compgen -W "$(_rust_targets)" -- "$cur"))
+            return
+            ;;
+        --extern|--edition)
+            return
+            ;;
+    esac
+
+    if [[ $cur == -* ]]; then
+        COMPREPLY=($(compgen -W '
+            --target
+            --emit
+            --print
+            --crate-type
+            --crate-name
+            --edition
+            --extern
+            --verbose
+            --quiet
+            --color
+            --cfg
+            --check-cfg
+            --explain
+            --help
+            --version
+            --regicide-opts
+        ' -- "$cur"))
+    fi
+}
+
+complete -F _regicide_cross_compile regicide-cross-compile
+complete -F _cargo cargo
+complete -F _rustc rustc

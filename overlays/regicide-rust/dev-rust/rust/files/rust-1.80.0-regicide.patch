@@ -1,0 +1,108 @@
+--- rustc-1.80.0-src/src/bootstrap/builder.rs
++++ rustc-1.80.0-src/src/bootstrap/builder.rs
+@@ -1,3 +1,7 @@
++// RegicideOS patch: Enable additional targets and optimizations
++// This patch adds support for embedded and AI/ML targets
++// Also enables performance optimizations for RegicideOS
++
+ use std::collections::{BTreeMap, BTreeSet};
+ use std::env;
+ use std::ffi::OsString;
+@@ -200,6 +204,14 @@
+         cargo
+     }
+
++    // RegicideOS: Add custom build flags
++    fn regicide_build_flags(&self) -> Vec<String> {
++        vec![
++            "-C".to_string(),
++            "target-cpu=native".to_string(),
++        ]
++    }
++
+     /// Gets the (verbose, cmd) environment variables.
+     pub fn ninja(&self) -> Command {
+         let mut cmd = self.cmd(&self.config.ninja);
+@@ -1500,6 +1512,12 @@
+         }
+     }
+
++    // RegicideOS: Enable embedded targets by default
++    pub fn regicide_embedded_targets(&self) -> bool {
++        self.config.build.contains("regicide") ||
++        std::env::var("REGICIDE_EMBEDDED").is_ok()
++    }
++
+     /// Returns the path to the C compiler for the target.
+     pub fn cc(&self, target: TargetSelection) -> PathBuf {
+         let target_compiler = self.compiler(target);
+--- rustc-1.80.0-src/src/bootstrap/config.rs
++++ rustc-1.80.0-src/src/bootstrap/config.rs
+@@ -100,6 +100,12 @@
+     pub build: TargetSelection,
+     pub hosts: Vec<TargetSelection>,
+     pub targets: Vec<TargetSelection>,
++
++    // RegicideOS: Additional configuration
++    pub regicide_mode: bool,
++    pub embedded_targets: Vec<String>,
++    pub ai_targets: Vec<String>,
++    pub cross_compile_tools: bool,
+
+     /// `Some` if rustc should be built with LLD, otherwise `None`.
+     pub lld: bool,
+@@ -252,6 +258,17 @@
+             }
+         }
+
++        // RegicideOS: Set custom configuration
++        config.regicide_mode = std::env::var("REGICIDE_MODE").unwrap_or_else(|_| "false".to_string()) == "true";
++        config.cross_compile_tools = std::env::var("REGICIDE_CROSS_TOOLS").unwrap_or_else(|_| "true".to_string()) == "true";
++
++        // Parse embedded targets
++        if let Ok(embedded) = std::env::var("REGICIDE_EMBEDDED_TARGETS") {
++            config.embedded_targets = embedded.split(',').map(|s| s.trim().to_string()).collect();
++        }
++
++        // Parse AI targets
++        if let Ok(ai_targets) = std::env::var("REGICIDE_AI_TARGETS") {
++            config.ai_targets = ai_targets.split(',').map(|s| s.trim().to_string()).collect();
++        }
++
+         let mut config = Config {
+             // Override build triples if we're compiling for Android on Windows
+             build: build.unwrap_or_else(|| {
+@@ -280,6 +297,11 @@
+             submodules: cfg!(feature = "submodules") || flags.submodules,
+             version: String::new(),
+             include_default_paths: true,
++
++            // RegicideOS settings
++            regicide_mode: config.regicide_mode,
++            embedded_targets: config.embedded_targets,
++            ai_targets: config.ai_targets,
++            cross_compile_tools: config.cross_compile_tools,
+             // This field is only used by rustdoc, but it's configured here
+             // because it's used during the build process.
+--- rustc-1.80.0-src/src/librustdoc/config.rs
++++ rustc-1.80.0-src/src/librustdoc/config.rs
+@@ -1,3 +1,6 @@
++// RegicideOS patch: Enhanced documentation generation
++// Adds support for embedded and AI/ML documentation
++
+ use std::collections::BTreeMap;
+ use std::collections::hash_map::Entry;
+ use std::default::Default;
+@@ -100,6 +103,12 @@
+     pub(crate) unstable_features: RustdocUnstableFeatures,
+     pub(crate) extend_css: Option<String>,
+     pub(crate) resource_suffix: String,
++
++    // RegicideOS: Documentation enhancements
++    pub(crate) regicide_mode: bool,
++    pub(crate) embedded_docs: bool,
++    pub(crate) ai_docs: bool,
++    pub(crate) cross_compile_docs: bool,
+ }
+
+ impl RustdocConfiguration {

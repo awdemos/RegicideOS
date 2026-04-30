@@ -1,0 +1,23 @@
+# RegicideOS Rust Package Defaults
+# Optimized for AI development and embedded systems
+
+# Core Rust with embedded support
+dev-lang/rust embedded_targets rust-analyzer rust-src rustfmt clippy
+dev-lang/rust-bin embedded_targets
+
+# Development tools
+dev-util/cargo audit tls
+dev-util/rustup complete-rust
+
+# AI/ML related packages (when available)
+dev-rust/tch cpu
+dev-rust/candle-core cpu
+dev-rust/smartcore all
+
+# Cross-compilation toolchains
+cross-arm-none-eabi/gcc embedded
+cross-riscv32-unknown-elf/gcc embedded
+
+# System integration
+sys-apps/systemd analyze
+sys-fs/btrfs-progs python

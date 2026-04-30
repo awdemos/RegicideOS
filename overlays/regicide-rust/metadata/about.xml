@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE overlay SYSTEM "http://www.gentoo.org/dtd/metadata.dtd">
+<overlay>
+	<name>regicide-overlay</name>
+	<description>
+		RegicideOS overlay providing AI-powered system management tools, 
+		enhanced Rust development support, and system integration utilities.
+		Following the Xenia Linux overlay pattern for RegicideOS-specific tools.
+	</description>
+	<owner>
+		<name>RegicideOS Team</name>
+		<email>team@regicideos.org</email>
+	</owner>
+	<source type="git">https://github.com/awdemos/regicide-overlay</source>
+	<feed>https://github.com/awdemos/regicide-overlay/commits/main.atom</feed>
+	<homepage>https://github.com/awdemos/RegicideOS</homepage>
+	<quality>experimental</quality>
+	<status>unofficial</status>
+</overlay>

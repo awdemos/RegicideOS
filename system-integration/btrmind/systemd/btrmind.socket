@@ -1,0 +1,15 @@
+[Unit]
+Description=RegicideOS BtrMind AI Storage Agent Socket
+Documentation=man:btrmind(1) https://docs.regicideos.com/btrmind
+PartOf=btrmind.service
+
+[Socket]
+ListenStream=/run/btrmind/control.sock
+ListenDatagram=/run/btrmind/metrics.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=btrmind
+Accept=no
+
+[Install]
+WantedBy=sockets.target
