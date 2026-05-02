@@ -81,7 +81,6 @@ stage4/packages:
 	sys-apps/lsb-release
 	sys-apps/mlocate
 	sys-apps/xdg-desktop-portal
-	sys-apps/xdg-desktop-portal-cosmic
 	sys-apps/xdg-desktop-portal-gtk
 	sys-auth/fprintd
 	sys-auth/rtkit

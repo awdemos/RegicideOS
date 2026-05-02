@@ -130,6 +130,31 @@ RegicideOS can be built entirely from Gentoo source using the Catalyst build sys
 - At least 50GB free disk space
 - The RegicideOS repository cloned locally
 
+**Set up Portage overlays (required before building):**
+
+The Catalyst build requires two overlays to be available on your Gentoo host:
+
+```bash
+# Clone the RegicideOS repository first
+git clone https://github.com/awdemos/RegicideOS.git
+cd RegicideOS
+
+# Clone the COSMIC overlay
+sudo mkdir -p /var/db/repos/cosmic-overlay
+sudo git clone https://github.com/fsvm88/cosmic-overlay.git /var/db/repos/cosmic-overlay
+
+# Symlink the regicide-rust overlay (lives inside this repo)
+sudo mkdir -p /var/db/repos/regicide-rust
+sudo ln -sf "$(pwd)/overlays/regicide-rust" /var/db/repos/regicide-rust
+
+# Register overlays with Portage
+sudo mkdir -p /etc/portage/repos.conf
+sudo cp build-system/catalyst/overlay/etc/portage/repos.conf/regicide.conf /etc/portage/repos.conf/
+
+# Sync the COSMIC overlay
+sudo emaint sync -r cosmic-overlay
+```
+
 **Build the OS image:**
 
 ```bash
