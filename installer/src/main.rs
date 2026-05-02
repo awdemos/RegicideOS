@@ -2978,29 +2978,10 @@ fn validate_username(username: &str) -> Result<()> {
 }
 
 fn validate_url(url: &str) -> Result<()> {
-    // Basic URL validation with allowlist for official repositories
+    // Basic URL validation — any HTTPS URL is acceptable
     let url_regex = regex::Regex::new(r"^https://[a-zA-Z0-9.-]+/[a-zA-Z0-9/_.-]*$")?;
     if !url_regex.is_match(url) {
         bail!("Invalid URL format");
-    }
-
-    // Only allow official repositories
-    let allowed_domains = [
-        "repo.xenialinux.org",
-        "xenialinux.org",
-        "repo.xenialinux.com",
-        "xenialinux.com",
-    ];
-
-    let domain = regex::Regex::new(r"^https://([a-zA-Z0-9.-]+)")
-        .unwrap()
-        .captures(url)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str())
-        .unwrap_or("");
-
-    if !allowed_domains.contains(&domain) {
-        bail!("URL not authorized");
     }
 
     Ok(())
@@ -3189,119 +3170,99 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     }
 
     if !use_local_image {
-        // RegicideOS only supports the official RegicideOS repository
-    const REGICIDE_REPOSITORY: &str = "https://repo.xenialinux.org/releases/";
-    if config.repository.is_empty() {
-        config.repository = REGICIDE_REPOSITORY.to_string();
-    } else if config.repository != REGICIDE_REPOSITORY {
-        if interactive {
-            warn(&format!(
-                "RegicideOS only supports the official RegicideOS repository. Using: {REGICIDE_REPOSITORY}"
-            ));
-            config.repository = REGICIDE_REPOSITORY.to_string();
-        } else {
-            die(&format!(
-                "RegicideOS only supports the official RegicideOS repository: {REGICIDE_REPOSITORY}"
-            ));
+        // No default remote repository - RegicideOS must be built from source
+        if config.repository.is_empty() {
+            die("No remote repository configured and no local image provided.\n\
+                 Build the OS image from source:\n\
+                   cd build-system/catalyst && sudo ./build.sh\n\
+                 Then install using the local image:\n\
+                   ./target/release/installer --image build-system/catalyst/output/regicide-cosmic.img /dev/sdX");
         }
-    }
 
-    // Validate repository URL security
-    validate_url(&config.repository)?;
+        // Validate repository URL security
+        validate_url(&config.repository)?;
 
-    // Validate repository accessibility
-    if !check_url(&config.repository).await {
-        if interactive {
-            warn("Cannot access the RegicideOS repository. Installation may fail if the repository remains unreachable.");
-        } else {
-            die("Cannot access the RegicideOS repository");
+        // Validate repository accessibility
+        if !check_url(&config.repository).await {
+            if interactive {
+                warn("Cannot access the configured repository. Installation may fail if the repository remains unreachable.");
+            } else {
+                die("Cannot access the configured repository");
+            }
         }
-    }
 
-    // RegicideOS only supports cosmic-fedora flavour
-    const REGICIDE_FLAVOUR: &str = "cosmic-fedora";
-    if config.flavour.is_empty() {
-        config.flavour = REGICIDE_FLAVOUR.to_string();
-    } else if config.flavour != REGICIDE_FLAVOUR {
-        if interactive {
-            warn(&format!(
-                "RegicideOS only supports the cosmic-fedora flavour. Using: {REGICIDE_FLAVOUR}"
-            ));
-            config.flavour = REGICIDE_FLAVOUR.to_string();
-        } else {
-            die(&format!(
-                "RegicideOS only supports the cosmic-fedora flavour: {REGICIDE_FLAVOUR}"
-            ));
+        // Set default flavour if empty
+        if config.flavour.is_empty() {
+            config.flavour = "cosmic-fedora".to_string();
         }
-    }
 
-    // Validate flavour security
-    validate_flavour(&config.flavour)?;
+        // Validate flavour security
+        validate_flavour(&config.flavour)?;
 
-    // Verify the cosmic-desktop flavour is available in the repository
-    match get_flavours(&config.repository).await {
-        Ok(flavours) => {
-            if !flavours.contains(&config.flavour) {
+        // Verify the flavour is available in the repository
+        match get_flavours(&config.repository).await {
+            Ok(flavours) => {
+                if !flavours.contains(&config.flavour) {
+                    if interactive {
+                        warn(&format!(
+                            "The {} flavour is not listed in the remote repository. Continuing anyway.",
+                            config.flavour
+                        ));
+                    } else {
+                        die(&format!(
+                            "The {} flavour is not available in the repository",
+                            config.flavour
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
                 if interactive {
                     warn(&format!(
-                        "The {} flavour is not listed in the remote repository. Continuing anyway.",
-                        config.flavour
+                        "Could not verify flavours from repository: {}. Continuing with defaults.",
+                        e
                     ));
                 } else {
                     die(&format!(
-                        "The {} flavour is not available in the repository",
-                        config.flavour
+                        "Failed to fetch flavours from repository: {}",
+                        e
                     ));
                 }
             }
         }
-        Err(e) => {
-            if interactive {
-                warn(&format!(
-                    "Could not verify flavours from repository: {}. Continuing with defaults.",
-                    e
-                ));
-            } else {
-                die(&format!(
-                    "Failed to fetch flavours from repository: {}",
-                    e
-                ));
-            }
-        }
-    }
 
-    // Validate release branch
-    match get_releases(&config.repository, &config.flavour).await {
-        Ok(releases) => {
-            if config.release_branch.is_empty() || !releases.contains(&config.release_branch) {
+        // Validate release branch
+        match get_releases(&config.repository, &config.flavour).await {
+            Ok(releases) => {
+                if config.release_branch.is_empty() || !releases.contains(&config.release_branch) {
+                    if interactive {
+                        println!("Available releases: {releases:?}");
+                        config.release_branch = get_input(
+                            "Enter release branch",
+                            releases.first().unwrap_or(&"main".to_string()),
+                        );
+                    } else {
+                        die("Invalid or missing release branch in config");
+                    }
+                }
+            }
+            Err(e) => {
                 if interactive {
-                    println!("Available releases: {releases:?}");
-                    config.release_branch = get_input(
-                        "Enter release branch",
-                        releases.first().unwrap_or(&"main".to_string()),
-                    );
+                    warn(&format!(
+                        "Could not fetch releases from repository: {}. Using 'main' as default.",
+                        e
+                    ));
+                    if config.release_branch.is_empty() {
+                        config.release_branch = "main".to_string();
+                    }
                 } else {
-                    die("Invalid or missing release branch in config");
+                    die(&format!(
+                        "Failed to fetch releases from repository: {}",
+                        e
+                    ));
                 }
             }
         }
-        Err(e) => {
-            if interactive {
-                warn(&format!(
-                    "Could not fetch releases from repository: {}. Using 'main' as default.",
-                    e
-                ));
-                if config.release_branch.is_empty() {
-                    config.release_branch = "main".to_string();
-                }
-            } else {
-                die(&format!(
-                    "Failed to fetch releases from repository: {}",
-                    e
-                ));
-            }
-        }
-    }
     }
 
     // Validate filesystem
