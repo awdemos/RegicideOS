@@ -21,7 +21,7 @@ class TestConfigValidation(unittest.TestCase):
         """Set up test fixtures."""
         self.valid_config = {
             "drive": "/dev/sda",
-            "root_url": "https://repo.xenialinux.com/releases/current/root.img",
+                            "root_url": "https://repo.regicideos.org/releases/current/root.img",
             "filesystem": "btrfs"
         }
     
@@ -154,7 +154,7 @@ class TestConfigFileHandling(unittest.TestCase):
         """Test parsing of TOML configuration files."""
         toml_content = """
 drive = "/dev/sda"
-root_url = "https://repo.xenialinux.com/releases/current/root.img"
+root_url = "https://repo.regicideos.org/releases/current/root.img"
 filesystem = "btrfs"
 """
         
@@ -169,7 +169,7 @@ filesystem = "btrfs"
                     with patch('tomllib.load') as mock_load:
                         mock_load.return_value = {
                             "drive": "/dev/sda",
-                            "root_url": "https://repo.xenialinux.com/releases/current/root.img", 
+            "root_url": "https://repo.regicideos.org/releases/current/root.img",
                             "filesystem": "btrfs"
                         }
                         

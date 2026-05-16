@@ -20,16 +20,16 @@
 
 ### 1.1 What is RegicideOS?
 
-RegicideOS is a specialized fork of Xenia Linux focused on:
+RegicideOS is a specialized Gentoo-based Linux distribution focused on:
 
 - **Rust-First Architecture**: System components migrated to Rust for memory safety and performance
 - **Immutable System Architecture**: Read-only base filesystem for enhanced security and reliability
 - **AI-Integrated**: AI capabilities at the system level for predictive maintenance and context-aware assistance
 
-### 1.2 Key Differentiators from Xenia Linux
+### 1.2 Key Differentiators
 
-| Feature | Xenia Linux | RegicideOS |
-|---------|-------------|------------|
+| Feature | Traditional Distros | RegicideOS |
+|---------|---------------------|------------|
 | **Desktop Environment** | Multiple choices | Cosmic Desktop only |
 | **Language Focus** | Mixed ecosystem | Rust-first approach |
 | **System Updates** | Traditional | Immutable/atomic |
@@ -45,7 +45,7 @@ RegicideOS is a specialized fork of Xenia Linux focused on:
 - **Processor**: 64-bit x86 CPU (Intel/AMD)
 - **Memory**: 4GB RAM
 - **Storage**: 20GB available disk space (20GB ROOTS + 12GB HOME recommended for LUKS encrypted systems)
-- **Firmware**: UEFI or Legacy BIOS
+- **Firmware**: UEFI only (BIOS not supported)
 
 #### Recommended Specifications
 - **Processor**: Multi-core x86-64
@@ -106,13 +106,17 @@ The easiest installation method is to download the pre-built installer binary fr
 curl -L -o regicide-installer \
   https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
 
-# Make executable and run
+# Make executable and run with local image
 chmod +x regicide-installer
-sudo ./regicide-installer
+sudo ./regicide-installer --image /path/to/regicide-cosmic.img
 
 # Or run with configuration file
 sudo ./regicide-installer -c regicide-config.toml
 ```
+
+> **Note**: The installer requires a local OS image (`--image`) or a remote repository.
+> RegicideOS does not currently host a remote repository. Build the image from source
+> (see "Building from Source" below) or download a release image.
 
 The installer will guide you through:
 1. **Drive Selection**: Choose target installation drive
@@ -212,15 +216,16 @@ cargo build --release
 # Verify build completed successfully
 ./target/release/installer --version
 
-# Run interactive installation (requires remote repository)
-sudo ./target/release/installer
-
-# Or run with configuration file
-sudo ./target/release/installer -c regicide-config.toml
+# Run with local image and configuration file
+sudo ./target/release/installer --image /path/to/regicide-cosmic.img -c regicide-config.toml
 
 # For development/testing with dry run
 cargo run --bin installer -- --dry-run
 ```
+
+> **Note**: Interactive installation without a local image requires a remote repository server
+> with a `Manifest.toml`. RegicideOS does not currently host such a repository. Use the
+> `--image` flag with a locally-built image instead.
 
 #### 3.2.3 Automated Installation
 
@@ -230,9 +235,7 @@ For scripted deployments, create a configuration file:
 # Create configuration
 cat > regicide-config.toml << EOF
 drive = "/dev/sda"
-repository = "https://repo.regicideos.org/releases/"
-flavour = "cosmic-fedora"
-release_branch = "main"
+image_path = "/path/to/regicide-cosmic.img"
 filesystem = "btrfs_encryption_dev"
 username = "admin"
 applications = "recommended"
@@ -267,13 +270,13 @@ The RegicideOS installer performs these steps:
    - Setup LUKS encryption on HOME partition with cryptsetup
    - Set up overlay directory structure on OVERLAY partition
 
-4. **System Image Download**
-   - Download compressed `root.img` tarball from RegicideOS repositories
-   - Uses `cosmic-fedora` flavor
+4. **System Image Deployment**
+   - Extract SquashFS `root.img` to ROOTS partition
+   - Uses locally-built or downloaded COSMIC desktop image
    - Verify image integrity with checksums
 
 5. **Bootloader Installation**
-   - Install GRUB for EFI or Legacy BIOS
+   - Install GRUB for UEFI
    - Configure boot parameters for immutable system
    - **Configure LUKS initramfs support BEFORE GRUB installation**
    - Install GRUB with crypto modules for encrypted boot
@@ -411,7 +414,7 @@ The installer **does not use Foxmerge** for package management. Instead:
 
 **Base System:**
 - Downloads compressed `root.img` tarball from RegicideOS repositories
-- Root image contains: `cosmic-fedora` flavor with minimal packages
+- Root image contains: COSMIC desktop environment with minimal packages
 - No package management during installation
 - System updates via atomic image replacement
 
@@ -624,16 +627,15 @@ RegicideOS uses an atomic update system via `root.img` tarball images:
 
 #### 8.1.1 Base System Updates
 
-```bash
-# Check for available updates
-curl -s https://repo.regicideos.org/releases/Manifest.toml
-
-# Manual update process
-sudo mount -L ROOTS /mnt/roots
-sudo wget https://repo.regicideos.org/releases/amd64/main/root.img
-sudo umount /mnt/roots
-sudo reboot
-```
+> **Note**: RegicideOS does not currently host a remote update repository. Updates are performed by rebuilding the OS image locally with Catalyst and reinstalling, or by downloading updated release images from GitHub.
+>
+> ```bash
+> # Manual update process (using locally-built image)
+> sudo mount -L ROOTS /mnt/roots
+> sudo tar xf /path/to/new-regicide-image.tar -C /mnt/roots
+> sudo umount /mnt/roots
+> sudo reboot
+> ```
 
 #### 8.1.2 Overlay Updates
 
@@ -1140,7 +1142,7 @@ menuentry "RegicideOS (Encrypted)" {
 **Initial release**
 - 4-Partition overlayfs architecture
 - Cosmic Desktop integration
-- Xenia Linux base system
+- Gentoo stage3 base system with COSMIC desktop
 - Basic LUKS encryption support
 - Basic installer functionality
 

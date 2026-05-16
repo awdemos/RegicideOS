@@ -193,16 +193,17 @@ mod tests {
     fn test_config_struct() {
         let config = Config {
             drive: "/dev/sda".to_string(),
-            repository: "https://repo.xenialinux.com/releases/".to_string(),
+            repository: "https://repo.regicideos.org/releases/".to_string(),
             flavour: "cosmic-desktop".to_string(),
             release_branch: "main".to_string(),
             filesystem: "btrfs".to_string(),
             username: "testuser".to_string(),
             applications: "recommended".to_string(),
+            image_path: None,
         };
 
         assert_eq!(config.drive, "/dev/sda");
-        assert_eq!(config.repository, "https://repo.xenialinux.com/releases/");
+        assert_eq!(config.repository, "https://repo.regicideos.org/releases/");
         assert_eq!(config.flavour, "cosmic-desktop");
         assert_eq!(config.release_branch, "main");
         assert_eq!(config.filesystem, "btrfs");
@@ -218,21 +219,22 @@ mod integration_tests {
 
     #[test]
     fn test_regicide_restrictions() {
-        // Test that RegicideOS enforces cosmic-desktop and Xenia repository
+        // Test that RegicideOS enforces cosmic-desktop and RegicideOS repository
         let valid_config = Config {
             drive: "/dev/sda".to_string(),
-            repository: "https://repo.xenialinux.com/releases/".to_string(),
+            repository: "https://repo.regicideos.org/releases/".to_string(),
             flavour: "cosmic-desktop".to_string(),
             release_branch: "main".to_string(),
             filesystem: "btrfs".to_string(),
             username: "user".to_string(),
             applications: "recommended".to_string(),
+            image_path: None,
         };
 
         // This would be the ideal config for RegicideOS
         assert_eq!(
             valid_config.repository,
-            "https://repo.xenialinux.com/releases/"
+            "https://repo.regicideos.org/releases/"
         );
         assert_eq!(valid_config.flavour, "cosmic-desktop");
     }
