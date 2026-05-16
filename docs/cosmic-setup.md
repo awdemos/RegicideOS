@@ -17,13 +17,13 @@ Any Gentoo system or chroot with the necessary tools:
 emerge -av dev-util/catalyst app-arch/pixz sys-fs/squashfs-tools
 ```
 
-### 2. Xenia Catalyst Configuration
+### 2. RegicideOS Catalyst Configuration
 
-Clone and set up the Xenia catalyst repository:
+The RegicideOS Catalyst configuration is included in the source repository. No external clone is needed:
 
 ```bash
-git clone https://gitlab.com/xenia-group/catalyst ~/xenia-catalyst
-ln -s ~/xenia-catalyst/config /var/tmp/catalyst/config
+cd /path/to/RegicideOS/build-system/catalyst
+# The spec files and overlay configuration are already present
 ```
 
 ## COSMIC Package Setup
@@ -55,14 +55,14 @@ To use directly from GURU, ensure the packages are unmasked in your catalyst con
 
 ## Catalyst Spec File
 
-Create a new spec file based on the existing GNOME configuration:
+The RegicideOS COSMIC spec is already provided in the source repository:
 
 ```bash
-cd ~/xenia-catalyst
-cp stage4-systemd-gnome.spec stage4-systemd-cosmic.spec
+cd /path/to/RegicideOS/build-system/catalyst
+# stage4-systemd-cosmic.spec is already configured
 ```
 
-Edit the new file with these key changes:
+Key configuration points:
 
 ### stage4-systemd-cosmic.spec
 
@@ -168,8 +168,9 @@ ps aux | grep cosmic
 # Sync Portage tree
 emerge --sync
 
-# Update catalyst configuration if needed
-cd ~/xenia-catalyst
+# Update catalyst configuration from RegicideOS source if needed
+cd /path/to/RegicideOS/build-system/catalyst
+# Pull latest changes from the RegicideOS repository
 git pull
 ```
 

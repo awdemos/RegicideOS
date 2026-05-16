@@ -22,7 +22,7 @@ class TestInstallerIntegrationSafety(unittest.TestCase):
         """Set up test fixtures."""
         self.test_config = {
             "drive": "/dev/sda",
-            "root_url": "https://repo.xenialinux.com/releases/current/root.img",
+            "root_url": "https://repo.regicideos.org/releases/current/root.img",
             "filesystem": "btrfs"
         }
     

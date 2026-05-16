@@ -179,7 +179,7 @@ info "Testing live system compatibility..."
 if [[ -f "/etc/os-release" ]]; then
     OS_ID=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"')
     case "$OS_ID" in
-        "gentoo"|"xenia"|"regicide")
+        "gentoo"|"regicide")
             success "Running on compatible OS: $OS_ID"
             ;;
         *)

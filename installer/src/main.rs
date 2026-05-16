@@ -2996,9 +2996,9 @@ fn validate_filesystem_type(fs: &str) -> Result<()> {
 }
 
 fn validate_flavour(flavour: &str) -> Result<()> {
-    // Only allow cosmic-fedora for RegicideOS
-    if flavour != "cosmic-fedora" {
-        bail!("Unsupported flavour");
+    // Only allow cosmic-desktop for RegicideOS
+    if flavour != "cosmic-desktop" {
+        bail!("Unsupported flavour: {}. Only 'cosmic-desktop' is supported.", flavour);
     }
     Ok(())
 }
@@ -3162,7 +3162,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
             "Using local image: {image_path}. Skipping remote repository checks."
         ));
         if config.flavour.is_empty() {
-            config.flavour = "cosmic-fedora".to_string();
+            config.flavour = "cosmic-desktop".to_string();
         }
         if config.release_branch.is_empty() {
             config.release_branch = "main".to_string();
@@ -3193,7 +3193,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
 
         // Set default flavour if empty
         if config.flavour.is_empty() {
-            config.flavour = "cosmic-fedora".to_string();
+            config.flavour = "cosmic-desktop".to_string();
         }
 
         // Validate flavour security
