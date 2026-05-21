@@ -25,8 +25,13 @@ mkdir -p "${CATALYST_TMP}/tmp"
 ln -sf "${CATALYST_DIR}/overlay" "${CATALYST_TMP}/config/stages/overlay" 2>/dev/null || true
 ln -sf "${CATALYST_DIR}/cosmic-overlay" "${CATALYST_TMP}/config/stages/cosmic-overlay" 2>/dev/null || true
 
+if [[ -f /tmp/snapshot_hash ]]; then
+    SNAPSHOT_HASH=$(cat /tmp/snapshot_hash)
+else
+    SNAPSHOT_HASH=$(date +%Y%m%d)
+fi
 sed -e "s|\[CATALYST_DIR\]|${CATALYST_DIR}/|g" \
-    -e "s|\[SNAPSHOT_HASH\]|$(date +%Y%m%d)|g" \
+    -e "s|\[SNAPSHOT_HASH\]|${SNAPSHOT_HASH}|g" \
     "${SPEC}" > "${CATALYST_TMP}/config/stages/stage4-systemd-cosmic.spec"
 
 echo "Building RegicideOS COSMIC stage4..."

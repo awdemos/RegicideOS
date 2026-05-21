@@ -12,6 +12,8 @@ rm -rf /opt
 mkdir /usr/opt
 ln -sf /usr/opt /
 
+mkdir -p /.recovery/etc /.recovery/home/recovery
+
 cp /etc/passwd /.recovery/etc/passwd
 cp /etc/shadow /.recovery/etc/shadow
 

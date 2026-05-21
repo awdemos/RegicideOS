@@ -42,7 +42,29 @@ async def build_cosmic(
     gentoo = (
         client.container()
         .from_("gentoo/stage3:amd64-systemd")
-        .with_exec(["emerge", "-qv", "dev-util/catalyst", "app-arch/pixz"])
+        .with_exec(["emerge-webrsync"])
+        .with_exec([
+            "sh", "-c",
+            "mkdir -p /etc/portage/package.accept_keywords /etc/portage/package.use && "
+            "echo 'dev-util/catalyst ~amd64' > /etc/portage/package.accept_keywords/catalyst && "
+            "echo 'sys-apps/util-linux python' > /etc/portage/package.use/catalyst && "
+            "echo 'sys-boot/grub grub_platforms_efi-32' >> /etc/portage/package.use/catalyst"
+        ])
+        .with_exec(["emerge", "-qv", "dev-util/catalyst", "app-arch/pixz", "dev-vcs/git"])
+        .with_exec(["mkdir", "-p", "/var/tmp/catalyst/builds/default", "/var/tmp/catalyst/snapshots"])
+        .with_exec([
+            "sh", "-c",
+            "cd /var/tmp/catalyst/builds/default && "
+            "STAGE3=$(curl -s https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64-systemd-mergedusr/latest-stage3-amd64-systemd-mergedusr.txt | awk '/stage3/{print $1}') && "
+            "curl -O \"https://distfiles.gentoo.org/releases/amd64/autobuilds/${STAGE3}\" && "
+            "ln -s $(basename ${STAGE3}) stage3-amd64-systemd-mergedusr.tar.xz"
+        ])
+        .with_exec([
+            "sh", "-c",
+            "git config --global --add safe.directory /var/db/repos/gentoo && "
+            "cd /var/db/repos/gentoo && git init && git add -A && git commit -m 'snapshot' && "
+            "git rev-parse HEAD > /tmp/snapshot_hash"
+        ])
         .with_exec(["mkdir", "-p", "/var/tmp/catalyst/config/stages"])
         .with_directory("/src", src)
     )
@@ -50,7 +72,7 @@ async def build_cosmic(
     build = (
         gentoo
         .with_workdir("/src/build-system/catalyst")
-        .with_exec(["./build.sh"])
+        .with_exec(["./build.sh"], insecure_root_capabilities=True)
     )
 
     return build
