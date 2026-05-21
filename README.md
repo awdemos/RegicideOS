@@ -6,7 +6,7 @@
 
 > *Converge and conquer.*
 
-> ⚠️ **Emergency Refactor in Progress**: The upstream software repository has gone offline. A refactor is currently underway to restore builds. Some installation methods and components may be temporarily unavailable.
+> ⚠️ **Development Status**: ~25-30% Complete. This project is under active development. See [STATUS.md](STATUS.md) for honest assessment of what works and what's planned. The installer is functional but no bootable ISO exists yet.
 
 [![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://kernel.org/)
@@ -39,14 +39,16 @@
 
 ## 🏗️ Architecture
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Kernel | Linux (→ [Asterinas](https://asterinas.github.io/)) | System foundation |
-| Init System | systemd | Service management |
-| Filesystem | Btrfs (read-only) | Immutable system image with overlay writes |
-| Container Runtime | Distrobox | Application isolation and compatibility |
-| Desktop Environment | [Cosmic Desktop](https://github.com/pop-os/cosmic-epoch) | GPU-accelerated, Wayland-native UI |
-| Package Management | Overlays | Community-driven, curated software bundles |
+| Component | Technology | Purpose | Status |
+|-----------|------------|---------|--------|
+| Kernel | Linux (→ [Asterinas](https://asterinas.github.io/)) | System foundation | ✅ Working |
+| Init System | systemd | Service management | ✅ Working |
+| Filesystem | Btrfs (read-only) | Immutable system image with overlay writes | ✅ Working |
+| Container Runtime | Distrobox | Application isolation and compatibility | 📋 Planned |
+| Desktop Environment | [Cosmic Desktop](https://github.com/pop-os/cosmic-epoch) | GPU-accelerated, Wayland-native UI | 📋 Planned |
+| Package Management | Overlays | Community-driven, curated software bundles | 📋 Planned |
+| AI Agent | BtrMind | BTRFS optimization and cleanup | ✅ Working |
+| AI Agent | PortCL | Portage optimization (placeholder) | ⚠️ Stub |
 
 ### Directory Layout
 
@@ -75,28 +77,17 @@
 
 ## 📥 Installation
 
+> **Note**: The installer exists and works for basic UEFI installs, but there is currently **no bootable ISO**. You must run the installer from an existing Linux live environment.
+
 ### Requirements
 
 - 64-bit x86 processor
 - 12GB disk space minimum (20GB recommended)
 - UEFI or Legacy BIOS firmware
 - Internet connection
+- Existing Linux live environment (e.g., Fedora Workstation)
 
-### Quick Install (Recommended)
-
-Boot any modern Linux live environment (Fedora Workstation recommended), then:
-
-```bash
-# Download the pre-built installer
-curl -L -o regicide-installer \
-  https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
-
-# Make executable and run
-chmod +x regicide-installer
-sudo ./regicide-installer
-```
-
-### Manual Build (Advanced)
+### Manual Build (Current Method)
 
 ```bash
 # Install build dependencies
@@ -108,6 +99,8 @@ cd RegicideOS/installer
 cargo build --release
 sudo ./target/release/installer
 ```
+
+
 
 ### Automated Configuration
 
@@ -122,7 +115,7 @@ username = "your-username"
 applications = "minimal"
 EOF
 
-sudo ./regicide-installer -c regicide-config.toml
+sudo ./target/release/installer -c regicide-config.toml
 ```
 
 ---
@@ -131,7 +124,8 @@ sudo ./regicide-installer -c regicide-config.toml
 
 | Phase | Feature | Status |
 |-------|---------|--------|
-| Now | BtrMind local AI assistant | 🔄 In Progress |
+| Now | BtrMind local AI assistant | ✅ Working (17/17 tests pass) |
+| Now | PortCL package optimization | ⚠️ Placeholder / stub |
 | 2026 | Predictive system maintenance | 📋 Planned |
 | 2026 | Intelligent resource allocation | 📋 Planned |
 | 2027 | Natural language system control | 📋 Planned |
@@ -141,9 +135,12 @@ sudo ./regicide-installer -c regicide-config.toml
 
 ## 🗺️ Roadmap
 
-- [x] Core installer with Btrfs validation
-- [x] Read-only root filesystem
-- [x] Rust rewrite of installer
+- [x] Core installer with Btrfs validation (basic, needs refactor)
+- [x] Read-only root filesystem (conceptual, not bootable)
+- [x] Rust rewrite of installer (functional but monolithic)
+- [x] BtrMind AI agent (fully working)
+- [ ] Bootable ISO / Base system image
+- [ ] PortCL real implementation
 - [ ] Cosmic Desktop integration
 - [ ] Rust replacements of core GNU utilities
 - [ ] Memory-safe package manager
