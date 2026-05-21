@@ -13,82 +13,16 @@ use installer::{
     check_username, get_flatpak_packages, get_fs, get_package_sets, is_efi, Config, Partition,
 };
 
-struct Colours;
+mod filesystem;
+mod logging;
+mod validation;
+use filesystem::{
+    safe_create_dir_all, safe_read_file, safe_remove_dir_all, safe_remove_file, safe_write_file,
+    validate_safe_path,
+};
+use logging::{die, info, print_banner, warn, Colours};
 
-impl Colours {
-    const RED: &'static str = "\x1b[31m";
-    const YELLOW: &'static str = "\x1b[33m";
-    const BLUE: &'static str = "\x1b[34m";
-    const ENDC: &'static str = "\x1b[m";
-}
 
-fn die(message: &str) -> ! {
-    // Sanitize error message to prevent information disclosure
-    let sanitized = sanitize_error_message(message);
-    eprintln!("{}[ERROR]{} {}", Colours::RED, Colours::ENDC, sanitized);
-    std::process::exit(1);
-}
-
-// Sanitize error messages to prevent information disclosure
-fn sanitize_error_message(message: &str) -> String {
-    // Remove potentially sensitive information
-    let sensitive_patterns = [
-        r"/home/[^/\s]+",             // Home directory paths
-        r"/root/[^/\s]+",             // Root directory paths
-        r"/tmp/[^/\s]+",              // Temp file paths
-        r"password[^=\s]*=\s*[^\s]+", // Passwords in error messages
-        r"token[^=\s]*=\s*[^\s]+",    // Tokens in error messages
-        r"key[^=\s]*=\s*[^\s]+",      // Keys in error messages
-        r"secret[^=\s]*=\s*[^\s]+",   // Secrets in error messages
-    ];
-
-    let mut sanitized = message.to_string();
-
-    for pattern in &sensitive_patterns {
-        if let Ok(regex) = regex::Regex::new(pattern) {
-            sanitized = regex.replace_all(&sanitized, "[REDACTED]").to_string();
-        }
-    }
-
-    // Remove full paths, keep only filenames
-    let path_regex = regex::Regex::new(r"/([^/\s]+/)+([^/\s]+)").unwrap();
-    sanitized = path_regex.replace_all(&sanitized, "[PATH]/$2").to_string();
-
-    // Limit error message length to prevent log flooding
-    if sanitized.len() > 200 {
-        sanitized.truncate(197);
-        sanitized.push_str("...");
-    }
-
-    sanitized
-}
-
-fn info(message: &str) {
-    println!("{}[INFO]{} {}", Colours::BLUE, Colours::ENDC, message);
-}
-
-fn warn(message: &str) {
-    let sanitized = sanitize_error_message(message);
-    println!("{}[WARN]{} {}", Colours::YELLOW, Colours::ENDC, sanitized);
-}
-
-fn print_banner() {
-    println!("{}", Colours::BLUE);
-    println!(
-        r#"
-    ██████╗ ███████╗ ██████╗ ██╗ ██████╗██╗██████╗ ███████╗ ██████╗ ███████╗
-    ██╔══██╗██╔════╝██╔════╝ ██║██╔════╝██║██╔══██╗██╔════╝██╔═══██╗██╔════╝
-    ██████╔╝█████╗  ██║  ███╗██║██║     ██║██║  ██║█████╗  ██║   ██║███████╗
-    ██╔══██╗██╔══╝  ██║   ██║██║██║     ██║██║  ██║██╔══╝  ██║   ██║╚════██║
-    ██║  ██║███████╗╚██████╔╝██║╚██████╗██║██████╔╝███████╗╚██████╔╝███████║
-    ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝ ╚═════╝╚═╝╚═════╝ ╚══════╝ ╚═════╝ ╚══════╝
-
-              🏰 A Rust-first, AI-powered Linux Distribution 🚀
-                        Cosmic Desktop • BTRFS • Gentoo Base
-    "#
-    );
-    println!("{}", Colours::ENDC);
-}
 
 // Execute commands with full error output
 fn execute_with_output(command: &str) -> Result<String> {
@@ -1497,6 +1431,25 @@ async fn get_releases(repository: &str, flavour: &str) -> Result<Vec<String>> {
 
 async fn get_url(config: &Config) -> Result<String> {
     let manifest = get_manifest(&config.repository).await?;
+
+    // Navigate to the version entry for the selected flavour and release branch
+    let version_entry = manifest
+        .get(&config.flavour)
+        .and_then(|f| f.as_table())
+        .and_then(|f| f.get("versions"))
+        .and_then(|v| v.as_table())
+        .and_then(|v| v.get(&config.release_branch))
+        .and_then(|r| r.as_table());
+
+    // If a direct URL is provided in the manifest, use it as-is (supports any host: GitHub Releases, Proton Drive, S3, etc.)
+    if let Some(url) = version_entry
+        .and_then(|r| r.get("url"))
+        .and_then(|u| u.as_str())
+    {
+        return Ok(url.to_string());
+    }
+
+    // Fall back to the legacy relative-path format: {repo}{arch}/{branch}/{filename}
     let arch = if cfg!(target_arch = "x86_64") {
         "amd64"
     } else if cfg!(target_arch = "aarch64") {
@@ -1505,13 +1458,7 @@ async fn get_url(config: &Config) -> Result<String> {
         "amd64"
     };
 
-    if let Some(filename) = manifest
-        .get(&config.flavour)
-        .and_then(|f| f.as_table())
-        .and_then(|f| f.get("versions"))
-        .and_then(|v| v.as_table())
-        .and_then(|v| v.get(&config.release_branch))
-        .and_then(|r| r.as_table())
+    if let Some(filename) = version_entry
         .and_then(|r| r.get("filename"))
         .and_then(|f| f.as_str())
     {
@@ -1520,7 +1467,7 @@ async fn get_url(config: &Config) -> Result<String> {
             config.repository, arch, config.release_branch, filename
         ))
     } else {
-        bail!("Could not find filename in manifest")
+        bail!("Could not find 'url' or 'filename' in manifest for flavour '{}' branch '{}'", config.flavour, config.release_branch)
     }
 }
 
@@ -2871,250 +2818,6 @@ CRYPTSETUP=y
     Ok(())
 }
 
-// Input validation functions
-fn validate_device_path(path: &str) -> Result<()> {
-    // Allow common block device patterns: /dev/sd*, /dev/nvme*, /dev/hd*, /dev/vd*, /dev/mmcblk*
-    let device_regex = regex::Regex::new(
-        r"^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|hd[a-z]+|vd[a-z]+|mmcblk[0-9]+)(p[0-9]+)?$",
-    )?;
-    if !device_regex.is_match(path) {
-        bail!("Invalid device path");
-    }
-
-    // Prevent dangerous device paths (but allow legitimate block devices)
-    let dangerous_exact = [
-        "/dev/null",
-        "/dev/zero",
-        "/dev/full",
-        "/dev/random",
-        "/dev/urandom",
-        "/dev/mem",
-        "/dev/kmem",
-        "/dev/port",
-        "/dev/console",
-        "/dev/initctl",
-    ];
-
-    let dangerous_prefixes = ["/dev/shm/", "/dev/pts/", "/dev/mqueue/", "/dev/hugepages/"];
-
-    // Block exact matches to dangerous devices
-    if dangerous_exact.contains(&path) {
-        bail!("Device access denied");
-    }
-
-    // Block dangerous prefixes
-    for dangerous in &dangerous_prefixes {
-        if path.starts_with(dangerous) {
-            bail!("Device access denied");
-        }
-    }
-
-    // Allow whole disk devices but warn about partitions for user selection
-    if path.contains("p") && path.chars().last().unwrap_or('a').is_ascii_digit() {
-        // This is a partition, not a whole disk - still allow but could warn
-    }
-
-    Ok(())
-}
-
-fn validate_username(username: &str) -> Result<()> {
-    // Unix username rules: 1-32 chars, lowercase letters, digits, hyphens, underscores
-    // Cannot start with hyphen or digit, cannot end with hyphen
-    let username_regex = regex::Regex::new(r"^[a-z_][a-z0-9_-]{0,31}$")?;
-    if !username_regex.is_match(username) {
-        bail!("Invalid username format");
-    }
-
-    // Reserved usernames
-    let reserved = [
-        "root",
-        "daemon",
-        "bin",
-        "sys",
-        "sync",
-        "games",
-        "man",
-        "lp",
-        "mail",
-        "news",
-        "uucp",
-        "proxy",
-        "www-data",
-        "backup",
-        "list",
-        "irc",
-        "gnats",
-        "nobody",
-        "systemd-network",
-        "systemd-resolve",
-        "syslog",
-        "messagebus",
-        "uuidd",
-        "dnsmasq",
-        "usbmux",
-        "rtkit",
-        "pulse",
-        "speech-dispatcher",
-        "avahi",
-        "saned",
-        "colord",
-        "hplip",
-        "geoclue",
-        "gnome-initial-setup",
-        "gdm",
-        "sshd",
-        "ntp",
-        "postgres",
-        "mysql",
-        "oracle",
-        "tomcat",
-    ];
-
-    if reserved.contains(&username) {
-        bail!("Username not available");
-    }
-
-    Ok(())
-}
-
-fn validate_url(url: &str) -> Result<()> {
-    // Basic URL validation — any HTTPS URL is acceptable
-    let url_regex = regex::Regex::new(r"^https://[a-zA-Z0-9.-]+/[a-zA-Z0-9/_.-]*$")?;
-    if !url_regex.is_match(url) {
-        bail!("Invalid URL format");
-    }
-
-    Ok(())
-}
-
-fn validate_filesystem_type(fs: &str) -> Result<()> {
-    let allowed_fs = ["btrfs", "btrfs_encryption_dev"];
-    if !allowed_fs.contains(&fs) {
-        bail!("Unsupported filesystem type");
-    }
-    Ok(())
-}
-
-fn validate_flavour(flavour: &str) -> Result<()> {
-    // Only allow cosmic-desktop for RegicideOS
-    if flavour != "cosmic-desktop" {
-        bail!("Unsupported flavour: {}. Only 'cosmic-desktop' is supported.", flavour);
-    }
-    Ok(())
-}
-
-fn validate_package_set(applications: &str) -> Result<()> {
-    let allowed_sets = ["recommended", "minimal", "base", "desktop", "full"];
-    if !allowed_sets.contains(&applications) {
-        bail!("Unsupported application set");
-    }
-    Ok(())
-}
-
-fn sanitize_input(input: &str) -> String {
-    // Remove null bytes and control characters
-    input
-        .chars()
-        .filter(|c| *c != '\0' && !c.is_control() || *c == '\t' || *c == '\n' || *c == '\r')
-        .collect()
-}
-
-// Path traversal protection
-fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
-    use std::path::{Path, PathBuf};
-
-    // Remove any dangerous characters
-    let sanitized = sanitize_input(path);
-
-    // Convert to absolute path
-    let absolute_path = if sanitized.starts_with('/') {
-        PathBuf::from(&sanitized)
-    } else {
-        std::env::current_dir()?.join(&sanitized)
-    };
-
-    // Get canonical path for allowed base (must exist)
-    let base_path = Path::new(allowed_base)
-        .canonicalize()
-        .with_context(|| format!("Base directory does not exist: {allowed_base}"))?;
-
-    // For validation, check if the path would be within base after creation
-    // We need to handle the case where the path doesn't exist yet (for directory creation)
-    let path_to_check = if absolute_path.exists() {
-        absolute_path
-            .canonicalize()
-            .unwrap_or_else(|_| absolute_path.clone())
-    } else {
-        // For non-existent paths, validate the parent directory exists and is within bounds
-        let parent = absolute_path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Invalid path: no parent directory"))?;
-
-        if !parent.exists() {
-            bail!("Parent directory does not exist: {}", parent.display());
-        }
-
-        parent
-            .canonicalize()
-            .map(|p| p.join(absolute_path.file_name().unwrap_or_default()))
-            .unwrap_or(absolute_path.clone())
-    };
-
-    // Ensure the path is within the allowed base directory
-    if !path_to_check.starts_with(&base_path) {
-        bail!(
-            "Path access denied: {} is outside allowed base {}",
-            path_to_check.display(),
-            base_path.display()
-        );
-    }
-
-    // Additional checks for dangerous patterns
-    let path_str = absolute_path.to_string_lossy();
-    let dangerous_patterns = [
-        "..", "~", "$HOME", "/etc/", "/root/", "/var/", "/usr/", "/bin/", "/sbin/", "/lib/",
-        "/proc/", "/sys/", "/dev/",
-    ];
-
-    for pattern in &dangerous_patterns {
-        if path_str.contains(pattern) && !path_str.starts_with(allowed_base) {
-            bail!("Path access denied: dangerous pattern detected");
-        }
-    }
-
-    Ok(absolute_path)
-}
-
-// Safe file operations with path validation
-fn safe_create_dir_all(path: &str, allowed_base: &str) -> Result<()> {
-    let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::create_dir_all(validated_path).with_context(|| "Failed to create directory")?;
-    Ok(())
-}
-
-fn safe_write_file(path: &str, content: &[u8], allowed_base: &str) -> Result<()> {
-    let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::write(validated_path, content).with_context(|| "Failed to write file")?;
-    Ok(())
-}
-
-fn safe_read_file(path: &str, allowed_base: &str) -> Result<String> {
-    let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::read_to_string(&validated_path).with_context(|| "Failed to read file")
-}
-
-fn safe_remove_file(path: &str, allowed_base: &str) -> Result<()> {
-    let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::remove_file(validated_path).with_context(|| "Failed to remove file")?;
-    Ok(())
-}
-
-fn safe_remove_dir_all(path: &str, allowed_base: &str) -> Result<()> {
-    let validated_path = validate_safe_path(path, allowed_base)?;
-    fs::remove_dir_all(validated_path).with_context(|| "Failed to remove directory")?;
-    Ok(())
-}
-
 fn get_input(prompt: &str, default: &str) -> String {
     print!(
         "{}. Valid options are \n{}[{}]{}: ",
@@ -3127,7 +2830,7 @@ fn get_input(prompt: &str, default: &str) -> String {
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
-    let input = sanitize_input(input.trim());
+    let input = validation::sanitize_input(input.trim());
 
     if input.is_empty() {
         default.to_string()
@@ -3149,7 +2852,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     }
 
     // Validate drive path security
-    validate_device_path(&config.drive)?;
+    validation::validate_device_path(&config.drive)?;
 
     // If using a local image, skip all remote repository checks
     let use_local_image = config.image_path.is_some();
@@ -3180,7 +2883,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
         }
 
         // Validate repository URL security
-        validate_url(&config.repository)?;
+        validation::validate_url(&config.repository)?;
 
         // Validate repository accessibility
         if !check_url(&config.repository).await {
@@ -3197,7 +2900,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
         }
 
         // Validate flavour security
-        validate_flavour(&config.flavour)?;
+        validation::validate_flavour(&config.flavour)?;
 
         // Verify the flavour is available in the repository
         match get_flavours(&config.repository).await {
@@ -3277,7 +2980,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     }
 
     // Validate filesystem type security
-    validate_filesystem_type(&config.filesystem)?;
+    validation::validate_filesystem_type(&config.filesystem)?;
 
     // Validate username
     if !config.username.is_empty() {
@@ -3291,7 +2994,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
 
         // Additional username security validation
         if !config.username.is_empty() {
-            validate_username(&config.username)?;
+            validation::validate_username(&config.username)?;
         }
     }
 
@@ -3307,7 +3010,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
     }
 
     // Validate package set security
-    validate_package_set(&config.applications)?;
+    validation::validate_package_set(&config.applications)?;
 
     Ok(config)
 }
