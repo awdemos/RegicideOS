@@ -155,17 +155,13 @@ func testOverlay(ctx context.Context, client *dagger.Client, source *dagger.Dire
 		WithExec([]string{"mkdir", "-p", "/var/db/repos"}).
 		WithExec([]string{"cp", "-r", "/regicide/overlays/regicide-rust", "/var/db/repos/regicide-overlay"}).
 		WithExec([]string{"mkdir", "-p", "/etc/portage/repos.conf", "/etc/portage/package.accept_keywords"}).
-		WithNewFile("/etc/portage/repos.conf/regicide.conf", dagger.ContainerWithNewFileOpts{
-			Contents: `[regicide-overlay]
+		WithNewFile("/etc/portage/repos.conf/regicide.conf", `[regicide-overlay]
 location = /var/db/repos/regicide-overlay
 sync-type = git
 sync-uri = https://github.com/awdemos/regicide-overlay.git
 auto-sync = yes
-`,
-		}).
-		WithNewFile("/etc/portage/package.accept_keywords/regicide", dagger.ContainerWithNewFileOpts{
-			Contents: "regicide-tools/* **\n",
-		}).
+`).
+		WithNewFile("/etc/portage/package.accept_keywords/regicide", "regicide-tools/* **\n").
 		WithExec([]string{"eselect", "repository", "list"}).
 		WithExec([]string{"emerge", "--search", "btrmind"}).
 		WithExec([]string{"emerge", "--pretend", "--quiet", "regicide-tools/btrmind"})

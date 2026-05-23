@@ -78,7 +78,7 @@ class TestISOCreationSafety(unittest.TestCase):
                 violations = []
                 warnings = []
                 
-                lines = script_content.split('\\n')
+                lines = script_content.split('\n')
                 for line_num, line in enumerate(lines, 1):
                     line = line.strip()
                     
@@ -571,7 +571,7 @@ class TestISOBuildProcessSafety(unittest.TestCase):
                     "chmod 777"
                 ]
                 
-                lines = content.split('\\n')
+                lines = content.split('\n')
                 for line_num, line in enumerate(lines, 1):
                     line = line.strip()
                     
@@ -640,10 +640,10 @@ echo "ISO build completed successfully"
         # Test dangerous script validation
         dangerous_script = os.path.join(self.build_dir, "dangerous_build.sh")
         with open(dangerous_script, 'w') as f:
-            f.write('#!/bin/bash\\n')
-            f.write('rm -rf /\\n')
-            f.write('dd if=/dev/zero of=/dev/sda\\n')
-            f.write('sudo mkfs.ext4 /dev/sdb1\\n')
+            f.write('#!/bin/bash\n')
+            f.write('rm -rf /\n')
+            f.write('dd if=/dev/zero of=/dev/sda\n')
+            f.write('sudo mkfs.ext4 /dev/sdb1\n')
         
         result = safety.validate_build_script(dangerous_script)
         self.assertFalse(result)
