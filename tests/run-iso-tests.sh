@@ -73,7 +73,7 @@ run_test_category() {
 check_dependencies() {
     echo -e "${BLUE}Checking ISO creation dependencies...${NC}"
     
-    local deps=(["python3"]="Python 3" ["pytest"]="Pytest testing framework" ["xorriso"]="Xorriso ISO creation tool" ["squashfs-tools"]="Squashfs compression" ["mksquashfs"]="Squashfs filesystem creator")
+    local -A deps=(["python3"]="Python 3" ["pytest"]="Pytest testing framework" ["xorriso"]="Xorriso ISO creation tool" ["mksquashfs"]="Squashfs filesystem creator")
     local missing_deps=()
     
     for dep in "${!deps[@]}"; do

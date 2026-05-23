@@ -337,6 +337,7 @@ class TestISOBuild(unittest.TestCase):
                 try:
                     # In real implementation, this would call mksquashfs
                     # For testing, create a placeholder file
+                    os.makedirs(os.path.dirname(output_file), exist_ok=True)
                     with open(output_file, 'w') as f:
                         f.write("Mock squashfs filesystem\\n")
                 except Exception as e:
@@ -514,9 +515,11 @@ class TestISOBuildErrorHandling(unittest.TestCase):
             def setup_environment(self):
                 """Setup that fails."""
                 try:
-                    # Try to create directory in a non-existent location
-                    invalid_dir = os.path.join(self.build_dir, "nonexistent", "nested")
-                    os.makedirs(invalid_dir, exist_ok=False)
+                    # Try to create directory where a file already exists
+                    invalid_dir = os.path.join(self.build_dir, "nonexistent")
+                    with open(invalid_dir, 'w') as f:
+                        f.write("")
+                    os.makedirs(os.path.join(invalid_dir, "nested"), exist_ok=False)
                     return True
                 except Exception as e:
                     self.errors.append(f"Directory creation failed: {e}")

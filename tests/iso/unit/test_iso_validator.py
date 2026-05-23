@@ -33,7 +33,7 @@ class TestISOValidation(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     
-    def create_validator(self):
+    def create_validator(self, iso_file=None):
         """Create a mock ISO validator."""
         class ISOValidator:
             def __init__(self, iso_file):
@@ -99,7 +99,7 @@ class TestISOValidation(unittest.TestCase):
                     self.errors.append(f"ISO file is not readable: {e}")
                     return False
         
-        return ISOValidator(self.test_iso)
+        return ISOValidator(iso_file if iso_file is not None else self.test_iso)
     
     def test_valid_iso_validation(self):
         """Test validation of a valid ISO file."""
@@ -117,7 +117,7 @@ class TestISOValidation(unittest.TestCase):
     def test_nonexistent_iso_validation(self):
         """Test validation of non-existent ISO file."""
         nonexistent_iso = os.path.join(self.temp_dir, "nonexistent.iso")
-        validator = self.create_validator.__func__(nonexistent_iso)
+        validator = self.create_validator(nonexistent_iso)
         
         result = validator.validate()
         
@@ -134,7 +134,7 @@ class TestISOValidation(unittest.TestCase):
         with open(empty_iso, 'w') as f:
             pass  # Create empty file
         
-        validator = self.create_validator.__func__(empty_iso)
+        validator = self.create_validator(empty_iso)
         result = validator.validate()
         
         self.assertFalse(result)
