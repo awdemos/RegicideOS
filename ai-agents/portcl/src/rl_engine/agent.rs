@@ -1,5 +1,5 @@
 use crate::config::RLConfig;
-use crate::error::{PortCLError, Result};
+use crate::error::Result;
 use crate::monitor::PortageMetrics;
 use crate::actions::Action;
 use crate::rl_engine::{

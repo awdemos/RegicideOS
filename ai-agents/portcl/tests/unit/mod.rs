@@ -12,7 +12,7 @@ pub mod test_safety;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use portcl::utils::{format_duration, format_bytes};
 
     #[test]

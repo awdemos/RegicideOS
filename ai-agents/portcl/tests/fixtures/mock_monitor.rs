@@ -5,7 +5,6 @@
 //! actual Portage system calls.
 
 use crate::fixtures::mock_data::*;
-use crate::fixtures::test_models::*;
 use portcl::error::PortCLError;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -430,7 +429,7 @@ impl MockPortageMonitorTrait for MockPortageMonitor {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
-        let metrics = self.metrics.read().unwrap();
+        let _metrics = self.metrics.read().unwrap();
         let avg_cpu_usage = samples.iter().map(|s| s.cpu_usage).sum::<f64>() / samples.len() as f64;
         let max_cpu_usage = samples.iter().map(|s| s.cpu_usage).fold(0.0, f64::max);
         let avg_memory_usage = samples.iter().map(|s| s.memory_usage).sum::<f64>() / samples.len() as f64;

@@ -357,7 +357,7 @@ mod rollback_manager_tests {
         manager.current_snapshot = Some(ids[0].clone());
 
         // Try to cleanup all but 1
-        let removed = manager.cleanup_old_snapshots(1).await.unwrap();
+        let _removed = manager.cleanup_old_snapshots(1).await.unwrap();
 
         // Current snapshot should be preserved even if it's old
         assert!(manager.get_snapshot(&ids[0]).is_some());
@@ -391,7 +391,7 @@ mod safety_checker_tests {
             ..Default::default()
         };
 
-        let checker = SafetyChecker::with_config(config);
+        let _checker = SafetyChecker::with_config(config);
         // Custom config should be applied
     }
 
@@ -422,7 +422,7 @@ mod safety_checker_tests {
         let checker = SafetyChecker::with_config(config);
         let action = Action::NoOp;
 
-        let checks = checker.validate_action(&action).await.unwrap();
+        let _checks = checker.validate_action(&action).await.unwrap();
 
         // With all checks disabled, should have minimal or no checks
         // (depends on implementation)
@@ -452,7 +452,7 @@ mod safety_checker_tests {
         let mut checker = SafetyChecker::new();
         let action = Action::NoOp;
 
-        let snapshot_id = checker.prepare_action(&action).await.unwrap();
+        let _snapshot_id = checker.prepare_action(&action).await.unwrap();
 
         // NoOp is not a critical action, so no snapshot should be created
         // (unless backup_before_critical is false)

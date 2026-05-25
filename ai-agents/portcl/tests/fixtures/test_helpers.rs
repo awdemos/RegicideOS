@@ -3,17 +3,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tempfile::{tempdir, TempDir};
 use serde::{Serialize, Deserialize};
-use tokio::time::sleep;
 use uuid::Uuid;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use futures::future;
 
 use crate::fixtures::mock_data::*;
-use crate::fixtures::test_models::*;
 use crate::fixtures::mock_monitor::*;
 use crate::fixtures::mock_executor::*;
 use crate::fixtures::mock_agent::*;
@@ -25,11 +22,6 @@ pub mod test_runner;
 pub mod data_validator;
 pub mod benchmark_helpers;
 
-pub use test_assertions::*;
-pub use mock_environment::*;
-pub use test_runner::*;
-pub use data_validator::*;
-pub use benchmark_helpers::*;
 pub use crate::fixtures::test_models::*;
 
 /// Creates a temporary directory for tests
@@ -588,13 +580,13 @@ pub struct MockTestEnvironment {
 impl MockTestEnvironment {
     pub async fn reset(&self) -> Result<(), String> {
         // Reset all components to initial state
-        let mut monitor = self.monitor.write().await;
+        let monitor = self.monitor.write().await;
         monitor.reset().await;
 
-        let mut executor = self.executor.write().await;
+        let executor = self.executor.write().await;
         executor.reset().await;
 
-        let mut agent = self.agent.write().await;
+        let agent = self.agent.write().await;
         agent.clear_injections();
 
         Ok(())
@@ -1009,7 +1001,7 @@ impl TestDataValidator {
                 }
                 Ok(())
             },
-            MockAction::CleanObsoletePackages { force } => {
+            MockAction::CleanObsoletePackages { force: _ } => {
                 // No specific validation needed for force flag
                 Ok(())
             },
@@ -1089,11 +1081,11 @@ impl TestDataValidator {
     /// Validate test output
     pub fn validate_test_output(output: &TestOutput) -> Result<(), String> {
         match output {
-            TestOutput::Success { stdout, stderr } => {
+            TestOutput::Success { stdout: _, stderr: _ } => {
                 // No specific validation required for success output
                 Ok(())
             },
-            TestOutput::Failure { stdout, stderr, error } => {
+            TestOutput::Failure { stdout: _, stderr: _, error } => {
                 if error.is_empty() {
                     return Err("Error message in failure output cannot be empty".to_string());
                 }
@@ -1258,7 +1250,7 @@ impl TestDataValidator {
 
     /// Validate test data for performance reasonableness
     pub fn validate_performance_reasonableness(results: &[TestResult]) -> Result<(), String> {
-        for (i, result) in results.iter().enumerate() {
+        for (_i, result) in results.iter().enumerate() {
             // Check for unusually long execution times
             if result.duration_ms > 300_000 { // 5 minutes
                 return Err(format!(
@@ -1300,7 +1292,7 @@ impl BenchmarkHelpers {
         let start_time = std::time::Instant::now();
         let start_memory = Self::get_memory_usage();
 
-        let result = f();
+        let _result = f();
 
         let end_time = std::time::Instant::now();
         let end_memory = Self::get_memory_usage();
@@ -1326,7 +1318,7 @@ impl BenchmarkHelpers {
         let start_time = std::time::Instant::now();
         let start_memory = Self::get_memory_usage();
 
-        let result = f.await;
+        let _result = f.await;
 
         let end_time = std::time::Instant::now();
         let end_memory = Self::get_memory_usage();

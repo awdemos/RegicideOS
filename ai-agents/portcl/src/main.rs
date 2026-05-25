@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 async fn run_agent(config: PortageConfig) -> Result<()> {
     let monitor = MonitorManager::new(config.monitoring.clone())?;
     let agent = PortageAgent::new(config.rl.clone())?;
-    let mut executor = ActionExecutor::new();
+    let executor = ActionExecutor::new();
 
     // Main agent loop
     loop {

@@ -3,7 +3,7 @@ use clap::{Arg, Command};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -18,7 +18,6 @@ mod logging;
 mod validation;
 use filesystem::{
     safe_create_dir_all, safe_read_file, safe_remove_dir_all, safe_remove_file, safe_write_file,
-    validate_safe_path,
 };
 use logging::{die, info, print_banner, warn, Colours};
 
@@ -1929,16 +1928,16 @@ fn verify_grub_environment() -> Result<()> {
 
 fn install_bootloader(platform: &str, device: &str) -> Result<()> {
     // Check for grub binary in chroot environment using chroot commands
-    let grub = match chroot_with_output(
+    let (grub, use_host_grub) = match chroot_with_output(
         "which grub-install 2>/dev/null || which grub2-install 2>/dev/null || echo 'not found'",
     ) {
         Ok(output) => {
             let result = output.trim();
             if result != "not found" && !result.is_empty() {
                 if result.contains("grub2-install") {
-                    "grub2"
+                    ("grub2", false)
                 } else {
-                    "grub"
+                    ("grub", false)
                 }
             } else {
                 // Try direct path check if which fails
@@ -1947,12 +1946,27 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                         let direct_result = direct_output.trim();
                         if direct_result != "not found" && !direct_result.is_empty() {
                             if direct_result.contains("grub2-install") {
-                                "grub2"
+                                ("grub2", false)
                             } else {
-                                "grub"
+                                ("grub", false)
                             }
                         } else {
-                            bail!("GRUB installer not found in chroot environment");
+                            // Fallback: use host GRUB installer if chroot doesn't have it
+                            info("GRUB not found in chroot, falling back to host GRUB installer");
+                            let host_grub_check = if execute("which grub2-install").is_ok() {
+                                Some("grub2")
+                            } else if execute("which grub-install").is_ok() {
+                                Some("grub")
+                            } else {
+                                None
+                            };
+                            if host_grub_check == Some("grub2") {
+                                ("grub2", true)
+                            } else if host_grub_check == Some("grub") {
+                                ("grub", true)
+                            } else {
+                                bail!("GRUB installer not found in chroot or host environment")
+                            }
                         }
                     }
                     Err(e) => {
@@ -1962,7 +1976,22 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
             }
         }
         Err(e) => {
-            bail!("Failed to check for GRUB installer: {}", e);
+            // If chroot itself fails (e.g., missing /bin/bash), try host GRUB directly
+            info("Chroot GRUB check failed, falling back to host GRUB installer");
+            let host_grub_check = if execute("which grub2-install").is_ok() {
+                Some("grub2")
+            } else if execute("which grub-install").is_ok() {
+                Some("grub")
+            } else {
+                None
+            };
+            if host_grub_check == Some("grub2") {
+                ("grub2", true)
+            } else if host_grub_check == Some("grub") {
+                ("grub", true)
+            } else {
+                bail!("GRUB installer not found in chroot or host environment: {e}")
+            }
         }
     };
 
@@ -1978,10 +2007,18 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         info(&format!("Installing GRUB with modules: {crypto_modules}"));
 
         // Install GRUB for EFI systems with crypto modules embedded
-        let grub_install_cmd = format!(
-            "{grub}-install --modules={crypto_modules} --force --target=\"{platform}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\" --recheck"
-        );
-        chroot(&grub_install_cmd)?;
+        if use_host_grub {
+            let grub_install_cmd = format!(
+                "{grub}-install --modules={crypto_modules} --force --target=\"{platform}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\" --recheck"
+            );
+            execute(&grub_install_cmd)?;
+            info("✓ Host GRUB EFI installation completed");
+        } else {
+            let grub_install_cmd = format!(
+                "{grub}-install --modules={crypto_modules} --force --target=\"{platform}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\" --recheck"
+            );
+            chroot(&grub_install_cmd)?;
+        }
 
         // GRUB configuration will be created in post_install after overlay filesystem is mounted
 
@@ -2196,18 +2233,26 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // GRUB configuration will be created in post_install() via create_grub_configuration()
     } else {
         // For BIOS, use exact same commands as Python reference
-        let grub_install_cmd = format!(
-            "{grub}-install --force --target=\"{platform}\" --boot-directory=\"/boot/efi\" {device}"
-        );
-        chroot(&grub_install_cmd)?;
+        if use_host_grub {
+            let grub_install_cmd = format!(
+                "{grub}-install --force --target=\"{platform}\" --boot-directory=\"/mnt/root/boot/efi\" {device}"
+            );
+            execute(&grub_install_cmd)?;
+            info("✓ Host GRUB BIOS installation completed");
+        } else {
+            let grub_install_cmd = format!(
+                "{grub}-install --force --target=\"{platform}\" --boot-directory=\"/boot/efi\" {device}"
+            );
+            chroot(&grub_install_cmd)?;
 
-        // Ensure boot partition is writable for GRUB config generation
-        info("Ensuring boot partition is writable for GRUB config generation");
-        chroot("mount -o remount,rw /boot/efi")?;
+            // Ensure boot partition is writable for GRUB config generation
+            info("Ensuring boot partition is writable for GRUB config generation");
+            chroot("mount -o remount,rw /boot/efi")?;
 
-        // Verify GRUB environment before running grub-mkconfig
-        info("Verifying GRUB environment before config generation");
-        verify_grub_environment()?;
+            // Verify GRUB environment before running grub-mkconfig
+            info("Verifying GRUB environment before config generation");
+            verify_grub_environment()?;
+        }
 
         // Skip GRUB mkconfig since we created manual configuration
         info("Skipping grub-mkconfig - using manual LUKS-compatible configuration");
@@ -2505,7 +2550,7 @@ menuentry "RegicideOS (Verbose)" {{
     Ok(())
 }
 
-async fn post_install(config: &Config) -> Result<()> {
+async fn mount_root_image(config: &Config) -> Result<()> {
     // Determine root image path: local or downloaded
     let root_img_path = if let Some(ref local_path) = config.image_path {
         info(&format!("Using local root image: {local_path}"));
@@ -2583,6 +2628,11 @@ async fn post_install(config: &Config) -> Result<()> {
         }
     }
 
+    // Create mountpoint directories for overlay targets
+    safe_create_dir_all("/mnt/root/etc", "/mnt/root")?;
+    safe_create_dir_all("/mnt/root/var", "/mnt/root")?;
+    safe_create_dir_all("/mnt/root/usr", "/mnt/root")?;
+
     // Mount root image as overlay lowerdir template
     info("Mounting root image as overlay template");
     safe_create_dir_all("/mnt/rootimg", "/mnt")?;
@@ -2601,6 +2651,30 @@ async fn post_install(config: &Config) -> Result<()> {
         "mount -t overlay overlay -o lowerdir=/mnt/rootimg/var,upperdir={var_path}/var,workdir={var_path}/varw,rw /mnt/root/var"
     ))?;
 
+    // Create merged-usr symlinks required for functional chroot
+    info("Creating merged-usr symlinks for chroot");
+    let merged_usr_links = [
+        ("/mnt/root/bin", "usr/bin"),
+        ("/mnt/root/sbin", "usr/bin"),
+        ("/mnt/root/lib", "usr/lib"),
+        ("/mnt/root/lib64", "usr/lib64"),
+    ];
+    for (link_path, target) in &merged_usr_links {
+        if !Path::new(link_path).exists() {
+            if let Some(parent) = Path::new(link_path).parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, link_path)?;
+            info(&format!("✓ Created symlink {link_path} -> {target}"));
+        }
+    }
+
+    info("✓ Root image and overlays mounted successfully");
+    Ok(())
+}
+
+async fn post_install(config: &Config) -> Result<()> {
     // Now that overlay filesystem is mounted and /etc is writable, create GRUB configuration
     info("Creating GRUB configuration after overlay filesystem is mounted...");
 
@@ -3179,6 +3253,9 @@ async fn main() -> Result<()> {
     info("Step 2: Mount native ROOTS filesystem");
     step3_native_mount()?;
 
+    info("Step 3: Mount root image and overlays");
+    mount_root_image(&config_parsed).await?;
+
     info("Step 4: Prepare for bootloader installation");
 
     info("Step 5: Install bootloader");
@@ -3210,7 +3287,7 @@ async fn main() -> Result<()> {
     info("About to call install_bootloader...");
     install_bootloader(platform, &config_parsed.drive)?;
 
-    info("Step 5: Post-installation tasks");
+    info("Step 6: Post-installation tasks");
     post_install(&config_parsed).await?;
 
     info("Installation completed successfully!");
@@ -3248,7 +3325,7 @@ mod tests_main {
         // Test that validate_safe_path works for non-existent paths (for directory creation)
         std::fs::create_dir_all("/tmp/test_base")?;
 
-        let result = validate_safe_path("/tmp/test_base/new_dir", "/tmp/test_base");
+        let result = filesystem::validate_safe_path("/tmp/test_base/new_dir", "/tmp/test_base");
         assert!(result.is_ok());
 
         // Cleanup
@@ -3261,7 +3338,7 @@ mod tests_main {
         // Test that validate_safe_path works for existing paths
         std::fs::create_dir_all("/tmp/test_base/existing_dir")?;
 
-        let result = validate_safe_path("/tmp/test_base/existing_dir", "/tmp/test_base");
+        let result = filesystem::validate_safe_path("/tmp/test_base/existing_dir", "/tmp/test_base");
         assert!(result.is_ok());
 
         // Cleanup
@@ -3274,7 +3351,7 @@ mod tests_main {
         // Test that validate_safe_path rejects paths outside base
         std::fs::create_dir_all("/tmp/test_base")?;
 
-        let result = validate_safe_path("/tmp/other_dir", "/tmp/test_base");
+        let result = filesystem::validate_safe_path("/tmp/other_dir", "/tmp/test_base");
         assert!(result.is_err());
 
         // Cleanup

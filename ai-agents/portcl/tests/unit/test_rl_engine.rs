@@ -3,7 +3,6 @@
 
 use portcl::actions::Action;
 use portcl::error::{PortCLError, Result};
-use portcl::prelude::*;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -557,7 +556,7 @@ async fn test_model_persistence_simulation() {
     let mut agent = MockRLAgent::new(config);
 
     // Simulate some training
-    for i in 0..10 {
+    for _i in 0..10 {
         let experience = create_mock_experience(0.1, false);
         agent.add_experience(experience).unwrap();
         let _ = agent.train_step();
@@ -580,7 +579,7 @@ async fn test_learning_rate_decay_simulation() {
 
     // Simulate learning rate decay over training
     let mut losses = Vec::new();
-    for i in 0..20 {
+    for _i in 0..20 {
         if agent.get_experience_count() >= agent.config.batch_size {
             if let Ok(loss) = agent.train_step() {
                 losses.push(loss);

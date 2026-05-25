@@ -510,7 +510,7 @@ impl MockPortageAgentTrait for MockPortageAgent {
         }
     }
 
-    async fn evaluate_performance(&self, test_episodes: u32) -> Result<f64, PortCLError> {
+    async fn evaluate_performance(&self, _test_episodes: u32) -> Result<f64, PortCLError> {
         self.simulate_delay("evaluate_performance").await;
 
         if self.should_fail("evaluate_performance") {
