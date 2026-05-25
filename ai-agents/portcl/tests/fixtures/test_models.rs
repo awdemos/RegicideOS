@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 /// Test execution result data model
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,7 +236,7 @@ impl TestResult {
     }
 
     /// Set stderr output
-    pub fn set_stderr(&mut self, stderr: String) {
+    pub fn set_stderr(&mut self, _stderr: String) {
         // stderr set via output variant
     }
 

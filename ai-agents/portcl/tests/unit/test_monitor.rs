@@ -4,16 +4,16 @@ use portcl::monitor::*;
 use portcl::config::MonitoringConfig;
 use portcl::error::PortCLError;
 use std::path::PathBuf;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use tokio_test;
 
 #[cfg(test)]
 mod monitor_tests {
     use super::*;
-    use crate::fixtures::test_helpers::*;
-    use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
-    use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
-    use std::collections::HashMap;
+    
+    use crate::fixtures::mock_monitor::MockMonitorMetrics;
+    
+    
 
     #[tokio::test]
     async fn test_portage_monitor_creation_success() {
@@ -125,7 +125,7 @@ mod monitor_tests {
         let result = MetricsCollector::new(config.clone());
 
         match result {
-            Ok(collector) => {
+            Ok(_collector) => {
                 // MetricsCollector was created successfully
                 assert!(true);
             },
@@ -296,7 +296,7 @@ mod monitor_tests {
         let result = MonitorManager::new(config.clone());
 
         match result {
-            Ok(manager) => {
+            Ok(_manager) => {
                 // Manager was created successfully
                 assert!(true);
             },
@@ -336,7 +336,7 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_basic() {
-        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+        use crate::fixtures::mock_monitor::MockPortageMonitor;
     use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();
@@ -354,12 +354,12 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_error_injection() {
-        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+        use crate::fixtures::mock_monitor::MockPortageMonitor;
     use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();
         let mock_packages = vec![MockPackage::sample_package()];
-        let mut mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
+        let mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
 
         // Test error injection
         mock_monitor.inject_error_async("get_metrics".to_string(), true).await;
@@ -370,13 +370,13 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_delay_injection() {
-        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+        use crate::fixtures::mock_monitor::MockPortageMonitor;
     use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
         use std::time::Duration;
 
         let mock_config = MockMonitoringConfig::default();
         let mock_packages = vec![MockPackage::sample_package()];
-        let mut mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
+        let mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
 
         // Test delay injection
         mock_monitor.inject_delay_async("get_metrics".to_string(), 100).await;
@@ -391,12 +391,12 @@ mod monitor_tests {
 
     #[tokio::test]
     async fn test_mock_portage_monitor_reset() {
-        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+        use crate::fixtures::mock_monitor::MockPortageMonitor;
     use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();
         let mock_packages = vec![MockPackage::sample_package()];
-        let mut mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
+        let mock_monitor = MockPortageMonitor::new_with_config(mock_config, mock_packages);
 
         // Inject some state
         mock_monitor.inject_error_async("get_metrics".to_string(), true).await;
@@ -732,7 +732,7 @@ mod monitor_performance_tests {
 
     #[tokio::test]
     async fn test_mock_monitor_performance() {
-        use crate::fixtures::mock_monitor::{MockPortageMonitor, MockMonitorMetrics};
+        use crate::fixtures::mock_monitor::MockPortageMonitor;
     use crate::fixtures::mock_data::{MockMonitoringConfig, MockPackage};
 
         let mock_config = MockMonitoringConfig::default();

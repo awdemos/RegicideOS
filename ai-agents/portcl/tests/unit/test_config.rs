@@ -2,14 +2,11 @@ use portcl::config::{
     PortageConfig, MonitoringConfig, RLConfig, ActionConfig, SafetyConfig, GeneralConfig,
     validate_config
 };
-use portcl::error::{PortCLError, Result};
-use portcl::prelude::*;
+use portcl::error::PortCLError;
 
 use std::path::PathBuf;
 use tempfile::{NamedTempFile, TempDir};
-use std::fs;
 use std::io::Write;
-use std::collections::HashMap;
 
 // Test utilities
 fn create_test_portage_config() -> PortageConfig {

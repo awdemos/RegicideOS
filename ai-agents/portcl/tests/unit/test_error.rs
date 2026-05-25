@@ -1,9 +1,7 @@
 use portcl::error::{PortCLError, Result};
 use portcl::utils::error::{handle_error, log_result, is_retryable_error, error_severity, ErrorSeverity};
-use portcl::prelude::*;
 
 use std::io;
-use std::path::PathBuf;
 use serde_json;
 use toml;
 

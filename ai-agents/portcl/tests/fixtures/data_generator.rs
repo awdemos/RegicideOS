@@ -7,7 +7,6 @@ use crate::fixtures::mock_data::*;
 use crate::fixtures::test_models::*;
 use rand::Rng;
 use std::collections::HashMap;
-use uuid::Uuid;
 
 /// Test data generator for creating varied and realistic test scenarios
 pub struct TestDataGenerator {
@@ -500,8 +499,8 @@ mod tests {
 
     #[test]
     fn test_generator_creation() {
-        let gen = TestDataGenerator::new();
-        let gen_seeded = TestDataGenerator::with_seed(42);
+        let _gen = TestDataGenerator::new();
+        let _gen_seeded = TestDataGenerator::with_seed(42);
         assert!(true); // Just verify creation works
     }
 

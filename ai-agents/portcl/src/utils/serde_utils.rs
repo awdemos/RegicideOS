@@ -1,4 +1,4 @@
-use crate::error::{PortCLError, Result};
+use crate::error::Result;
 use serde::{de::DeserializeOwned, Serialize};
 
 pub fn to_json_string<T: Serialize>(value: &T) -> Result<String> {

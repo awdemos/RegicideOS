@@ -2,13 +2,12 @@
 
 use portcl::actions::*;
 use portcl::error::PortCLError;
-use std::collections::HashMap;
 
 #[cfg(test)]
 mod action_tests {
     use super::*;
-    use crate::fixtures::test_helpers::*;
-    use crate::fixtures::mock_executor::MockActionExecutorTrait;
+    
+    
 
     #[test]
     fn test_action_noop_creation() {
@@ -221,7 +220,7 @@ mod mock_action_executor_tests {
     use super::*;
     use crate::fixtures::mock_executor::*;
     use crate::fixtures::mock_data::*;
-    use crate::fixtures::test_helpers::*;
+    
     use std::time::Duration;
 
     #[tokio::test]
@@ -235,7 +234,7 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_basic_execution() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         let action = portcl::actions::Action::NoOp;
         let result = executor.execute_action(&action).await;
@@ -249,7 +248,7 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_all_action_types() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         let actions = vec![
             portcl::actions::Action::NoOp,
@@ -276,7 +275,7 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_error_injection() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         // Inject error for specific action
         executor.inject_error_async("execute_action".to_string(), true).await;
@@ -291,7 +290,7 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_delay_injection() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         // Inject delay for specific action
         executor.inject_delay_async("execute_action".to_string(), 200).await;
@@ -308,7 +307,7 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_state_management() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         // Execute some actions
         let actions = vec![
@@ -330,7 +329,7 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_reset() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         // Execute some actions and inject errors
         executor.execute_action(&portcl::actions::Action::NoOp).await.unwrap();
@@ -350,13 +349,13 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_concurrent_execution() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
-        let action = portcl::actions::Action::NoOp;
+        let _action = portcl::actions::Action::NoOp;
 
         // Execute multiple actions concurrently
         let handles = (0..5).map(|_| {
-            let mut executor = executor.clone();
+            let executor = executor.clone();
             tokio::spawn(async move {
                 executor.execute_action(&portcl::actions::Action::NoOp).await
             })
@@ -378,7 +377,7 @@ mod mock_action_executor_tests {
     #[tokio::test]
     async fn test_mock_action_executor_history_tracking() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         // Execute some actions
         let actions = vec![
@@ -404,7 +403,7 @@ mod mock_action_executor_tests {
 
 #[cfg(test)]
 mod action_validation_tests {
-    use super::*;
+    
     use crate::fixtures::mock_data::*;
     use crate::fixtures::test_helpers::*;
 
@@ -468,7 +467,7 @@ mod action_validation_tests {
 
 #[cfg(test)]
 mod action_integration_tests {
-    use super::*;
+    
     use crate::fixtures::mock_data::*;
     use crate::fixtures::test_helpers::*;
     use crate::fixtures::mock_executor::MockActionExecutorTrait;
@@ -519,7 +518,7 @@ mod action_integration_tests {
 
 #[cfg(test)]
 mod action_performance_tests {
-    use super::*;
+    
     use crate::fixtures::mock_data::*;
     use crate::fixtures::mock_executor::MockActionExecutor;
     use crate::fixtures::test_helpers::*;
@@ -547,7 +546,7 @@ mod action_performance_tests {
     #[tokio::test]
     async fn test_mock_action_executor_performance() {
         let config = MockActionConfig::default();
-        let mut executor = MockActionExecutor::new_with_config(config).unwrap();
+        let executor = MockActionExecutor::new_with_config(config).unwrap();
 
         let benchmark = BenchmarkHelpers::benchmark_async(
             "mock_action_execution",

@@ -3,7 +3,6 @@
 //! This module provides a mock implementation of ActionExecutor that
 //! simulates Portage action operations without requiring actual system calls.
 
-use crate::fixtures::mock_data::*;
 pub use crate::fixtures::mock_data::MockActionConfig;
 pub use crate::fixtures::mock_data::MockAction;
 use portcl::error::PortCLError;
@@ -488,7 +487,7 @@ impl MockActionExecutorTrait for MockActionExecutor {
             // Check if we should stop on failure
             if self.config.rollback_enabled && results.last().map_or(false, |r| r.is_err()) {
                 // Rollback successful actions
-                for (i, result) in results.iter().enumerate() {
+                for (_i, result) in results.iter().enumerate() {
                     if let Ok(ref action_result) = result {
                         if let Err(_) = self.rollback_action(&action_result.action_id).await {
                             // Log rollback failure but continue

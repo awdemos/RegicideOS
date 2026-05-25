@@ -1,5 +1,5 @@
 use crate::config::MonitoringConfig;
-use crate::error::{PortCLError, Result};
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;

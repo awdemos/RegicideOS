@@ -384,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn test_heuristic_actions() {
         let config = create_test_config();
-        let mut learner = ReinforcementLearner::new(&config).unwrap();
+        let learner = ReinforcementLearner::new(&config).unwrap();
         
         // Test emergency threshold
         let emergency_state = State::from_metrics(&create_test_metrics(99.0));

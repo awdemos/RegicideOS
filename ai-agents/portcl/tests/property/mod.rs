@@ -4,14 +4,13 @@
 //! properties hold true across a wide range of inputs.
 
 use proptest::prelude::*;
-use std::collections::HashMap;
 
 #[cfg(test)]
 mod property_tests {
     use super::*;
     use portcl::utils::{format_duration, format_bytes};
     use portcl::error::PortCLError;
-    use portcl::actions::Action;
+    
 
     proptest! {
         #[test]
@@ -59,7 +58,7 @@ mod property_tests {
 mod config_properties {
     use super::*;
     use crate::fixtures::mock_data::*;
-    use crate::fixtures::test_models::*;
+    
 
     proptest! {
         #[test]
@@ -252,7 +251,7 @@ mod performance_properties {
 mod data_model_properties {
     use super::*;
     use crate::fixtures::mock_data::*;
-    use crate::fixtures::test_models::*;
+    
 
     proptest! {
         #[test]

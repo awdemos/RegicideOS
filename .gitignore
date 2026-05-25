@@ -33,6 +33,7 @@ dist/
 output/
 *.iso
 *.img
+build-system/catalyst/tmp/
 
 # Cache
 .cache/
