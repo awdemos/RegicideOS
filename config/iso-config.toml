@@ -102,8 +102,7 @@ optional = [
 
 # AI agent packages
 ai_agents = [
-    "btrmind",
-    "portcl"
+    "btrmind"
 ]
 
 # Excluded packages (security or compatibility reasons)
@@ -149,7 +148,6 @@ required_services = [
 # Optional services
 optional_services = [
     "btrmind",
-    "portcl",
     "docker",
     "ssh"
 ]

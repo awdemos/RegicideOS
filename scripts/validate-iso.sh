@@ -90,9 +90,9 @@ count_result() {
     local result=$1
     
     case $result in
-        "PASSED") ((VALIDATION_PASSED++)) ;;
-        "FAILED") ((VALIDATION_FAILED++)) ;;
-        "WARNING") ((VALIDATION_WARNINGS++)) ;;
+        "PASSED") ((VALIDATION_PASSED++)) || true ;;
+        "FAILED") ((VALIDATION_FAILED++)) || true ;;
+        "WARNING") ((VALIDATION_WARNINGS++)) || true ;;
     esac
 }
 

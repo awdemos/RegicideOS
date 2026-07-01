@@ -4,7 +4,7 @@ version_stamp: cosmic-systemd
 rel_type: default
 profile: default/linux/amd64/23.0/desktop/systemd
 snapshot_treeish: [SNAPSHOT_HASH]
-source_subpath: default/stage3-amd64-systemd-mergedusr
+source_subpath: default/stage3-amd64-systemd
 compression_mode: pixz
 portage_confdir: /var/tmp/catalyst/config/stages
 portage_prefix: releng
@@ -114,10 +114,8 @@ stage4/packages:
 	sys-kernel/gentoo-kernel-bin
 	sys-kernel/linux-firmware
 	sys-power/power-profiles-daemon
-	regicide-tools/btrmind
-	regicide-tools/portcl
-	regicide-tools/regicide-installer
-	regicide-tools/regicide-ai-tools
+ 	regicide-tools/btrmind
+ 	regicide-tools/regicide-installer
 stage4/empty: /var/tmp /var/cache /tmp
 stage4/rm:
 	/boot/initramfs?*.img

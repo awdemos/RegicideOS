@@ -42,11 +42,14 @@ catalyst -a -f "${CATALYST_TMP}/config/stages/stage4-systemd-cosmic.spec"
 
 TARBALL=$(ls -t "${CATALYST_TMP}/builds/default/"stage4-amd64-systemd-cosmic-*.tar.xz 2>/dev/null | head -n1)
 if [[ -f "${TARBALL}" ]]; then
+    # Provide a stable filename for downstream tooling (e.g. Dagger pipelines).
+    ln -sf "$(basename "${TARBALL}")" "${CATALYST_TMP}/builds/default/stage4-amd64-systemd-cosmic.tar.xz"
+
     echo ""
     echo "Stage4 tarball complete: ${TARBALL}"
     echo ""
     echo "Creating SquashFS image..."
-    
+
     IMG_DIR="${REGICIDE_DIR}/build-system/catalyst/output"
     mkdir -p "${IMG_DIR}"
     
