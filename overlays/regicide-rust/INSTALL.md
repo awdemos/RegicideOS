@@ -81,10 +81,7 @@ emerge regicide-tools/regicide-installer
 
 ### Future AI Tools
 
-```bash
-# PortCL will be available when implemented
-# emerge regicide-tools/portcl
-```
+No package-management AI agent is implemented yet. When one is spec'd and built, it will be available in this overlay.
 
 ## Configuration
 

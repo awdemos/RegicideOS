@@ -80,12 +80,12 @@ log() {
 validate_dependencies() {
     log "INFO" "Validating build dependencies..."
     
-    local deps=()
+    local -A deps=()
     local missing_deps=()
     
     # Core dependencies
     deps["xorriso"]="ISO creation tool"
-    deps["squashfs-tools"]="Squashfs compression"
+    deps["unsquashfs"]="Squashfs extraction"
     deps["mksquashfs"]="Squashfs filesystem creator"
     deps["genisoimage"]="ISO image creation"
     deps["bsdtar"]="Archive extraction"
@@ -241,10 +241,12 @@ EOF
 prepare_bootloaders() {
     log "INFO" "Preparing bootloaders..."
     
-    # Check for existing bootloader files
-    local bootloader_sources=()
+    # Check for actual bootloader files (not just directories)
+    local bootloader_found=false
+    local efi_files=()
+    local grub_files=()
     
-    # Look for bootloader files in common locations
+    # Look for actual bootloader files in common locations
     local search_paths=(
         "$ROOT_DIR/bootloader"
         "$ROOT_DIR/grub"
@@ -255,15 +257,19 @@ prepare_bootloaders() {
     
     for path in "${search_paths[@]}"; do
         if [[ -d "$path" ]]; then
-            bootloader_sources+=("$path")
+            # Look for actual EFI or GRUB binaries
+            local found_files=$(find "$path" -maxdepth 3 -type f \( -iname "*.efi" -o -iname "grub*.img" -o -iname "*.lst" \) 2>/dev/null | head -n5)
+            if [[ -n "$found_files" ]]; then
+                bootloader_found=true
+                log "INFO" "Found bootloader files in $path"
+            fi
         fi
     done
     
-    if [[ ${#bootloader_sources[@]} -eq 0 ]]; then
-        log "WARN" "No bootloader sources found. Creating minimal UEFI bootloader."
+    if [[ "$bootloader_found" == "false" ]]; then
+        log "WARN" "No real bootloader files found. Creating minimal UEFI bootloader stubs."
         create_minimal_uefi_bootloader
     else
-        log "INFO" "Found bootloader sources: ${bootloader_sources[*]}"
         copy_bootloader_files
     fi
     
@@ -400,17 +406,34 @@ create_iso_image() {
     if ! $DRY_RUN; then
         # Create ISO using xorriso
         if command -v xorriso &> /dev/null; then
-            xorriso -as mkisofs \
-                -iso-level 3 \
-                -full-iso9660-filenames \
-                -volid "$ISO_LABEL" \
-                -eltorito-boot boot/grub/grub.cfg \
-                -eltorito-catalog boot/grub/boot.cat \
-                -no-emul-boot \
-                -boot-load-size 4 \
-                -boot-info-table \
-                -output "$ISO_OUTPUT" \
-                "$ISO_DIR"
+            # Check if we have a real EFI boot image
+            local efi_boot_file="$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
+            local has_real_bootloader=false
+            if [[ -s "$efi_boot_file" ]] && file "$efi_boot_file" | grep -qiE "PE32\+|EFI application\|MS-DOS executable"; then
+                has_real_bootloader=true
+            fi
+            
+            if [[ "$has_real_bootloader" == "true" ]]; then
+                log "INFO" "Creating UEFI-bootable ISO with El Torito..."
+                xorriso -as mkisofs \
+                    -iso-level 3 \
+                    -full-iso9660-filenames \
+                    -volid "$ISO_LABEL" \
+                    -eltorito-alt-boot \
+                    -e EFI/BOOT/BOOTX64.EFI \
+                    -no-emul-boot \
+                    -isohybrid-gpt-basdat \
+                    -output "$ISO_OUTPUT" \
+                    "$ISO_DIR"
+            else
+                log "WARN" "No real bootloader found. Creating data-only ISO (not bootable)."
+                xorriso -as mkisofs \
+                    -iso-level 3 \
+                    -full-iso9660-filenames \
+                    -volid "$ISO_LABEL" \
+                    -output "$ISO_OUTPUT" \
+                    "$ISO_DIR"
+            fi
         else
             log "ERROR" "xorriso not available for ISO creation"
             return 1

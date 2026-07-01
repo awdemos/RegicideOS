@@ -6,7 +6,7 @@
 
 ### ✅ Completed
 - [x] Rust-based installer with EFI reliability improvements (basic, needs refactor)
-- [x] Technical specifications (PortCL, BtrMind, Rust overlay)
+- [x] Technical specifications (BtrMind, Rust overlay)
 - [x] Comprehensive handbook documentation (partially aspirational)
 - [x] BTRFS read-only system architecture design (conceptual)
 
@@ -84,17 +84,16 @@
    - Remove other desktop environment options (not started)
    - Add post-install Cosmic setup (not started)
 
-### Sprint 4: PortCL AI Agent (3-4 weeks) 🟡 NOT COMPLETED
-**Priority**: HIGH - Package optimization
+### Sprint 4: Future Package AI Agent (3-4 weeks) 📋 NOT STARTED
+**Priority**: LOW - Package optimization is not required for MVP
 **Goal**: Working package management optimization
 
 **Tasks**:
-1. **PortCL implementation** ⚠️ PARTIAL:
-   - CLI framework exists
-   - RL engine stubbed (not implemented)
-   - Portage monitoring integration (not implemented)
-   - Build parallelism optimization (not implemented)
-   - Test suite exists but is mostly stubs (not 90%+ coverage)
+1. **Package AI implementation** 📋 NOT STARTED:
+   - Wait until base system and Portage workflow are stable
+   - Spec from scratch (do not reuse the old PortCL placeholder)
+   - RL engine, Portage monitoring, build parallelism optimization
+   - Real test suite (90%+ coverage)
    - See [STATUS.md](STATUS.md) for honest assessment
 
 ## Phase 2: System Integration
@@ -138,7 +137,7 @@
 ### 1. Set up development environment:
 ```bash
 cd RegicideOS
-mkdir -p ai-agents/{btrmind,portcl}
+mkdir -p ai-agents/btrmind
 mkdir -p overlays/regicide-rust
 mkdir -p cosmic-integration
 ```
@@ -175,7 +174,6 @@ sudo mount /dev/loop0 /mnt/test-btrfs
 ### Phase 1 Success (Foundation):
 - [ ] RegicideOS boots to a desktop environment (no ISO exists yet)
 - [ ] BtrMind runs automatically as systemd service (pending installed system)
-- [ ] PortCL runs automatically (pending real implementation)
 - [ ] Package management works via overlays (partial — dotfiles only)
 - [x] Documentation exists (extensive but partially aspirational)
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rebuild all RegicideOS Rust modules
-# This script rebuilds: installer, btrmind, and portcl
+# This script rebuilds: installer and btrmind
 
 set -euo pipefail
 
@@ -77,10 +77,6 @@ main() {
     
     # Build btrmind
     build_module "btrmind" "${PROJECT_ROOT}/ai-agents/btrmind"
-    echo ""
-    
-    # Build portcl
-    build_module "portcl" "${PROJECT_ROOT}/ai-agents/portcl"
     echo ""
     
     # Summary

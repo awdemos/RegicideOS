@@ -1,0 +1,58 @@
+# COSMIC Overlay QA Ignore File
+# Lines starting with # are comments
+# Syntax:
+#   <atom>[:<version>] <check>
+#   <atom> can be category/package or just category
+#   <version> is optional, pins ignore to specific version
+#   <check> is the pkgcheck check name (e.g. PotentialStable, VCSVersionVisible, *)
+# Examples:
+# Ignore PotentialStable for a whole category:
+###### cosmic-base PotentialStable
+
+# Ignore VCSVersionVisible for a specific package:
+###### cosmic-base/pop-appstream-data VCSVersionVisible
+
+# Ignore all checks for a specific version:
+###### cosmic-base/pop-appstream-data:9999 *
+
+# Ignore PotentialStable for multiple categories:
+###### acct-group PotentialStable
+###### acct-user PotentialStable
+
+# Ignore StyleCheck for a package:
+###### cosmic-base/cosmic-wallpapers StyleCheck
+
+#####################
+###### Actual ignores
+# Ignore qa-reports folder
+qa-reports *
+
+# PotentialStable
+acct-group/cosmic-greeter PotentialStable
+acct-group/cosmic-initial-setup PotentialStable
+acct-user/cosmic-greeter PotentialStable
+acct-user/cosmic-initial-setup PotentialStable
+virtual/notification-daemon PotentialStable
+
+# VisibleVcsPkg
+cosmic-base/pop-appstream-data VisibleVcsPkg
+cosmic-base/pop-fonts VisibleVcsPkg
+cosmic-base/pop-gtk-theme VisibleVcsPkg
+cosmic-base/pop-icon-theme VisibleVcsPkg
+# these are mostly 9999 ebuilds
+cosmic-utils/* VisibleVcsPkg
+
+# ExcessiveLineLength
+# We have 1 sed line that replaces one file path with another
+cosmic-base/cosmic-osd ExcessiveLineLength
+
+# IndirectInherits
+cosmic-base/* IndirectInherits
+cosmic-utils/* IndirectInherits
+
+# UnknownRestrict
+# RESTRICT=network-sandbox exists, somehow pkgcheck complains
+cosmic-extra/cutecosmic UnknownRestrict
+dev-lang/dart UnknownRestrict
+dev-util/buf UnknownRestrict
+dev-util/dart-sass UnknownRestrict

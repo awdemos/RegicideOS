@@ -86,7 +86,7 @@ pub fn get_flatpak_packages(applications_set: &str) -> String {
                 "org.libreoffice.LibreOffice",
             ],
         ),
-        ("minimal", vec!["dev.zed.Zed"]),
+        ("minimal", vec![]),
     ]
     .into_iter()
     .collect();

@@ -2,7 +2,23 @@
 # RegicideOS COSMIC Desktop post-build script
 # Based on Xenia Linux stage4-systemd.sh, adapted for RegicideOS
 
+# Ensure dracut can unlock LUKS-encrypted root when the image is built with
+# the --encrypt option. The crypt module and /etc/crypttab are included so
+# systemd in the initramfs can prompt for the passphrase at boot.
+mkdir -p /etc/dracut.conf.d
+cat > /etc/dracut.conf.d/99-regicide-luks.conf << 'EOF'
+add_dracutmodules+=" crypt "
+install_items+=" /etc/crypttab "
+EOF
+
 dracut --force --no-hostonly --kver $(ls /lib/modules/)
+
+# Dracut's switch-root executes /sbin/init.  In a merged-/usr layout
+# (/sbin -> usr/bin and /usr/sbin -> bin -> usr/bin) the real binary must
+# live in /usr/bin.  Create the canonical systemd symlink if it is missing.
+if [[ -x /usr/lib/systemd/systemd && ! -e /usr/bin/init ]]; then
+    ln -sf /usr/lib/systemd/systemd /usr/bin/init
+fi
 
 # Set default root password (user should change this)
 echo "root:regicide" | chpasswd
