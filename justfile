@@ -41,10 +41,6 @@ build-installer:
 build-btrmind:
     cargo build --release -p btrmind
 
-# Build portcl AI agent
-build-portcl:
-    cargo build --release -p portcl
-
 # Build everything including ISO (requires Gentoo/Catalyst)
 build-iso:
     cd build-system/catalyst && sudo ./build.sh

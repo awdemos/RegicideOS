@@ -64,129 +64,132 @@ Currently supported:
 
 ### 3.1 Pre-Installation
 
-#### 3.1.1 Live Environment Setup
+RegicideOS is developed and tested primarily inside virtual machines. You do not need a Linux live environment unless you are installing to bare metal.
 
-RegicideOS requires installation from a Linux live environment. We recommend Fedora Live:
+For developer builds:
+- A Linux host with Docker/Podman and the Dagger CLI
+- `/dev/kvm` access for VM image creation
+- At least 100 GB free disk space
 
-1. **Download Fedora Live Workstation**: https://getfedora.org/workstation/download/
-2. **Create bootable USB**: Use tools like `dd`, Rufus, or balenaEtcher
-3. **Boot target machine**: From the live USB environment
+For bare-metal installs:
+- Boot any Linux live environment (e.g., Fedora Live)
+- Clone the repo, build the Rust installer, and point it at a local SquashFS image
 
-#### 3.1.2 Prepare Live Environment
-
-Once booted into the live environment:
-
-```bash
-# Clone RegicideOS repository
-git clone https://github.com/awdemos/RegicideOS.git
-cd RegicideOS
-
-# Install all build dependencies (git, gcc, rust, btrfs-progs, cryptsetup, etc.)
-# This auto-detects your distro and uses the correct package manager
-./scripts/install-dependencies.sh
-
-# Build installer (now without warnings)
-cd installer
-cargo build --release
-
-# Verify build completed successfully
-./target/release/installer --version
-```
-
-> **⚠️ IMPORTANT**: Prevent system suspend during installation to avoid state corruption, especially when using LUKS encryption. The installer now handles this automatically, but manual prevention is recommended for reliability.
+> **⚠️ IMPORTANT**: Prevent system suspend during installation to avoid state corruption, especially when using LUKS encryption.
 
 ### 3.2 Installation Methods
 
-#### 3.2.1 Using Pre-built Installer (Recommended)
+#### 3.2.1 Build from Source with Dagger
 
-The easiest installation method is to download the pre-built installer binary from GitHub releases:
-
-```bash
-# Download the pre-built installer
-curl -L -o regicide-installer \
-  https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
-
-# Make executable and run with local image
-chmod +x regicide-installer
-sudo ./regicide-installer --image /path/to/regicide-cosmic.img
-
-# Or run with configuration file
-sudo ./regicide-installer -c regicide-config.toml
-```
-
-> **Note**: The installer requires a local OS image (`--image`) or a remote repository.
-> RegicideOS does not currently host a remote repository. Build the image from source
-> (see "Building from Source" below) or download a release image.
-
-The installer will guide you through:
-1. **Drive Selection**: Choose target installation drive
-2. **Filesystem Layout**: BTRFS with LUKS encryption (recommended)
-3. **User Setup**: Create administrative user account
-4. **Application Sets**: Choose minimal or recommended packages
-
-#### 3.2.2 Building from Source
-
-RegicideOS can be built entirely from Gentoo source using the Catalyst build system. This produces a SquashFS image that can be installed with the `--image` flag.
+The intended developer build for RegicideOS uses the **Dagger pipeline**. It runs the Gentoo stage4 build inside a container, so you do not need a Gentoo host or Catalyst installed locally.
 
 **Prerequisites:**
-- A Gentoo host or container with Portage
-- `catalyst` and `squashfs-tools` installed
-- At least 50GB free disk space
-- The RegicideOS repository cloned locally
+- A Linux host with Docker or Podman
+- The Dagger CLI (`dagger`)
+- `git`
+- At least 100 GB free disk space (COSMIC compiles many Rust packages from source)
+- `/dev/kvm` access if you plan to build a QCOW2 VM image
 
-**Set up Portage overlays (required before building):**
-
-The Catalyst build requires two overlays to be available on your Gentoo host:
+**Clone the repository:**
 
 ```bash
-# Clone the RegicideOS repository first
 git clone https://github.com/awdemos/RegicideOS.git
 cd RegicideOS
-
-# Clone the COSMIC overlay
-sudo mkdir -p /var/db/repos/cosmic-overlay
-sudo git clone https://github.com/fsvm88/cosmic-overlay.git /var/db/repos/cosmic-overlay
-
-# Symlink the regicide-rust overlay (lives inside this repo)
-sudo mkdir -p /var/db/repos/regicide-rust
-sudo ln -sf "$(pwd)/overlays/regicide-rust" /var/db/repos/regicide-rust
-
-# Register overlays with Portage
-sudo mkdir -p /etc/portage/repos.conf
-sudo cp build-system/catalyst/overlay/etc/portage/repos.conf/regicide.conf /etc/portage/repos.conf/
-
-# Sync the COSMIC overlay
-sudo emaint sync -r cosmic-overlay
 ```
 
-**Build the OS image:**
+**Build the stage4 + live SquashFS:**
 
 ```bash
-# Navigate to the build system
+dagger run python build-system/dagger_pipeline.py
+```
+
+This runs six cacheable stages in `build-system/catalyst/stages/`:
+
+1. `stage1-setup.sh` — download and extract the Gentoo stage3 seed
+2. `stage2-sync.sh` — sync Portage and update `@world`
+3. `stage3-base.sh` — install the base system packages
+4. `stage4-cosmic.sh` — install COSMIC desktop packages
+5. `stage5-regicide.sh` — install RegicideOS tools
+6. `stage6-finalize.sh` — enable services, run dracut, create the stage4 tarball
+
+The first run can take several hours because the COSMIC stage compiles Rust packages from source. Subsequent runs reuse the `distfiles` and `binpkgs` Dagger cache volumes and are much faster.
+
+Outputs:
+- `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz`
+- `build-system/catalyst/output/regicide-cosmic.img` (live SquashFS)
+
+**Build a bootable QCOW2 VM image:**
+
+`build-vm-image.sh` takes the stage4 tarball and SquashFS and creates a fully bootable QCOW2 disk image by running the installer inside a KVM VM. No host root access or loop devices are required.
+
+```bash
 cd build-system/catalyst
 
-# Run the Catalyst build (this will take several hours)
-./build.sh
+# Basic unencrypted image
+./build-vm-image.sh \
+    --squashfs output/regicide-cosmic.img \
+    output/stage4-amd64-systemd-cosmic.tar.xz \
+    output/regicide-cosmic.qcow2 20G
 
-# The output will be at:
-#   build-system/catalyst/output/regicide-cosmic.img
+# Encrypted image with LUKS2
+printf 'regicide-secure-test' > /tmp/regicide-passphrase.txt
+./build-vm-image.sh \
+    --encrypt --passphrase-file /tmp/regicide-passphrase.txt \
+    --squashfs output/regicide-cosmic.img \
+    output/stage4-amd64-systemd-cosmic.tar.xz \
+    output/regicide-cosmic-enc.qcow2 20G
 ```
 
-The build process:
-1. Downloads a Gentoo stage3 tarball
-2. Applies the RegicideOS Catalyst spec (stage4-systemd-cosmic.spec)
-3. Installs COSMIC desktop from the cosmic-base overlay
-4. Enables systemd services (cosmic-greeter, NetworkManager, PipeWire)
-5. Produces a SquashFS image ready for installation
-
-**Install from the locally-built image:**
+The VM builder exposes a SPICE display on port `5920` so you can watch the build:
 
 ```bash
-# Build the installer
-cd ../../installer
+remote-viewer spice://localhost:5920
+```
+
+**Boot the QCOW2 image in QEMU**
+
+Serial console:
+
+```bash
+pkill -9 -f 'qemu-system-x86_64' 2>/dev/null || true
+cp /usr/share/OVMF/OVMF_VARS.fd /tmp/ovmf-vars.fd
+qemu-system-x86_64 \
+    -enable-kvm -m 8G -smp 4 -cpu host -machine type=q35,accel=kvm \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+    -drive if=pflash,format=raw,file=/tmp/ovmf-vars.fd \
+    -nographic \
+    -hda output/regicide-cosmic.qcow2
+```
+
+For encrypted images, enter the LUKS passphrase `regicide-secure-test` when prompted.
+
+Graphical SPICE window:
+
+```bash
+cp /usr/share/OVMF/OVMF_VARS.fd /tmp/ovmf-gui.fd
+qemu-system-x86_64 \
+    -enable-kvm -m 8G -smp 4 -cpu host -machine type=q35,accel=kvm \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+    -drive if=pflash,format=raw,file=/tmp/ovmf-gui.fd \
+    -vga qxl -spice port=5920,disable-ticketing=on \
+    -serial file:/tmp/regicide-gui-serial.log \
+    -hda output/regicide-cosmic.qcow2
+```
+
+Then attach a SPICE viewer:
+
+```bash
+remote-viewer spice://localhost:5920
+```
+
+**Install to bare metal from the local SquashFS:**
+
+Boot the target machine from any Linux live environment, clone the repo, build the installer, and run it against the SquashFS:
+
+```bash
+cd installer
 cargo build --release
 
-# Install using the local image
 sudo ./target/release/installer \
     --image ../build-system/catalyst/output/regicide-cosmic.img \
     /dev/sdX
@@ -197,7 +200,7 @@ Or use a configuration file:
 ```toml
 # regicide-local.toml
 drive = "/dev/sda"
-image_path = "/path/to/regicide-cosmic.img"
+image_path = "build-system/catalyst/output/regicide-cosmic.img"
 filesystem = "btrfs"
 username = "regicide"
 applications = ""
@@ -207,29 +210,14 @@ applications = ""
 sudo ./target/release/installer -c regicide-local.toml
 ```
 
-**Build the installer from source (if you need to customize it):**
+**Other deployment formats:**
 
-```bash
-# Build the installer from source
-cargo build --release
+- The live SquashFS (`regicide-cosmic.img`) can be written directly to a USB drive or deployed to a ROOTS partition.
+- Bootable ISO / hybrid image generation is not yet automated; track progress in `STATUS.md`.
 
-# Verify build completed successfully
-./target/release/installer --version
+#### 3.2.3 Bare-Metal Automated Installation
 
-# Run with local image and configuration file
-sudo ./target/release/installer --image /path/to/regicide-cosmic.img -c regicide-config.toml
-
-# For development/testing with dry run
-cargo run --bin installer -- --dry-run
-```
-
-> **Note**: Interactive installation without a local image requires a remote repository server
-> with a `Manifest.toml`. RegicideOS does not currently host such a repository. Use the
-> `--image` flag with a locally-built image instead.
-
-#### 3.2.3 Automated Installation
-
-For scripted deployments, create a configuration file:
+For scripted deployments, create a configuration file and run the source-built installer:
 
 ```bash
 # Create configuration
@@ -241,13 +229,7 @@ username = "admin"
 applications = "recommended"
 EOF
 
-# Run with pre-built installer (recommended)
-curl -L -o regicide-installer \
-  https://github.com/awdemos/RegicideOS/releases/latest/download/regicide-installer
-chmod +x regicide-installer
-sudo ./regicide-installer -c regicide-config.toml
-
-# Or run with source-built installer
+# Run the source-built installer
 sudo ./target/release/installer -c regicide-config.toml
 ```
 
@@ -446,44 +428,152 @@ flatpak install <app>              # Flatpak applications
 
 ---
 
-## 7. Development Environment
+## 7. Post-Installation Updates
 
-### 7.1 Development Environment Setup
+> **Current status**: RegicideOS does **not** have an automated update manager. There is no `foxmerge`, `foxbox`, or equivalent CLI yet. Post-install updates are manual.
 
-RegicideOS is optimized for modern development with comprehensive tooling. After installing official dotfiles (see Section 7.3), you have a complete development environment:
+### 7.1 Update Model
 
-#### 7.1.1 IDE Setup
+RegicideOS is an **image-based, immutable-root** distribution with a writable overlay layer:
+
+- **ROOTS** partition: read-only base system image (`root.img` SquashFS)
+- **OVERLAY** partition: writable `/etc`, `/var`, `/usr` overlays
+- **HOME** partition: user data
+
+This means there are two ways to update the system:
+
+1. **Replace the base image** (atomic, clean, recommended)
+2. **Use Portage on the overlay** (incremental, can drift from the base image)
+
+### 7.2 Replacing the Base Image (Recommended)
+
+When a new `regicide-cosmic.img` is available, replace the ROOTS image and reboot:
+
+```bash
+# Boot from a live environment or another root
+sudo mkdir -p /mnt/roots
+sudo mount /dev/disk/by-label/ROOTS /mnt/roots
+
+# Back up the current image
+sudo mv /mnt/roots/root.img /mnt/roots/root.img.previous
+
+# Copy the new image
+sudo cp /path/to/new/regicide-cosmic.img /mnt/roots/root.img
+sync
+sudo umount /mnt/roots
+```
+
+Then reboot. The overlay layer persists, so your `/etc`, `/var`, and `/usr` customizations remain — but compatibility with the new base image is your responsibility.
+
+### 7.3 Using Portage on the Overlay (Advanced)
+
+Because `/usr` is an overlay, you can run `emerge` directly on a running system, but this is **not the intended workflow** and can leave the system in an inconsistent state:
+
+```bash
+# Sync Portage (if network is configured)
+sudo emerge --sync
+
+# Update a single package
+sudo emerge -av1 <package>
+```
+
+If you go this route, treat the system as a normal Gentoo install and accept that atomic rollback via image replacement may no longer apply cleanly.
+
+### 7.4 User Toolchains
+
+User-facing development tools are **not** installed in the base image by default. Install them per-user inside containers:
+
+```bash
+# Distrobox is the recommended container tool
+distrobox create --name dev --image fedora:44
+distrobox enter dev
+
+# Inside the container
+sudo dnf install zed rustup nodejs
+```
+
+This keeps the base image small and lets each user pick their own toolchain.
+
+### 7.5 Future: RegicideOS Update CLI
+
+A first-party update tool is the next priority after the MVP build boots. The planned `regicide-update` CLI will:
+
+- Accept a local SquashFS image produced by the Dagger pipeline
+- Back up the current ROOTS image before replacing it
+- Install the new image atomically
+- Offer rollback to the previous image on failure
+
+See `.omo/plans/root-update-system.md` for the full plan. For now, updates are manual using the steps in Section 7.2.
+
+### 7.6 Customizing Your Base Image
+
+Power users are expected to modify the Dagger pipeline and stage scripts to build their own base image:
+
+```bash
+# Edit stage scripts, e.g. add packages to stage4-cosmic.sh
+$EDITOR build-system/catalyst/stages/stage4-cosmic.sh
+
+# Rebuild with Dagger
+dagger run python build-system/dagger_pipeline.py
+```
+
+The output `build-system/catalyst/output/regicide-cosmic.img` is the image you install or apply with the planned `regicide-update apply` command.
+
+---
+
+## 8. Development Environment
+
+### 8.1 Development Environment Setup
+
+User-facing development tools are installed inside **Distrobox** containers, not in the immutable base image. This keeps the base system minimal and lets each user choose their own toolchain.
+
+#### 8.1.1 Container-First Toolchain
+
+```bash
+# Create a personal development container
+distrobox create --name dev --image fedora:44
+distrobox enter dev
+
+# Inside the container, install whatever you need
+sudo dnf install zed rustup nodejs python3-pip
+```
+
+Applications launched from inside Distrobox integrate with the host desktop (icons, notifications, GPU access), so this feels native.
+
+#### 8.1.2 Why Distrobox and not Toolbox?
+
+- **Distrobox** works on Podman or Docker, supports more distributions, and has smoother GUI/Steam/GPU integration.
+- **Toolbox** is simpler but more Fedora-centric.
+
+RegicideOS uses **Distrobox** as the default. Toolbox may be supported later if users ask for it.
+
+#### 8.1.3 IDE Setup (in a container)
 
 **Zed Editor:**
 ```bash
-# Install Zed via Flatpak
+# Install Zed inside your Distrobox container
 flatpak install flathub dev.zed.Zed
 
-# Recommended extensions
-zed --install-extension rust-analyzer
-zed --install-extension lldb
-zed --install-extension crates
+# Or via your distribution's package manager
+cargo install zed
 ```
 
-#### 7.1.2 Development Tools
+#### 8.1.4 Development Tools
 
 ```bash
 # Essential Rust tools
 cargo install cargo-watch cargo-edit cargo-audit cargo-tarpaulin
 
 # Code formatting and linting
-cargo install rustfmt clippy
-
-# Documentation generation
-cargo install cargo-doc
+rustup component add rustfmt clippy
 
 # Cross-compilation support
 rustup target add x86_64-unknown-linux-musl
 ```
 
-### 7.2 AI/ML Development
+### 8.2 AI/ML Development
 
-#### 7.2.1 Machine Learning Frameworks
+#### 8.2.1 Machine Learning Frameworks
 
 Some recommended Rust-native ML frameworks:
 
@@ -498,24 +588,24 @@ cargo add candle-core candle-nn
 cargo add tokenizers hf-hub
 ```
 
-#### 7.2.2 Development Containers
+#### 8.2.2 Development Containers
 
 AI development environments in containers:
 
 ```bash
 # Create ML development environment
-distrobox create --name ml-dev --image fedora:39
+distrobox create --name ml-dev --image fedora:44
 distrobox enter ml-dev
 
 # Install additional tools
 pip install jupyter transformers datasets
 ```
 
-### 7.3 User Configuration and Dotfiles
+### 8.3 User Configuration and Dotfiles
 
 RegicideOS provides official dotfiles for a consistent, modern development experience:
 
-#### 7.3.1 Installing RegicideOS Dotfiles
+#### 8.3.1 Installing RegicideOS Dotfiles
 
 The official dotfiles package provides a Rust-focused shell configuration with RegicideOS theming:
 
@@ -543,7 +633,7 @@ sudo install-regicide-dotfiles --user username
 - BTRFS optimization tools
 - Portage helper functions
 
-#### 7.3.2 Dotfiles Customization
+#### 8.3.2 Dotfiles Customization
 
 After installation, you can customize your environment:
 
@@ -561,7 +651,7 @@ nano ~/.config/starship.toml
 nano ~/.gitconfig
 ```
 
-#### 7.3.3 Backup and Restore
+#### 8.3.3 Backup and Restore
 
 ```bash
 # Uninstall dotfiles (creates backup)
@@ -571,9 +661,9 @@ uninstall-regicide-dotfiles
 uninstall-regicide-dotfiles --restore-backup
 ```
 
-### 7.4 System Development
+### 8.4 System Development
 
-#### 7.4.1 Rust Toolchain Management
+#### 8.4.1 Rust Toolchain Management
 
 RegicideOS provides comprehensive Rust development support:
 
@@ -600,7 +690,7 @@ cargo generate --git https://github.com/rust-embedded/cortex-m-quickstart
 cargo embed --target thumbv6m-none-eabi
 ```
 
-### 7.5 Contributing to RegicideOS
+### 8.5 Contributing to RegicideOS
 
 Development environment for RegicideOS itself:
 
@@ -619,13 +709,13 @@ cargo run --bin installer -- --dry-run
 
 ---
 
-## 8. System Administration
+## 9. System Administration
 
-### 8.1 System Updates
+### 9.1 System Updates
 
 RegicideOS uses an atomic update system via `root.img` tarball images:
 
-#### 8.1.1 Base System Updates
+#### 9.1.1 Base System Updates
 
 > **Note**: RegicideOS does not currently host a remote update repository. Updates are performed by rebuilding the OS image locally with Catalyst and reinstalling, or by downloading updated release images from GitHub.
 >
@@ -637,7 +727,7 @@ RegicideOS uses an atomic update system via `root.img` tarball images:
 > sudo reboot
 > ```
 
-#### 8.1.2 Overlay Updates
+#### 9.1.2 Overlay Updates
 
 Package overlays are updated using system package management tools:
 
@@ -657,7 +747,7 @@ sudo dnf clean
 sudo emerge --depclean
 ```
 
-#### 8.1.3 Update Workflow
+#### 9.1.3 Update Workflow
 
 The installer automates base system updates:
 1. Download newest `root.img` from RegicideOS repositories
@@ -668,7 +758,7 @@ The installer automates base system updates:
 
 GRUB's `10_linux` helper automatically picks the newest `root-*.img` by modification time.
 
-### 8.2 System Configuration
+### 9.2 System Configuration
 
 System configuration persists in overlay filesystems:
 
@@ -684,7 +774,7 @@ sudo dnf list installed
 sudo qlist -I  # if using Portage
 ```
 
-### 8.3 System Snapshots
+### 9.3 System Snapshots
 
 The current 4-Partition architecture does not support granular snapshots. For rollback:
 
@@ -703,11 +793,11 @@ grub-mkconfig -o /boot/grub/grub.cfg
 
 > **Note**: BTRFS-native architecture with subvolume snapshot support is planned for future versions (see [INSTALLATION_ARCHITECTURE.md](INSTALLATION_ARCHITECTURE.md)).
 
-### 8.4 OS Personality Swapping
+### 9.4 OS Personality Swapping
 
 The phrase "OS personality" refers to ability to replace the read-only base system image (`root.img`) while keeping your local changes and home directory intact. This is one of the most powerful features of RegicideOS's architecture.
 
-#### 8.4.1 Understanding OS Personalities
+#### 9.4.1 Understanding OS Personalities
 
 An "OS personality" is essentially the complete system environment contained in a compressed tarball (`root.img`). This includes:
 
@@ -721,11 +811,11 @@ Your personal data remains in separate locations:
 - **Home directory**: User files in `/home`
 - **Persistent configuration**: Custom settings and installed packages
 
-#### 8.4.2 The Personality Swap Mechanism
+#### 9.4.2 The Personality Swap Mechanism
 
 Because RegicideOS's boot loader (GRUB) always picks the **newest** `root-*.img` by modification time, swapping personalities is as simple as copying a new image file to ROOTS partition.
 
-#### 8.4.3 Step-by-Step Personality Swap
+#### 9.4.3 Step-by-Step Personality Swap
 
 **While running RegicideOS or from a live USB:**
 
@@ -751,7 +841,7 @@ On the next boot:
 - The system overlays your writable BTRFS layers
 - You are instantly running the new personality
 
-#### 8.4.4 Rolling Back Personalities
+#### 9.4.4 Rolling Back Personalities
 
 Keep old file for easy rollback:
 
@@ -767,7 +857,7 @@ sudo touch /mnt/root-gnome.img.bak   # make it newest again
 reboot
 ```
 
-#### 8.4.5 Managing Multiple Personalities
+#### 9.4.5 Managing Multiple Personalities
 
 You can keep multiple personalities available:
 
@@ -780,7 +870,7 @@ sudo touch /mnt/root-desired-personality.img
 reboot
 ```
 
-#### 8.4.6 Deleting Obsolete Images
+#### 9.4.6 Deleting Obsolete Images
 
 Clean up old personalities to save space:
 
@@ -792,7 +882,7 @@ sudo rm /mnt/root-old.img
 sudo btrfs filesystem sync /mnt
 ```
 
-### 8.5 Managing Multiple Personalities
+### 9.5 Managing Multiple Personalities
 
 You can create your own personalities:
 
@@ -807,11 +897,11 @@ sudo touch /mnt/root-custom.img
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
-### 9.1 Installation Issues
+### 10.1 Installation Issues
 
-#### 9.1.1 Common Installation Problems
+#### 10.1.1 Common Installation Problems
 
 **LUKS Device Not Found:**
 ```bash
@@ -840,7 +930,7 @@ ls -la /boot/efi/EFI/
 cat /boot/efi/grub/grub.cfg
 ```
 
-#### 9.1.2 LUKS-Specific Issues
+#### 10.1.2 LUKS-Specific Issues
 
 > **Note**: As of v2.0 (January 2026), the installer includes comprehensive LUKS boot improvements including dynamic partition detection and proper UUID handling. The issues below describe legacy problems that should no longer occur.
 
@@ -886,9 +976,9 @@ sudo blkid -o device -t TYPE=crypto_LUKS
 sudo lsblk -f | grep crypto
 ```
 
-### 9.2 Boot Issues
+### 10.2 Boot Issues
 
-#### 9.2.1 GRUB Recovery
+#### 10.2.1 GRUB Recovery
 
 If system fails to boot:
 
@@ -910,9 +1000,9 @@ If system fails to boot:
    - GNOME (via different image)
    - Wayland-only mode
 
-#### 9.2.2 Snapshot Recovery
+#### 10.2.2 Snapshot Recovery
 
-Since current architecture doesn't support granular snapshots, rollback requires personality swapping (see Section 8.4).
+Since current architecture doesn't support granular snapshots, rollback requires personality swapping (see Section 9.4).
 
 ```bash
 # List available personalities (system images)
@@ -928,9 +1018,9 @@ sudo cp /mnt/root-working.img /mnt/
 sudo reboot
 ```
 
-### 9.3 Service Management
+### 10.3 Service Management
 
-#### 9.3.1 System Services
+#### 10.3.1 System Services
 
 ```bash
 # Manage core services
@@ -941,19 +1031,19 @@ sudo systemctl restart bluetooth
 sudo journalctl -u systemd-networkd
 ```
 
-#### 9.3.2 AI Agent Management
+#### 10.3.2 AI Agent Management
 
 ```bash
-# Control AI agents
-sudo systemctl enable portcl
-sudo systemctl start portcl
+# Control BtrMind storage agent
+sudo systemctl enable btrmind
+sudo systemctl start btrmind
 
 # Monitor agent performance
-portcl dashboard
-btrmind monitor
+sudo journalctl -u btrmind -f
+btrmind stats
 ```
 
-### 9.4 System Health
+### 10.4 System Health
 
 ```bash
 # Check filesystem status
@@ -966,7 +1056,7 @@ sudo btrfs balance start /
 sudo btrfs scrub start /
 ```
 
-### 9.5 Debug Information
+### 10.5 Debug Information
 
 **Enable Verbose Boot:**
 ```bash
@@ -986,7 +1076,7 @@ RUST_LOG=debug RUST_BACKTRACE=1 sudo ./installer
 
 ---
 
-## 10. FAQ
+## 11. FAQ
 
 ### Q1: Does RegicideOS use BTRFS subvolumes?
 
@@ -1023,9 +1113,20 @@ sudo ./installer
 
 ### Q6: What happened to Foxmerge?
 
-**A:** Foxmerge was described in early planning but was not implemented in favor of a simpler direct download model. The installer downloads compressed `root.img` tarballs from RegicideOS repositories, and post-installation package management is handled by standard system tools (dnf, emerge).
+**A:** Foxmerge was described in early planning but was not implemented. RegicideOS does not currently have a first-party update CLI. Post-installation base-system updates are done by replacing the `root.img` on the ROOTS partition, and per-user packages are installed in Distrobox containers. Standard Portage commands can be used on the overlay layer, but that is not the recommended workflow.
 
-### Q7: How do I verify LUKS is working correctly?
+### Q7: How do post-install updates work?
+
+**A:** There is no automated update manager yet. The recommended manual workflow is:
+
+1. Build or download a new `regicide-cosmic.img`.
+2. Mount the ROOTS partition from a live environment.
+3. Replace `/mnt/roots/root.img` with the new image.
+4. Reboot.
+
+See Section 7 for the full update procedure.
+
+### Q8: How do I verify LUKS is working correctly?
 
 **A:**
 ```bash
@@ -1048,7 +1149,7 @@ lsinitramfs /boot/initrd.img-* | grep cryptsetup
 
 ---
 
-## 11. References
+## 12. References
 
 ### Related Documentation
 - [INSTALLATION_ARCHITECTURE.md](INSTALLATION_ARCHITECTURE.md) - Complete technical architecture details, LUKS boot implementation

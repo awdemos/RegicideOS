@@ -278,14 +278,14 @@ ls -la /mnt/root-cosmic-*.img
 
 ### 1. AI System Management
 
-The PortCL AI agent works seamlessly with COSMIC:
+BtrMind is the only AI agent currently implemented. It monitors BTRFS health and can run cleanup actions:
 
 ```bash
-# Enable AI optimization for COSMIC
-systemctl enable --now portcl-agent
+# Enable BtrMind storage maintenance
+systemctl enable --now btrmind
 
-# Monitor COSMIC performance
-portcl-monitor --dashboard
+# View storage analysis
+btrmind analyze
 ```
 
 ### 2. Snapshot Management
@@ -307,7 +307,7 @@ RegicideOS with COSMIC Desktop provides:
 - **Pure Gentoo base** with full Portage compatibility
 - **Immutable system** with BTRFS overlays for safety
 - **Modern Rust-based desktop** with Wayland support
-- **AI-powered optimization** through PortCL
+- **BTRFS storage maintenance** through BtrMind
 - **Easy updates and rollbacks** via overlay template images
 - **High performance** with Zstd compression and BTRFS optimization
 

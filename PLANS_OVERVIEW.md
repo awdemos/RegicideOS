@@ -8,13 +8,12 @@
 
 ## 🎯 Executive Summary
 
-RegicideOS is approximately **25-30% complete**. The project has a working BtrMind AI agent, a basic installer, and extensive documentation. PortCL is a placeholder/stub, no COSMIC integration exists, and no bootable ISO has been built. The immediate priority is building a bootable base system image, followed by completing PortCL and installer refactoring.
+RegicideOS is approximately **25-30% complete**. The project has a working BtrMind AI agent, a basic installer, and extensive documentation. No COSMIC integration exists, no bootable ISO has been built, and a package-management AI agent has not been implemented. The immediate priority is building a bootable base system image, followed by installer refactoring.
 
 ## ✅ Completed Components
 
 ### **Core Infrastructure**
 - **BtrMind AI Agent**: ✅ Working prototype (17/17 tests passing, real RL implementation)
-- **PortCL AI Agent**: ⚠️ Placeholder / stub (CLI exists, RL engine not implemented)
 - **UEFI Installer**: ✅ Working prototype (basic installs work, needs refactoring)
 - **Regicide-Rust Overlay**: ✅ Basic structure exists
 - **Documentation**: ✅ Extensive but partially aspirational
@@ -38,8 +37,7 @@ RegicideOS is approximately **25-30% complete**. The project has a working BtrMi
 - [ ] Cross-compilation support and validation (not verified)
 
 ### **Phase 2: AI Ecosystem Completion** 🟡 PARTIAL
-- [x] PortCL specification complete
-- [ ] PortCL implementation (stub — RL engine not implemented)
+- [x] BtrMind implementation and testing
 - [ ] Comprehensive test suite (minimal coverage, mostly stub tests)
 
 ### **Phase 3: Desktop Integration & Utilities** 🟡 NOT STARTED
@@ -67,15 +65,14 @@ RegicideOS is approximately **25-30% complete**. The project has a working BtrMi
 - Verify installer can install it
 - Test on real hardware
 
-### **2. PortCL Real Implementation** (3-4 weeks) - **HIGH PRIORITY**
-**Status**: Placeholder/stub — needs RL engine
-**Location**: `ai-agents/portcl/`
-**Impact**: Required for "AI-Native" claim
+### **2. Future Package-Management AI Agent** (3-4 weeks) - **LOWER PRIORITY**
+**Status**: Not started
+**Location**: TBD
+**Impact**: Nice-to-have for "AI-Native" claim; not required for MVP
 
 **Key Tasks**:
-- Decision: implement RL or simplify approach
-- Remove placeholder code
-- Fix license to GPL-3.0
+- Wait until base system and package workflow are stable
+- Spec from scratch (do not reuse old PortCL placeholder)
 - Add real tests
 
 ### **3. Installer Refactor** (3-4 weeks) - **HIGH PRIORITY**
@@ -110,7 +107,7 @@ ai-agents/
 ### **Sprint 2: Coordination Integration (Weeks 3-4)**
 ```bash
 # Integrate coordination with existing agents
-- Connect BtrMind and PortCL to coordination system
+- Connect BtrMind to coordination system
 - Implement communication channels
 - Test knowledge sharing scenarios
 - Validate conflict resolution
@@ -137,10 +134,10 @@ ai-agents/
 
 ## 🔧 Technical Requirements
 
-### **PortCL Implementation Requirements**
+### **Package AI Agent Implementation Requirements** (future, low priority)
 - **Language**: Rust 1.75+
-- **Framework**: tokio for async, tch for RL
-- **Integration**: Portage API, systemd/OpenRC
+- **Framework**: tokio for async
+- **Integration**: Portage API, systemd
 - **Testing**: 90%+ test coverage
 - **Documentation**: API docs and deployment guide
 
@@ -158,12 +155,11 @@ ai-agents/
 
 ## 📊 Success Metrics
 
-### **PortCL Success Criteria**
-- [ ] RL model convergence within 5 days
-- [ ] Package management optimization with measurable improvements
+### **Package AI Agent Success Criteria** (future)
+- [ ] Spec created from scratch
 - [ ] System stability with graceful error handling
 - [ ] Resource overhead monitoring and optimization
-- [ ] Real test coverage (currently stub tests only)
+- [ ] Real test coverage
 
 ### **Multi-Agent Coordination Success Criteria**
 - [ ] Successful knowledge sharing between agents
@@ -186,13 +182,13 @@ ai-agents/
 ## 🎯 Resource Requirements
 
 ### **Development Resources**
-- **Lead Developer**: 1 FTE for PortCL implementation
+- **Lead Developer**: 1 FTE for base system / installer
 - **UI/UX Designer**: Part-time for Cosmic integration
 - **QA Engineer**: Part-time for testing and validation
 - **Technical Writer**: Part-time for documentation updates
 
 ### **Infrastructure Requirements**
-- **Testing Environment**: Multiple Gentoo/Xenia systems
+- **Testing Environment**: Multiple Gentoo systems
 - **CI/CD Pipeline**: Automated testing and deployment
 - **Documentation Site**: Updated with new features
 - **Community Support**: Forum and issue tracking
@@ -220,12 +216,12 @@ ai-agents/
 ## 📋 Risk Assessment
 
 ### **High Risk Items**
-- **PortCL Complexity**: Reinforcement learning implementation challenges
+- **Package AI Complexity**: Reinforcement learning implementation challenges (future)
 - **System Integration**: Coordinating multiple AI agents reliably
 - **Desktop Environment**: Cosmic integration complexity and maintenance
 
 ### **Mitigation Strategies**
-- **Incremental Development**: Build PortCL in stages with frequent validation
+- **Incremental Development**: Build package AI in stages with frequent validation
 - **Robust Testing**: Comprehensive testing at each integration point
 - **Fallback Mechanisms**: Ensure system stability during AI agent coordination
 
@@ -253,6 +249,6 @@ ai-agents/
 
 **Project Status**: 🟡 IN DEVELOPMENT - ~25-30% complete, focused on bootable ISO
 **Confidence Level**: 🟡 MODERATE - Clear specs for BtrMind, installer needs refactor, build system untested
-**Estimated Completion**: TBD — dependent on bootable ISO and PortCL implementation
+**Estimated Completion**: TBD — dependent on bootable ISO
 
 *For current status, see [STATUS.md](STATUS.md). This document is updated periodically.*

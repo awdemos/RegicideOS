@@ -16,11 +16,11 @@
 - **Reality**: Real implementation. Async tokio loop, metrics collection, RL action selection, reward calculation, threshold alerting.
 - **Maturity**: Working prototype
 
-#### PortCL (`ai-agents/portcl/`)
-- **Language**: Rust
+#### Future AI Package Agent
+- **Language**: (not decided)
 - **Claim**: RL-driven Portage optimization agent
-- **Reality**: Thin wrapper. Basic CLI, placeholder agent loop, stub tests. RL engine referenced but not implemented.
-- **Maturity**: Placeholder
+- **Reality**: No implementation. The previous placeholder (`ai-agents/portcl/`) was removed. A real agent should be spec'd from scratch once the base system is stable.
+- **Maturity**: Not started
 
 ### 3. Build System (`build-system/`)
 - **Claim**: Dagger-based CI/CD with automated ISO builds
@@ -88,7 +88,7 @@ The README markets "AI-Native · Rust-First · Immutable Linux Distribution" but
 
 ### 3. AI Agent Asymmetry
 - **BtrMind**: Real RL agent with learning loop, reward calculation, threshold alerts. Can actually monitor Btrfs.
-- **PortCL**: Placeholder. Claims RL-driven Portage optimization but has unimplemented stubs.
+- **Future package agent**: Not implemented.
 
 ### 4. Documentation Fiction
 Multiple documents claim production-ready status or completed features that don't exist:
@@ -104,7 +104,7 @@ Multiple documents claim production-ready status or completed features that don'
 - 310 total commits, 149 fix commits (48% fix rate)
 - 90 commits related to GRUB/boot (29% of all commits)
 - 68 commits related to bind mounts/overlay (22%)
-- 31 commits related to PortCL/compiler (10%)
+- 31 commits related to the old PortCL placeholder/compiler (10%)
 - High fix-to-feature ratio indicates instability
 
 ## Severity Assessment
@@ -112,7 +112,7 @@ Multiple documents claim production-ready status or completed features that don'
 | Issue | Severity | Impact |
 |-------|----------|--------|
 | Installer monolith | Critical | Blocks maintainability, testing, security audit |
-| PortCL vaporware | High | Undermines "AI-Native" claim |
+| AI package agent missing | High | Undermines "AI-Native" claim if overstated |
 | No working OS image | Critical | Product doesn't exist as advertised |
 | Documentation fiction | High | Misleading contributors and users |
 | Build system duality | Medium | Confusing, old code should be removed |
@@ -130,7 +130,7 @@ But let's deconstruct:
 
 ### "AI-Native"
 - **Claim**: RL-driven agents manage the system autonomously
-- **Reality**: One working agent (btrmind) for Btrfs maintenance. One placeholder (portcl). No integration between agents and OS.
+- **Reality**: One working agent (btrmind) for Btrfs maintenance. No package-management agent exists yet. No integration between agents and OS.
 - **Question**: Does "AI-Native" mean the OS is managed by AI, or just that AI tools are included?
 
 ### "Rust-First"
@@ -179,11 +179,11 @@ Everything else is secondary.
   - `configurator`: Network, users, services
   - `orchestrator`: Coordinates the above
 - **btrmind**: Keep as-is — it's already well-structured
-- **portcl**: Rewrite or remove. Current implementation is not useful.
+- **future package agent**: Spec from scratch when the base system and package workflow are stable.
 
 ### Layer 2: AI Integration
 - BtrMind runs as systemd service
-- Future: PortCL replacement for Portage optimization
+- Future: a real package agent for Portage optimization (spec'd from scratch)
 - All agents communicate via unified API (gRPC or Unix sockets)
 
 ### Layer 3: Build Pipeline
@@ -197,7 +197,7 @@ Everything else is secondary.
 - All docs must be tested/verified
 
 ## What Gets Removed
-- `ai-agents/portcl/` (or archive and rewrite)
+- `ai-agents/portcl/` placeholder (already removed)
 - Old build system stubs (`dagger.py`, `regicide_image_builder.py`)
 - Aspirational specs that aren't implemented
 - Old vaporware CI tool
@@ -215,8 +215,7 @@ Everything else is secondary.
 - **Recommendation**: GNOME default, COSMIC experimental.
 
 ## "PortCL should be kept"
-- **Counter**: The current PortCL is a stub. Keeping it gives false confidence. Better to remove and rebuild properly.
-- **Mitigation**: Archive the code, create new spec for real PortCL.
+- **Counter**: The previous PortCL placeholder was removed. A real package agent can be spec'd and built from scratch when the base system is stable.
 
 ## "We don't have enough contributors for this"
 - **Counter**: With Andrew as primary contributor (208/310 commits), scope must match capacity.
@@ -251,7 +250,7 @@ Everything else is secondary.
 ### Sprint 4: AI Integration (2-3 weeks)
 - [ ] BtrMind systemd service
 - [ ] Unified agent API design
-- [ ] PortCL spec and implementation plan
+- [ ] Future package agent spec and implementation plan (only after base system is stable)
 
 ### Sprint 5: Polish (2 weeks)
 - [ ] CI/CD pipeline
@@ -280,7 +279,7 @@ git tag v0.1-aspirational
 ### 3. Focus on MVP
 - Prioritize bootable ISO over documentation
 - Prioritize installer stability over new features
-- Prioritize BtrMind over PortCL
+- Prioritize BtrMind over a future package agent
 
 ### 4. Establish Truth
 - README = reality, not aspiration
@@ -305,7 +304,7 @@ git tag v0.1-aspirational
 
 ### Month 5-6: AI Integration
 - BtrMind with web dashboard
-- PortCL v2 spec complete
+- Package agent v2 spec complete (only after base system is stable)
 - Agent communication protocol defined
 
 ## 12-Month Vision

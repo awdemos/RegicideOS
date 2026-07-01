@@ -218,8 +218,7 @@ btrmind analyze
 ## Integration with RegicideOS
 
 BtrMind is part of the RegicideOS AI ecosystem:
-- **Coordination** with PortCL (package management AI)
-- **Knowledge sharing** through inter-agent communication
+- **Future coordination** with a package-management AI agent (not yet implemented)
 - **System-wide optimization** as part of autonomous OS management
 
 ## License

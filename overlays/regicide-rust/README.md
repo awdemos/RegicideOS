@@ -111,8 +111,8 @@ Embedded development tools:
 
 #### app-misc/regicide-ai-tools
 - **Source**: Regicide overlay (exclusive)
-- **Components**: BtrMind, PortCL (future), system integration
-- **USE flags**: `btrmind`, `portcl`, `systemd`
+- **Components**: BtrMind, system integration
+- **USE flags**: `btrmind`, `systemd`
 
 ## Embedded Development
 
@@ -259,7 +259,7 @@ AI agents work with RegicideOS's container-first approach:
 
 ```bash
 # Install tools in Distrobox container
-distrobox create --name rust-dev --image fedora:39
+distrobox create --name rust-dev --image fedora:44
 distrobox enter rust-dev
 # Install Rust toolchain normally
 ```
@@ -348,7 +348,6 @@ systemctl start btrmind
 - [x] GURU overlay compatibility
 
 ### Near-term (1-2 months)
-- [ ] PortCL package management AI
 - [ ] Additional embedded toolchains (AVR, Xtensa)
 - [ ] AI model sharing infrastructure
 - [ ] Performance optimization packages

@@ -33,6 +33,8 @@ dist/
 output/
 *.iso
 *.img
+*.qcow2
+*.qcow2.*
 build-system/catalyst/tmp/
 
 # Cache
