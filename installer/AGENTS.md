@@ -1,5 +1,31 @@
 # Agent Guidelines for RegicideOS Installer
 
+**Scope**: `installer/`
+
+## OVERVIEW
+Safety-critical Rust OS installer. Builds the `installer` binary, validates user input and paths, partitions the target disk, and deploys the SquashFS image to a ROOTS partition.
+
+## STRUCTURE
+```
+installer/
+├── src/
+│   ├── main.rs       # CLI, install orchestration, safe-command wrapper
+│   ├── lib.rs        # Config/Partition types and validation helpers
+│   ├── filesystem.rs # Partitioning and filesystem operations
+│   ├── validation.rs # Input/path validation
+│   └── logging.rs    # Sanitized logging
+└── Cargo.toml
+```
+
+## WHERE TO LOOK
+| Task | Location | Notes |
+|------|----------|-------|
+| Add CLI argument | `src/main.rs` | Clap derive parser |
+| Change partitioning | `src/filesystem.rs` | Wraps gdisk/parted/mkfs/cryptsetup |
+| Validate config/path | `src/validation.rs` | `validate_safe_path()` blocks traversal |
+| Add public helper | `src/lib.rs` | Add `#[cfg(test)]` unit tests |
+| Sanitize output | `src/logging.rs` | Redacts paths, passwords, tokens |
+
 ## Build Commands
 - **Build**: `cargo build --release`
 - **Run**: `cargo run --bin installer`
@@ -45,3 +71,11 @@
 - Use descriptive variable names
 - Add security comments for sensitive operations
 - Follow Rust 2021 edition conventions
+
+## ANTI-PATTERNS
+- **Do not use raw `std::process::Command`**: route all external commands through `execute()` or `execute_safe_command()`.
+- **Do not allow path traversal**: every file path must be validated with `validate_safe_path()` before use.
+- **Do not leak sensitive data in logs**: error messages must pass through `sanitize_error_message()`.
+- **Do not write to block devices outside dry-run wrappers**: destructive operations are gated by safety checks and mocked in tests.
+- **Do not bypass package-manager allowlist**: `dnf`/`apt`/`pacman` writes are blocked except for installing `gdisk`.
+- **Do not disable or skip safety tests**: destructive-operation guards must remain under test.

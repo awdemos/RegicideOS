@@ -1,3 +1,67 @@
+# PROJECT KNOWLEDGE BASE — RegicideOS
+
+**Generated:** 2026-07-02
+**Commit:** a8f88a3
+**Branch:** main
+
+## OVERVIEW
+RegicideOS is an AI-native, Rust-first, immutable Linux distribution built on Gentoo + Catalyst. The active code is a Cargo workspace (`installer`, `ai-agents/btrmind`) plus Catalyst build scripts, a Gentoo overlay, and Python test suites.
+
+## STRUCTURE
+```
+.
+├── installer/              # Rust OS installer (safety-critical)
+├── ai-agents/
+│   └── btrmind/            # BTRFS monitoring AI agent
+├── build-system/catalyst/  # Gentoo Catalyst stage4 + image builders
+├── overlays/regicide-rust/ # RegicideOS Gentoo overlay
+├── tests/                  # Python pytest suites
+├── scripts/                # Operational shell helpers
+├── docs/                   # Operational docs
+├── specs/                  # Feature specs
+└── AGENTS.md               # This file
+```
+
+## WHERE TO LOOK
+| Task | Location | Notes |
+|------|----------|-------|
+| Build Rust workspace | `Cargo.toml`, `justfile` | Members: `installer`, `ai-agents/btrmind` |
+| OS image build | `build-system/catalyst/` | Requires root + Catalyst on Gentoo |
+| Installer code | `installer/src/` | CLI, partitioning, filesystem, validation, logging |
+| BtrMind agent | `ai-agents/btrmind/src/` | RL loop, BTRFS metrics, cleanup actions |
+| Gentoo packaging | `overlays/regicide-rust/` | Ebuilds for tools + Rust toolchain |
+| Tests | `tests/` | Component-organized pytest suites |
+| Plans/specs | `specs/`, `templates/` | Numbered specs + plan templates |
+
+## COMMANDS
+```bash
+# Rust workspace
+just build           # cargo build --workspace --release
+just test            # cargo test --workspace
+just lint            # cargo clippy --workspace -- -D warnings
+just fix             # cargo fix --workspace --allow-dirty; cargo fmt --workspace
+just check-fmt       # cargo fmt --workspace -- --check
+just ci              # lint test build
+
+# OS image (root, Gentoo host)
+just build-iso       # cd build-system/catalyst && sudo ./build.sh
+
+# Installer
+cd installer && cargo build --release
+sudo ./target/release/installer --image ../build-system/catalyst/output/regicide-cosmic.img /dev/sdX
+
+# Dagger CI/CD
+just dagger-build    # DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+```
+
+## NOTES
+- The repo contains large generated artifacts (`target/`, disk images, `.opencode/node_modules/`); real source depth is shallow (≤5 levels).
+- `legacy_installer.py` at root is superseded by the Rust installer under `installer/`.
+- The COSMIC desktop packages are listed in the stage4 spec but not yet installed because the local `cosmic-overlay/` has Portage config only.
+- Security scanners (`trivy`, `hadolint`, SBOM) are referenced in templates but not yet wired in CI.
+
+---
+
 # AI Engineering Guidelines
 
 ## Role & Output Contracts
