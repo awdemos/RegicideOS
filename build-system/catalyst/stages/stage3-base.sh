@@ -3,7 +3,9 @@
 set -euo pipefail
 
 source "$(dirname "$0")/common.sh"
+STAGE_NAME="stage3-base"
 
+log_status "start" "installing base system packages"
 PACKAGES=(
     app-admin/sudo
     app-containers/crun
@@ -66,7 +68,10 @@ PACKAGES=(
 
 for pkg in "${PACKAGES[@]}"; do
     echo "Installing ${pkg}..."
+    log_status "package" "${pkg}"
     run_in_chroot emerge -q "$pkg" || echo "WARNING: ${pkg} may have failed"
 done
 
+clean_rootfs_transient
+log_status "complete" "base system packages installed"
 echo "Stage 3 complete."

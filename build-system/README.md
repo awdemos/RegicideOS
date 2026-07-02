@@ -157,10 +157,10 @@ Dagger is used as an **orchestration layer**, not a replacement for Catalyst. Th
 ### Usage
 
 ```bash
-dagger run python build-system/dagger_pipeline.py
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
-The pipeline runs six cacheable stages:
+The pipeline runs six cacheable stages. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI, which is easier to read in agent/CI environments:
 
 1. `stages/stage1-setup.sh` — stage3 seed and Portage snapshot
 2. `stages/stage2-sync.sh` — Portage sync and `@world` update
@@ -174,8 +174,17 @@ The pipeline runs six cacheable stages:
 To reuse an existing stage4 tarball or SquashFS, pass:
 
 ```bash
-dagger run python build-system/dagger_pipeline.py --from-tarball ./output/stage4-amd64-systemd-cosmic.tar.xz --from-squashfs ./output/regicide-cosmic.img
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --from-tarball ./output/stage4-amd64-systemd-cosmic.tar.xz --from-squashfs ./output/regicide-cosmic.img
 ```
+
+### Build observability for agents
+
+The pipeline writes per-stage progress to `output/build-status.jsonl`. Each line is a JSON object with `time`, `stage`, `event`, and `detail` fields. Agents can tail this file instead of parsing the Dagger TUI.
+
+An MCP server and skill are also available:
+
+- Run `python build-system/mcp-server.py` for stdio MCP access to build status, logs, and artifacts.
+- Install the companion skill from `build-system/skills/regicide-build/SKILL.md` (or `~/.config/opencode/skills/regicide-build/`).
 
 ## COSMIC Stage4 Spec
 
@@ -184,7 +193,7 @@ The `stage4-systemd-cosmic.spec` defines:
 - **Profile**: `default/linux/amd64/23.0/desktop/systemd`
 - **Overlays**: fsvm88/cosmic-overlay (for COSMIC packages), regicide-rust (for RegicideOS tools)
 - **Desktop**: COSMIC Desktop from cosmic-overlay
-- **RegicideOS tools**: btrmind, regicide-installer
+- **RegicideOS tools**: regicide-installer
 - **Post-build**: Enables cosmic-greeter, NetworkManager, PipeWire, Flatpak
 
 ## Why Catalyst?
