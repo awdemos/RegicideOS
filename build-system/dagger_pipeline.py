@@ -13,8 +13,8 @@ Dagger provides:
   - Clean environment isolation
 
 Usage:
-  dagger run python build-system/dagger_pipeline.py
-  dagger run python build-system/dagger_pipeline.py --encrypt
+  DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+  DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --encrypt
 """
 
 import argparse
@@ -64,7 +64,7 @@ async def build_cosmic(
     # cosmic-overlay git clone.
     distfiles_cache = client.cache_volume("regicide-distfiles-v5")
     binpkgs_cache = client.cache_volume("regicide-binpkgs-v5")
-    build_cache = client.cache_volume("regicide-manual-build-v5")
+    build_cache = client.cache_volume("regicide-manual-build-v6")
     cosmic_overlay_cache = client.cache_volume("regicide-cosmic-overlay-v5")
 
     base = (
@@ -81,10 +81,12 @@ async def build_cosmic(
         ["emerge", "-qv", "sys-apps/bubblewrap", "dev-vcs/git", "app-arch/tar", "net-misc/curl"]
     )
 
-    # Build state and cosmic-overlay clone live on cache volumes.
+    # The rootfs lives in the container overlay (not a cache volume) because
+    # Dagger's cache-volume snapshot commit fails on multi-gigabyte rootfs
+    # volumes.  distfiles/binpkgs/cosmic-overlay remain on cache volumes so the
+    # heavy parts of stage4 can still reuse prior work.
     with_build_dir = (
         with_tools
-        .with_mounted_cache("/var/tmp/regicide-build", build_cache)
         .with_mounted_cache("/var/cache/cosmic-overlay", cosmic_overlay_cache)
         .with_exec(["mkdir", "-p", "/var/tmp/regicide-build/stage3"])
     )
@@ -218,6 +220,11 @@ async def main() -> None:
         description="Build RegicideOS COSMIC stage4, SquashFS, and optional encrypted QCOW2."
     )
     parser.add_argument(
+        "--plain",
+        action="store_true",
+        help="Use plain Dagger progress output (useful for logs and CI)",
+    )
+    parser.add_argument(
         "--encrypt",
         action="store_true",
         help="Also build an encrypted QCOW2 disk image and prompt for a LUKS passphrase",
@@ -245,6 +252,9 @@ async def main() -> None:
         help="Reuse an existing SquashFS image instead of rebuilding it in Dagger",
     )
     args = parser.parse_args()
+
+    if args.plain:
+        os.environ["DAGGER_PROGRESS"] = "plain"
 
     tarball_path: Path | None = None
     squashfs_path: Path | None = None
@@ -286,6 +296,11 @@ async def main() -> None:
             print("Output: regicide-cosmic.img")
         else:
             print(f"Using existing SquashFS image: {squashfs_path}")
+
+        if tarball_path is None:
+            print("Exporting stage4 tarball...")
+            await tarball.export("build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz")
+            print("Output: build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz")
 
         if args.encrypt:
             if tarball_path is None:

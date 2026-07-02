@@ -114,7 +114,6 @@ stage4/packages:
 	sys-kernel/gentoo-kernel-bin
 	sys-kernel/linux-firmware
 	sys-power/power-profiles-daemon
- 	regicide-tools/btrmind
  	regicide-tools/regicide-installer
 stage4/empty: /var/tmp /var/cache /tmp
 stage4/rm:

@@ -47,7 +47,7 @@ build-iso:
 
 # Run Dagger CI/CD pipeline (requires Dagger)
 dagger-build:
-    dagger run python build-system/dagger_pipeline.py
+	DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 
 # Full CI check (build, test, lint)
 ci: lint test build
