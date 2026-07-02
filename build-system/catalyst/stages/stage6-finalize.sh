@@ -3,7 +3,9 @@
 set -euo pipefail
 
 source "$(dirname "$0")/common.sh"
+STAGE_NAME="stage6-finalize"
 
+log_status "start" "post-build configuration and tarball creation"
 echo "Applying post-build configuration..."
 run_in_chroot bash -c '
     if command -v dracut &> /dev/null; then
@@ -59,6 +61,7 @@ run_in_chroot bash -c '
 '
 
 echo "Creating stage4 tarball..."
+log_status "tarball" "creating stage4-amd64-systemd-cosmic.tar.xz"
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_FILE="${OUTPUT_DIR}/stage4-amd64-systemd-cosmic.tar.xz"
 
@@ -71,5 +74,6 @@ tar -C "${ROOTFS}" -cpJf "${OUTPUT_FILE}" \
     --exclude='./var/cache/binpkgs/*' \
     .
 
+log_status "complete" "stage4 tarball created"
 echo "Stage 6 complete."
 echo "Output: ${OUTPUT_FILE}"

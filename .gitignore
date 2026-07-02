@@ -58,3 +58,13 @@ __pycache__/
 
 # macOS resource forks
 ._*
+
+# Agent/AI tool state
+.desloppify/
+.omo/
+.specify/
+
+# Legacy artifacts not part of current source
+legacy_installer.py
+regicideos_poster.png
+scorecard.png

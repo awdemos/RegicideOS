@@ -112,10 +112,10 @@ sudo ./build.sh
 **Option B: Dagger (works in any container with Docker/Podman)**
 
 ```bash
-dagger run python build-system/dagger_pipeline.py
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
-The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse the `distfiles` and `binpkgs` cache volumes and are much faster.
+The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse the `distfiles` and `binpkgs` cache volumes and are much faster. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
 
 Both methods produce:
 - `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz`

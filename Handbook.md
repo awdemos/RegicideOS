@@ -100,10 +100,10 @@ cd RegicideOS
 **Build the stage4 + live SquashFS:**
 
 ```bash
-dagger run python build-system/dagger_pipeline.py
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
-This runs six cacheable stages in `build-system/catalyst/stages/`:
+This runs six cacheable stages in `build-system/catalyst/stages/`. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI, which is easier to read in agent/CI environments:
 
 1. `stage1-setup.sh` — download and extract the Gentoo stage3 seed
 2. `stage2-sync.sh` — sync Portage and update `@world`
@@ -514,7 +514,7 @@ Power users are expected to modify the Dagger pipeline and stage scripts to buil
 $EDITOR build-system/catalyst/stages/stage4-cosmic.sh
 
 # Rebuild with Dagger
-dagger run python build-system/dagger_pipeline.py
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
 The output `build-system/catalyst/output/regicide-cosmic.img` is the image you install or apply with the planned `regicide-update apply` command.

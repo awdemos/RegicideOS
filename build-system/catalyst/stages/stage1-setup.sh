@@ -4,7 +4,9 @@ set -euo pipefail
 
 # shellcheck source=common.sh
 source "$(dirname "$0")/common.sh"
+STAGE_NAME="stage1-setup"
 
+log_status "start" "preparing stage3 seed"
 for cmd in bwrap curl tar; do
     if ! command -v "$cmd" &> /dev/null; then
         echo "ERROR: required command '$cmd' not found"
@@ -67,4 +69,6 @@ PROFILE="default/linux/amd64/23.0/desktop/systemd"
 echo "Setting profile to ${PROFILE}..."
 run_in_chroot eselect profile set "$PROFILE"
 
+clean_rootfs_transient
+log_status "complete" "stage3 seed and portage snapshot ready"
 echo "Stage 1 complete."
