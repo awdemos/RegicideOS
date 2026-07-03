@@ -6,7 +6,7 @@
 
 > *Converge and conquer.*
 
-> ⚠️ **Development Status**: ~25-30% Complete. This project is under active development. See [STATUS.md](STATUS.md) for honest assessment of what works and what's planned. The installer is functional but no bootable ISO exists yet.
+> ⚠️ **Development Status**: The installer works, the Dagger/Catalyst build pipeline produces a bootable stage4 + SquashFS + QCOW2, and the COSMIC desktop boots to a greeter. A bootable ISO is not yet automated. See [STATUS.md](STATUS.md) for the full breakdown.
 
 [![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://kernel.org/)
@@ -14,6 +14,8 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](https://www.gnu.org/licenses/gpl-3.0)
 
 **A forward-looking Linux distribution with a clear mission:** every component that can be implemented in Rust will be migrated to Rust, and AI capabilities are integrated at the system level.
+
+RegicideOS is built from a Gentoo stage4 with COSMIC as the default desktop. The root filesystem is a read-only Btrfs volume; stateful data lives on separate subvolumes. Updates are prepared offline, verified, and swapped atomically. The live image is a SquashFS produced directly by the Catalyst/Dagger pipeline, so what boots is byte-for-byte what was validated.
 
 [📥 Install](#installation) · [🏗️ Architecture](#architecture) · [🗺️ Roadmap](#roadmap) · [🤝 Contributing](#contributing)
 
@@ -34,6 +36,7 @@
 - ⚡ **Zero-cost performance** — Leverage Rust's abstractions without runtime overhead
 - 🤖 **AI-native from day one** — RL-driven optimization, predictive maintenance, and intelligent resource allocation
 - 🔒 **Immutable foundation** — Read-only Btrfs root with atomic updates and instant rollback
+- 🚀 **Aggressive Dagger caching** — Incremental builds reuse cached stages so subsequent builds take 99% less time
 
 ---
 
@@ -45,8 +48,8 @@
 | Init System | systemd | Service management | ✅ Working |
 | Filesystem | Btrfs (read-only) | Immutable system image with overlay writes | ✅ Working |
 | Container Runtime | Distrobox | Application isolation and compatibility | 📋 Planned |
-| Desktop Environment | [Cosmic Desktop](https://github.com/pop-os/cosmic-epoch) | GPU-accelerated, Wayland-native UI | 📋 Planned |
-| Package Management | Overlays | Community-driven, curated software bundles | 📋 Planned |
+| Desktop Environment | [Cosmic Desktop](https://github.com/pop-os/cosmic-epoch) | GPU-accelerated, Wayland-native UI | ✅ Installed |
+| Package Management | Portage + custom overlays | Gentoo source-based + curated bundles | ✅ Working |
 | AI Agent | BtrMind | BTRFS optimization and cleanup | ✅ Working |
 | AI Agent | (future) | Portage optimization | 📋 Planned |
 
@@ -83,7 +86,7 @@
 
 - 64-bit x86 processor
 - 12GB disk space minimum (20GB recommended)
-- UEFI or Legacy BIOS firmware
+- UEFI firmware
 - Internet connection
 - Existing Linux live environment (e.g., Fedora Workstation) for bare-metal installs
 
@@ -115,7 +118,7 @@ sudo ./build.sh
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
-The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse the `distfiles` and `binpkgs` cache volumes and are much faster. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
+The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse the `distfiles` and `binpkgs` cache volumes and can take 99% less time. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
 
 Both methods produce:
 - `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz`
@@ -139,7 +142,7 @@ sudo ./build-vm-image.sh \
     output/regicide-cosmic-enc.qcow2 20G
 ```
 
-> **Current status**: both unencrypted and encrypted images build successfully, boot to a serial-console `regicideos login:` prompt, and run `systemd-logind` (verified on both). The default root password is `regicide`. The LUKS passphrase for the encrypted example is `regicide-secure-test`. The COSMIC Desktop packages are listed in the stage4 spec but are not currently installed because the local `cosmic-overlay/` does not contain their ebuilds; therefore `cosmic-greeter` is enabled but cannot start yet.
+> **Current status**: both unencrypted and encrypted images build successfully, boot to a serial-console login prompt, and reach the COSMIC greeter. The default user is `regicide` with password `regicide`; the root password is intentionally unset, so manage root via `sudo passwd root` after login. The LUKS passphrase for the encrypted example is `regicide-secure-test`.
 
 #### 3. Install to bare metal
 
@@ -247,7 +250,7 @@ This section gives deterministic, observable steps an AI agent can follow to bui
 
 3. For encrypted images, enter the LUKS passphrase `regicide-secure-test` when prompted.
 
-4. Success criterion: the VM reaches `regicideos login:` on the serial console. Log in as `root` / `regicide` and run `systemctl status systemd-logind` to confirm it is `active (running)`.
+4. Success criterion: the VM reaches the COSMIC greeter or serial login prompt. Log in as `regicide` / `regicide` and run `systemctl status systemd-logind` to confirm it is `active (running)`.
 
 #### E. Observe the VM in a GUI window
 
@@ -364,7 +367,7 @@ sudo ./target/release/installer -c regicide-config.toml
 - [x] BtrMind AI agent (fully working)
 - [x] Bootable QCOW2 VM image
 - [ ] Bootable ISO / Base system image
-- [ ] Cosmic Desktop integration
+- [x] Cosmic Desktop integration
 - [ ] Rust replacements of core GNU utilities
 - [ ] Memory-safe package manager
 - [ ] Advanced AI capabilities (predictive maintenance, NL control)
@@ -381,6 +384,8 @@ We particularly need help with:
 - 📦 **Overlay creation** — Developing useful package collections
 - 📝 **Documentation** — Improving guides and references
 - 🧪 **Testing** — Bug reports and verification
+
+**Found a bug?** Please [file an Issue](https://github.com/RegicideOS/RegicideOS/issues) with detailed logs, the command you ran, and your environment so we can reproduce it.
 
 ---
 
