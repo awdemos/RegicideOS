@@ -66,14 +66,38 @@ PROFILE
     mkdir -p /.recovery/etc
     cp /etc/passwd /.recovery/etc/passwd
     cp /etc/shadow /.recovery/etc/shadow
-    echo "recovery:x:1000:1000::/home/recovery:/bin/bash" >> /.recovery/etc/passwd
-    echo "recovery:x:1000:" >> /.recovery/etc/group
-    chown 1000:1000 -R /.recovery/home/recovery
+    echo "recovery:x:1001:1001::/home/recovery:/bin/bash" >> /.recovery/etc/passwd
+    echo "recovery:x:1001:" >> /.recovery/etc/group
+    chown 1001:1001 -R /.recovery/home/recovery
 
     chown portage:portage /var/cache/distfiles
 
-    cp /usr/share/i18n/SUPPORTED /etc/locale.gen
+    # Generate only the locale we need to keep the image smaller.
+    cat > /etc/locale.gen << EOF
+en_US.UTF-8 UTF-8
+EOF
     locale-gen
+
+    # Ensure home directory ownership is correct even if extraction/creation
+    # left it as root or another uid.
+    chown 1000:1000 -R /home/regicide || true
+
+    # COSMIC defaults: active window hint off, screen reader disabled,
+    # and UI event sounds off for a quieter first-boot experience.
+    mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicComp/v1
+    printf false > /home/regicide/.config/cosmic/com.system76.CosmicComp/v1/active_hint
+    chown -R regicide:regicide /home/regicide/.config
+
+    # Disable the Orca screen reader and GNOME/COSMIC event sounds by default.
+    mkdir -p /etc/dconf/db/local.d
+    cat > /etc/dconf/db/local.d/00-regicide-a11y << EOF
+[org/gnome/desktop/a11y/applications]
+screen-reader-enabled=false
+
+[org/gnome/desktop/sound]
+event-sounds=false
+EOF
+    dconf update 2>/dev/null || true
 
     systemctl enable bluetooth || true
     systemctl enable NetworkManager || true
