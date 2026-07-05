@@ -100,14 +100,19 @@ async def build_cosmic(
         .with_env_variable("REGICIDE_COSMIC_OVERLAY_DIR", "/var/cache/cosmic-overlay")
     )
 
-    # Run each stage as a separate withExec so Dagger can cache the result of
-    # each stage independently. Stages 1-5 are idempotent: re-running them on
-    # an already-populated rootfs is a cheap no-op.
+    # Split long Portage emerges into cacheable withExec layers to limit
+    # per-operation rootfs snapshots and avoid Dagger engine strain.
     stage_scripts = [
         "stages/stage1-setup.sh",
         "stages/stage2-sync.sh",
-        "stages/stage3-base.sh",
-        "stages/stage4-cosmic.sh",
+        "stages/stage3-base-a.sh",
+        "stages/stage3-base-b.sh",
+        "stages/stage3-base-c.sh",
+        "stages/stage3-base-d.sh",
+        "stages/stage3-base-e.sh",
+        "stages/stage3-base-f.sh",
+        "stages/stage4-cosmic-a.sh",
+        "stages/stage4-cosmic-b.sh",
         "stages/stage5-regicide.sh",
         "stages/stage6-finalize.sh",
     ]
@@ -149,6 +154,133 @@ async def build_iso(
     )
 
     return builder.file("/tmp/regicide-cosmic.img")
+
+
+def _with_cosign(container: dagger.Container) -> dagger.Container:
+    """Install cosign v2.4.0 into a Linux container from the official release."""
+    cosign_url = (
+        "https://github.com/sigstore/cosign/releases/download/"
+        "v2.4.0/cosign-linux-amd64"
+    )
+    expected_sha256 = "cd7636b3586a3bdac2d9c8f3b421ed119edcb20499107887fd929211110e8418"
+    return (
+        container
+        .with_exec(["apk", "add", "--no-cache", "curl", "ca-certificates", "coreutils"])
+        .with_exec([
+            "sh", "-c",
+            f"curl -sL -o /usr/local/bin/cosign '{cosign_url}' && "
+            f"echo '{expected_sha256}  /usr/local/bin/cosign' | sha256sum -c - && "
+            "chmod +x /usr/local/bin/cosign",
+        ])
+    )
+
+
+async def sign_artifacts(
+    client: dagger.Client,
+    squashfs: dagger.File,
+    sbom: dagger.File,
+    identity: str,
+) -> tuple[dagger.File, dagger.File | None, dagger.File, dagger.File, dagger.File | None, dagger.File, dagger.File]:
+    """Sign the SquashFS image and SBOM, and attest the SBOM to the image.
+
+    Returns (squashfs_sig, squashfs_cert, squashfs_bundle, sbom_sig, sbom_cert, sbom_bundle, attestation_bundle).
+    In key-based mode the certificate files are None.
+    """
+    signer = client.container().from_("alpine:latest")
+    signer = _with_cosign(signer)
+
+    signer = (
+        signer
+        .with_file("/artifacts/regicide-cosmic.img", squashfs)
+        .with_file("/artifacts/sbom.spdx.json", sbom)
+        .with_env_variable("COSIGN_EXPERIMENTAL", "1")
+    )
+
+    key_path = os.environ.get("COSIGN_KEY_PATH")
+    if key_path:
+        signer = signer.with_mounted_file("/secrets/cosign.key", client.host().file(key_path))
+        signer = signer.with_env_variable("COSIGN_PASSWORD", os.environ.get("COSIGN_PASSWORD", ""))
+
+        signer = signer.with_exec([
+            "cosign", "sign-blob",
+            "--key=/secrets/cosign.key",
+            "--tlog-upload=false",
+            "--output-signature=/artifacts/regicide-cosmic.img.sig",
+            "--output-certificate=/artifacts/regicide-cosmic.img.cert",
+            "--bundle=/artifacts/regicide-cosmic.img.bundle",
+            "/artifacts/regicide-cosmic.img",
+        ])
+        signer = signer.with_exec([
+            "cosign", "sign-blob",
+            "--key=/secrets/cosign.key",
+            "--tlog-upload=false",
+            "--output-signature=/artifacts/sbom.spdx.json.sig",
+            "--output-certificate=/artifacts/sbom.spdx.json.cert",
+            "--bundle=/artifacts/sbom.spdx.json.bundle",
+            "/artifacts/sbom.spdx.json",
+        ])
+        signer = signer.with_exec([
+            "cosign", "attest-blob",
+            "--key=/secrets/cosign.key",
+            "--tlog-upload=false",
+            "--predicate=/artifacts/sbom.spdx.json",
+            "--type=spdx",
+            "--output-attestation=/artifacts/regicide-cosmic.img.att",
+            "/artifacts/regicide-cosmic.img",
+        ])
+        return (
+            signer.file("/artifacts/regicide-cosmic.img.sig"),
+            None,
+            signer.file("/artifacts/regicide-cosmic.img.bundle"),
+            signer.file("/artifacts/sbom.spdx.json.sig"),
+            None,
+            signer.file("/artifacts/sbom.spdx.json.bundle"),
+            signer.file("/artifacts/regicide-cosmic.img.att"),
+        )
+
+    # Keyless OIDC signing uses the ambient OIDC token.  cosign v2.4.0's
+    # sign-blob takes --output-signature/--output-certificate but not
+    # --certificate-identity/--certificate-oidc-issuer; those are for `cosign
+    # sign` on OCI images.  The certificate returned by Fulcio still carries
+    # the identity claims and is verified by the standard verify-blob flow.
+    signer = signer.with_env_variable("COSIGN_YES", "true")
+
+    signer = signer.with_exec([
+        "sh", "-c",
+        "cosign sign-blob "
+        "--output-signature=/artifacts/regicide-cosmic.img.sig "
+        "--output-certificate=/artifacts/regicide-cosmic.img.cert "
+        "--bundle=/artifacts/regicide-cosmic.img.bundle "
+        "/artifacts/regicide-cosmic.img",
+    ])
+
+    signer = signer.with_exec([
+        "sh", "-c",
+        "cosign sign-blob "
+        "--output-signature=/artifacts/sbom.spdx.json.sig "
+        "--output-certificate=/artifacts/sbom.spdx.json.cert "
+        "--bundle=/artifacts/sbom.spdx.json.bundle "
+        "/artifacts/sbom.spdx.json",
+    ])
+
+    signer = signer.with_exec([
+        "sh", "-c",
+        "cosign attest-blob "
+        "--predicate=/artifacts/sbom.spdx.json "
+        "--type=spdx "
+        "--output-attestation=/artifacts/regicide-cosmic.img.att "
+        "/artifacts/regicide-cosmic.img",
+    ])
+
+    return (
+        signer.file("/artifacts/regicide-cosmic.img.sig"),
+        signer.file("/artifacts/regicide-cosmic.img.cert"),
+        signer.file("/artifacts/regicide-cosmic.img.bundle"),
+        signer.file("/artifacts/sbom.spdx.json.sig"),
+        signer.file("/artifacts/sbom.spdx.json.cert"),
+        signer.file("/artifacts/sbom.spdx.json.bundle"),
+        signer.file("/artifacts/regicide-cosmic.img.att"),
+    )
 
 
 def _get_luks_passphrase() -> str:
@@ -251,22 +383,27 @@ async def main() -> None:
         default=None,
         help="Reuse an existing SquashFS image instead of rebuilding it in Dagger",
     )
+    parser.add_argument(
+        "--run-vm-test",
+        action="store_true",
+        help="Build an unencrypted QCOW2 from the stage4 tarball and run stage8-vm-test.sh",
+    )
     args = parser.parse_args()
 
     if args.plain:
         os.environ["DAGGER_PROGRESS"] = "plain"
 
     tarball_path: Path | None = None
-    squashfs_path: Path | None = None
+    squashfs_input: Path | None = None
     if args.from_tarball:
         tarball_path = args.from_tarball.resolve()
         if not tarball_path.is_file():
             print(f"Error: --from-tarball file not found: {tarball_path}", file=sys.stderr)
             sys.exit(1)
     if args.from_squashfs:
-        squashfs_path = args.from_squashfs.resolve()
-        if not squashfs_path.is_file():
-            print(f"Error: --from-squashfs file not found: {squashfs_path}", file=sys.stderr)
+        squashfs_input = args.from_squashfs.resolve()
+        if not squashfs_input.is_file():
+            print(f"Error: --from-squashfs file not found: {squashfs_input}", file=sys.stderr)
             sys.exit(1)
 
     config = dagger.Config(log_output=sys.stdout)
@@ -289,41 +426,109 @@ async def main() -> None:
             print(f"Using existing stage4 tarball: {tarball_path}")
             tarball = client.host().file(str(tarball_path))
 
-        if squashfs_path is None:
-            print("Creating SquashFS image...")
-            iso_image = await build_iso(client, tarball)
-            await iso_image.export("regicide-cosmic.img")
-            print("Output: regicide-cosmic.img")
-        else:
-            print(f"Using existing SquashFS image: {squashfs_path}")
+
+
+        out_dir = Path("build-system/catalyst/output")
 
         if tarball_path is None:
             print("Exporting stage4 tarball...")
-            await tarball.export("build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz")
+            await tarball.export(str(out_dir / "stage4-amd64-systemd-cosmic.tar.xz"))
             print("Output: build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz")
+            tarball_path = out_dir / "stage4-amd64-systemd-cosmic.tar.xz"
+
+        print("Loading SBOM for signing...")
+        subprocess.run(
+            ["./build-system/catalyst/stages/stage7-sbom.sh"],
+            check=True,
+        )
+        sbom_path = out_dir / "sbom.spdx.json"
+
+        squashfs_path = out_dir / "regicide-cosmic.img"
+        if squashfs_input is not None:
+            print(f"Using existing SquashFS image: {squashfs_input}")
+            subprocess.run(
+                ["cp", "-f", str(squashfs_input), str(squashfs_path)],
+                check=True,
+            )
+        else:
+            print("Creating SquashFS image locally...")
+            subprocess.run(
+                [
+                    "sh", "-c",
+                    "mkdir -p /tmp/regicide-squashfs-root && "
+                    f"tar -C /tmp/regicide-squashfs-root -xpJf '{tarball_path}' && "
+                    f"mksquashfs /tmp/regicide-squashfs-root '{squashfs_path}' "
+                    "-comp zstd -Xcompression-level 19 && "
+                    "rm -rf /tmp/regicide-squashfs-root",
+                ],
+                check=True,
+            )
+        print(f"Output: {squashfs_path}")
+
+        print("Running stage7 verification on host artifacts...")
+        subprocess.run(
+            ["./build-system/catalyst/stages/stage7-verify.sh"],
+            check=True,
+        )
+
+        identity = os.environ.get(
+            "REGICIDE_SIGN_IDENTITY",
+            "https://github.com/RegicideOS/RegicideOS/.github/workflows/release.yml@refs/heads/main",
+        )
+        print(f"Signing artifacts with identity: {identity}")
+        iso_image = client.host().file(str(out_dir / "regicide-cosmic.img"))
+        sbom_file = client.host().file(str(sbom_path))
+        (
+            img_sig,
+            img_cert,
+            img_bundle,
+            sbom_sig,
+            sbom_cert,
+            sbom_bundle,
+            attestation,
+        ) = await sign_artifacts(client, iso_image, sbom_file, identity)
+
+        await img_sig.export(str(out_dir / "regicide-cosmic.img.sig"))
+        await img_bundle.export(str(out_dir / "regicide-cosmic.img.bundle"))
+        await sbom_sig.export(str(out_dir / "sbom.spdx.json.sig"))
+        await sbom_bundle.export(str(out_dir / "sbom.spdx.json.bundle"))
+        await attestation.export(str(out_dir / "regicide-cosmic.img.att"))
+        if img_cert is not None:
+            await img_cert.export(str(out_dir / "regicide-cosmic.img.cert"))
+            await sbom_cert.export(str(out_dir / "sbom.spdx.json.cert"))
+
+        print("Output: build-system/catalyst/output/regicide-cosmic.img.sig")
+        print("Output: build-system/catalyst/output/regicide-cosmic.img.bundle")
+        if img_cert is not None:
+            print("Output: build-system/catalyst/output/regicide-cosmic.img.cert")
+        print("Output: build-system/catalyst/output/sbom.spdx.json.sig")
+        print("Output: build-system/catalyst/output/sbom.spdx.json.bundle")
+        if sbom_cert is not None:
+            print("Output: build-system/catalyst/output/sbom.spdx.json.cert")
+        print("Output: build-system/catalyst/output/regicide-cosmic.img.att")
 
         if args.encrypt:
-            if tarball_path is None:
-                # Export the stage4 tarball so the local image builder can use it.
-                tarball_host_path = Path(
-                    tempfile.mkdtemp(prefix="regicide-build-")
-                ) / "stage4.tar.xz"
-                print(f"Exporting stage4 tarball to {tarball_host_path}...")
-                await tarball.export(str(tarball_host_path))
-            else:
-                tarball_host_path = tarball_path
+            await build_qcow2_locally(
+                tarball_path=tarball_path,
+                output_path=Path(args.qcow2_output).resolve(),
+                disk_size=args.qcow2_size,
+                encrypt=True,
+            )
 
-            try:
-                await build_qcow2_locally(
-                    tarball_path=tarball_host_path,
-                    output_path=Path(args.qcow2_output).resolve(),
-                    disk_size=args.qcow2_size,
-                    encrypt=True,
-                )
-            finally:
-                if tarball_path is None:
-                    tarball_host_path.unlink(missing_ok=True)
-                    tarball_host_path.parent.rmdir()
+        if args.run_vm_test:
+            print("Building unencrypted QCOW2 for post-install VM test...")
+            qcow2_path = Path("build-system/catalyst/output/regicide-cosmic-vm-test.qcow2").resolve()
+            await build_qcow2_locally(
+                tarball_path=tarball_path,
+                output_path=qcow2_path,
+                disk_size=args.qcow2_size,
+                encrypt=False,
+            )
+            print("Running stage8 post-install VM test...")
+            subprocess.run(
+                ["./build-system/catalyst/stages/stage8-vm-test.sh", str(qcow2_path)],
+                check=True,
+            )
 
 
 if __name__ == "__main__":
