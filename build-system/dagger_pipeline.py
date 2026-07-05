@@ -81,6 +81,11 @@ async def build_cosmic(
         ["emerge", "-qv", "sys-apps/bubblewrap", "dev-vcs/git", "app-arch/tar", "net-misc/curl"]
     )
 
+    # Mount only the files each stage needs, and mount them just before the
+    # stage runs.  This keeps Dagger's cache keys stable: changing one stage
+    # script (e.g. stage6-finalize.sh) only invalidates that stage and later
+    # work, not the heavy Portage emerges in stages 1-5.
+    #
     # The rootfs lives in the container overlay (not a cache volume) because
     # Dagger's cache-volume snapshot commit fails on multi-gigabyte rootfs
     # volumes.  distfiles/binpkgs/cosmic-overlay remain on cache volumes so the
@@ -89,15 +94,28 @@ async def build_cosmic(
         with_tools
         .with_mounted_cache("/var/cache/cosmic-overlay", cosmic_overlay_cache)
         .with_exec(["mkdir", "-p", "/var/tmp/regicide-build/stage3"])
-    )
-
-    with_source = (
-        with_build_dir
-        .with_directory("/src", src)
-        .with_workdir("/src/build-system/catalyst")
         .with_env_variable("REGICIDE_BUILD_DIR", "/var/tmp/regicide-build")
         .with_env_variable("REGICIDE_OUTPUT_DIR", "/var/tmp/regicide-build/output")
         .with_env_variable("REGICIDE_COSMIC_OVERLAY_DIR", "/var/cache/cosmic-overlay")
+        .with_workdir("/src/build-system/catalyst")
+    )
+
+    stages_path = "/src/build-system/catalyst/stages"
+    overlays_path = "/src/overlays"
+    catalyst_path = "/src/build-system/catalyst"
+
+    # Mount the shared helper once.
+    build = with_build_dir.with_mounted_file(
+        f"{stages_path}/common.sh",
+        src.file("build-system/catalyst/stages/common.sh"),
+    )
+
+    # Stage 4a copies the local overlays into the rootfs; mount them too.
+    build = (
+        build
+        .with_directory(f"{catalyst_path}/overlay", src.directory("build-system/catalyst/overlay"))
+        .with_directory(f"{catalyst_path}/cosmic-overlay", src.directory("build-system/catalyst/cosmic-overlay"))
+        .with_directory(f"{overlays_path}/regicide-rust", src.directory("overlays/regicide-rust"))
     )
 
     # Split long Portage emerges into cacheable withExec layers to limit
@@ -116,20 +134,29 @@ async def build_cosmic(
         "stages/stage5-regicide.sh",
         "stages/stage6-finalize.sh",
     ]
-    build = with_source
     for script in stage_scripts:
-        build = build.with_exec([f"./{script}"], insecure_root_capabilities=True)
+        # stage_scripts entries include the "stages/" prefix so the exec command
+        # matches the repository layout.  Strip that prefix for the in-container
+        # mount path.
+        script_basename = script.removeprefix("stages/")
+        build = (
+            build.with_mounted_file(
+                f"{stages_path}/{script_basename}",
+                src.file(f"build-system/catalyst/{script}"),
+            )
+            .with_exec([f"./{script}"], insecure_root_capabilities=True)
+        )
 
     tarball_name = "stage4-amd64-systemd-cosmic.tar.xz"
     build = build.with_exec([
-        "mkdir", "-p", "/src/build-system/catalyst/output",
+        "mkdir", "-p", f"{catalyst_path}/output",
     ]).with_exec([
         "cp",
         f"/var/tmp/regicide-build/output/{tarball_name}",
-        f"/src/build-system/catalyst/output/{tarball_name}",
+        f"{catalyst_path}/output/{tarball_name}",
     ])
 
-    return build.with_workdir("/src/build-system/catalyst")
+    return build.with_workdir(catalyst_path)
 
 
 async def build_iso(
