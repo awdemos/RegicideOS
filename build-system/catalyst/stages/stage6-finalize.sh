@@ -62,8 +62,12 @@ PROFILE
     chown regicide:regicide /etc/portage/make.conf
     chmod 0664 /etc/portage/make.conf
 
-    # Ensure the root README.md shipped by the COSMIC overlay is world-readable.
-    chmod 0644 /README.md 2>/dev/null || true
+    # The COSMIC overlay ships a README at the root of the stage4 rootfs. Rename
+    # it so it is clear it belongs to the overlay, and keep it world-readable.
+    if [[ -f /README.md ]]; then
+        mv /README.md /README_COSMIC_OVERLAY.md
+    fi
+    chmod 0644 /README_COSMIC_OVERLAY.md 2>/dev/null || true
 
     # Disable sshd reverse-DNS lookups so SSH logins do not hang when DNS is
     # temporarily unavailable inside the VM.
@@ -185,6 +189,20 @@ EOF
     # and UI event sounds off for a quieter first-boot experience.
     mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicComp/v1
     printf false > /home/regicide/.config/cosmic/com.system76.CosmicComp/v1/active_hint
+
+    # Pin Rio terminal to the dock alongside the default COSMIC apps.
+    mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicAppList/v1
+    cat > /home/regicide/.config/cosmic/com.system76.CosmicAppList/v1/favorites <<'FAVEOF'
+[
+  "com.system76.CosmicAppList",
+  "com.system76.CosmicFiles",
+  "com.system76.CosmicEdit",
+  "com.system76.CosmicTerminal",
+  "com.rioterm.Rio",
+  "com.system76.CosmicSettings"
+]
+FAVEOF
+
     chown -R regicide:regicide /home/regicide/.config
 
     # Disable the Orca screen reader and GNOME/COSMIC event sounds by default.
