@@ -234,9 +234,10 @@ EOF
     cp /boot/config* /boot/config 2>/dev/null || true
 
     flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true
-    # Pre-install Rio terminal from Flathub so it is available out-of-the-box.
-    # Allow failure because flatpak install can require network/reachable repo.
-    flatpak install --noninteractive flathub com.rioterm.Rio || true
+    # Pre-install Rio terminal and OpenCode from Flathub so they are available
+    # out-of-the-box. Allow failure because flatpak install can require a
+    # network/reachable repo.
+    flatpak install --noninteractive flathub com.rioterm.Rio ai.opencode.opencode || true
 STAGE6EOF
 
 echo "Cleaning up..."
