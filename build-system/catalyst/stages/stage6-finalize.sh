@@ -153,6 +153,10 @@ SVCEOF
     chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
     chmod u+s /usr/libexec/dbus-daemon-launch-helper
     chmod u+s /usr/lib/polkit-1/polkit-agent-helper-1 2>/dev/null || true
+    # pam_unix uses unix_chkpwd to verify passwords when the calling process
+    # is not root. cosmic-greeter runs as the logged-in user, so this helper
+    # must be setuid or graphical login fails while SSH still works.
+    chmod u+s /sbin/unix_chkpwd /usr/sbin/unix_chkpwd 2>/dev/null || true
 
     rm -rf /opt
     mkdir /usr/opt
