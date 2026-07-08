@@ -506,7 +506,7 @@ async def main() -> None:
                     f"{sudo_prefix}tar -C \"$SQUASH_ROOT\" -xpJf '{tarball_path}'; "
                     f"{sudo_prefix}mksquashfs \"$SQUASH_ROOT\" '{squashfs_path}' "
                     "-comp zstd -Xcompression-level 19 -noappend; "
-                    f"{sudo_prefix}chown '$(id -u):$(id -g)' '{squashfs_path}'; "
+                    f"{sudo_prefix}chown {os.getuid()}:{os.getgid()} '{squashfs_path}'; "
                     f"unsquashfs -s '{squashfs_path}' >/dev/null; "
                     f"{sudo_prefix}rm -rf \"$SQUASH_ROOT\" || true",
                 ],
