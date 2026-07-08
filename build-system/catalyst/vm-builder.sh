@@ -40,7 +40,7 @@ fi
 # The target disk is attached as /dev/vda.
 TARGET="/dev/vda"
 OUTPUT="/run/regicide-output/regicide-cosmic.qcow2"
-DISK_SIZE="20G"
+DISK_SIZE="30G"
 if [[ -f "${DATA_DIR}/disk-size" ]]; then
     DISK_SIZE="$(cat "${DATA_DIR}/disk-size")"
 fi

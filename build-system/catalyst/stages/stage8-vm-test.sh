@@ -14,7 +14,24 @@ OUTPUT_DIR="${OUTPUT_DIR:-${CATALYST_DIR}/output}"
 DEFAULT_QCOW2="${OUTPUT_DIR}/regicide-cosmic.qcow2"
 QCOW2="${1:-${DEFAULT_QCOW2}}"
 QCOW2="$(realpath -e "${QCOW2}" 2>/dev/null || true)"
-SSH_PORT="${REGICIDE_VM_SSH_PORT:-2222}"
+
+# Pick a free local SSH forwarding port.  A fixed port (2222) collides when
+# another RegicideOS VM is already running on the host.
+find_free_port() {
+    local base="${1:-2222}"
+    local port
+    for port in $(seq "${base}" 2999); do
+        if ! (command -v ss >/dev/null 2>&1 && ss -Htn "sport = :${port}" | grep -q .) && \
+           ! (command -v netstat >/dev/null 2>&1 && netstat -atn 2>/dev/null | grep -q ":${port} ") && \
+           ! (timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" 2>/dev/null); then
+            echo "${port}"
+            return 0
+        fi
+    done
+    echo "ERROR: no free TCP port found in range ${base}-2999" >&2
+    return 1
+}
+SSH_PORT="${REGICIDE_VM_SSH_PORT:-$(find_free_port 2222)}"
 VM_MEMORY="${REGICIDE_VM_MEMORY:-4096}"
 VM_SMP="${REGICIDE_VM_SMP:-4}"
 TIMEOUT_SEC="${REGICIDE_VM_TIMEOUT:-300}"
