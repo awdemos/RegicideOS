@@ -937,13 +937,29 @@ if [[ ! -f "\${IMAGE_PATH}" ]]; then
     exit 1
 fi
 
+# Pick a free local SSH forwarding port so multiple RegicideOS VMs can run.
+find_free_port() {
+    local port
+    for port in $(seq 2222 2999); do
+        if ! (command -v ss >/dev/null 2>&1 && ss -Htn "sport = :${port}" | grep -q .) && \
+           ! (command -v netstat >/dev/null 2>&1 && netstat -atn 2>/dev/null | grep -q ":${port} ") && \
+           ! (timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" 2>/dev/null); then
+            echo "${port}"
+            return 0
+        fi
+    done
+    echo "ERROR: no free TCP port found in range 2222-2999" >&2
+    return 1
+}
+SSH_PORT="\${REGICIDE_VM_SSH_PORT:-\$(find_free_port)}"
+
 echo "Starting RegicideOS QEMU VM..."
 echo "  Image: \${IMAGE_PATH}"
 echo "  Memory: 4G"
 echo "  CPUs: 2"
-echo "  SSH: localhost:2222 -> :22"
+echo "  SSH: localhost:\${SSH_PORT} -> :22"
 echo ""
-echo "To connect via SSH:  ssh -p 2222 regicide@localhost"
+echo "To connect via SSH:  ssh -p \${SSH_PORT} regicide@localhost"
 echo "To stop: Ctrl+A then X (if using -nographic) or close window"
 echo ""
 
@@ -991,7 +1007,7 @@ qemu-system-x86_64 \\
     -smp 2 \\
     -cpu host \\
     -drive file="\${IMAGE_PATH}",format=qcow2,if=virtio \\
-    -netdev user,id=net0,hostfwd=tcp::2222-:22 \\
+    -netdev "user,id=net0,hostfwd=tcp::\\${SSH_PORT}-:22" \\
     -device virtio-net-pci,netdev=net0 \\
     -vga virtio \\
     -display sdl,gl=on \\
