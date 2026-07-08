@@ -210,15 +210,18 @@ PYEOF
 
 # Wait for sshd to be ready on the forwarded port.  A TCP open is not enough;
 # QEMU's user networking accepts the connection before the guest sshd is ready,
-# so wait for the SSH protocol banner.
+# so wait for the SSH protocol banner.  Allow extra time for first-boot sshd
+# socket activation and host-key generation on slower hosts.
 echo "Waiting for sshd banner on localhost:${SSH_PORT}..."
 ready=false
-for _ in $(seq 1 120); do
+# Give systemd a moment to start sshd.socket after the login prompt appears.
+sleep 3
+for _ in $(seq 1 180); do
     # Read one line rather than a fixed byte count; OpenSSH banners are
     # shorter than 32 bytes ("SSH-2.0-...\\r\\n"), so head -c 32 can block
     # waiting for more data and cause the timeout to fire even when sshd is
     # already listening.
-    if timeout 2 bash -c "exec 3<>/dev/tcp/localhost/${SSH_PORT}; head -n 1 <&3 | grep -q SSH" 2>/dev/null; then
+    if timeout 3 bash -c "exec 3<>/dev/tcp/localhost/${SSH_PORT}; head -n 1 <&3 | grep -q SSH" 2>/dev/null; then
         ready=true
         break
     fi
