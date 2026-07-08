@@ -1,0 +1,26 @@
+[project]
+name = "regicide-update"
+version = "0.1.0"
+description = "Portage-based update and rollback suite for RegicideOS"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+regicide-update = "regicide_update.cli_update:main"
+regicide-rollback = "regicide_update.cli_rollback:main"
+regicide-image = "regicide_update.cli_image:main"
+regicide-boot-revert = "regicide_update.boot_revert:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

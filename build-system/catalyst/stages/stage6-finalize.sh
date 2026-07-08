@@ -7,6 +7,21 @@ STAGE_NAME="stage6-finalize"
 
 log_status "start" "post-build configuration and tarball creation"
 echo "Applying post-build configuration..."
+
+# Stage the regicide-update source tree inside the rootfs so the chroot can
+# install it into the image.
+REPO_ROOT="$(cd "${CATALYST_DIR}/../.." && pwd)"
+REGICIDE_UPDATE_STAGING="${ROOTFS}/tmp/regicide_update_src"
+rm -rf "${REGICIDE_UPDATE_STAGING}"
+install -d "${REGICIDE_UPDATE_STAGING}/src" "${REGICIDE_UPDATE_STAGING}/data" \
+    "${REGICIDE_UPDATE_STAGING}/build-system/catalyst"
+cp -a "${REPO_ROOT}/src/regicide_update" "${REGICIDE_UPDATE_STAGING}/src/"
+cp "${REPO_ROOT}/pyproject.toml" "${REGICIDE_UPDATE_STAGING}/"
+cp "${REPO_ROOT}/build-system/catalyst/seed-overlays.sh" \
+    "${REGICIDE_UPDATE_STAGING}/build-system/catalyst/"
+cp "${REPO_ROOT}/data/regicide-rollback-apply.service" \
+    "${REGICIDE_UPDATE_STAGING}/data/"
+
 run_in_chroot bash <<'STAGE6EOF'
     if command -v dracut &> /dev/null; then
         dracut --force --no-hostonly --kver "$(ls /lib/modules/ | head -n1)"
@@ -260,6 +275,39 @@ EOF
     # out-of-the-box. Allow failure because flatpak install can require a
     # network/reachable repo.
     flatpak install --noninteractive flathub com.rioterm.Rio ai.opencode.opencode || true
+
+    # Install the regicide-update suite (update/rollback/image tools) from the
+    # repo source tree. It is pure Python, so copy it directly into the system
+    # site-packages and provide thin CLI wrappers.
+    REGICIDE_UPDATE_SRC="/tmp/regicide_update_src"
+    if [[ -d "${REGICIDE_UPDATE_SRC}/src/regicide_update" ]]; then
+        PY_SITE="$(python3 -c 'import site, sys; print(site.getsitepackages()[0])')"
+        install -d "${PY_SITE}"
+        cp -a "${REGICIDE_UPDATE_SRC}/src/regicide_update" "${PY_SITE}/regicide_update"
+        install -d /usr/lib/regicide-update
+        install -Dm755 "${REGICIDE_UPDATE_SRC}/build-system/catalyst/seed-overlays.sh" \
+            /usr/lib/regicide-update/seed-overlays.sh
+        install -Dm644 "${REGICIDE_UPDATE_SRC}/data/regicide-rollback-apply.service" \
+            /etc/systemd/system/regicide-rollback-apply.service
+        cat > /usr/bin/regicide-update <<'CMDEOF'
+#!/bin/sh
+exec python3 -m regicide_update.cli_update "$@"
+CMDEOF
+        cat > /usr/bin/regicide-rollback <<'CMDEOF'
+#!/bin/sh
+exec python3 -m regicide_update.cli_rollback "$@"
+CMDEOF
+        cat > /usr/bin/regicide-image <<'CMDEOF'
+#!/bin/sh
+exec python3 -m regicide_update.cli_image "$@"
+CMDEOF
+        cat > /usr/bin/regicide-boot-revert <<'CMDEOF'
+#!/bin/sh
+exec python3 -m regicide_update.boot_revert "$@"
+CMDEOF
+        chmod 755 /usr/bin/regicide-update /usr/bin/regicide-rollback /usr/bin/regicide-image /usr/bin/regicide-boot-revert
+        systemctl enable regicide-rollback-apply.service || true
+    fi
 STAGE6EOF
 
 echo "Cleaning up..."
