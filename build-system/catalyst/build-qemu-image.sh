@@ -1001,16 +1001,22 @@ if [[ -n "\${OVMF_VARS}" ]]; then
     UEFI_FLAGS="\${UEFI_FLAGS} -drive if=pflash,format=raw,file=\${TMP_VARS}"
 fi
 
+DISPLAY_ARGS=(-nographic -vga none)
+if [[ -n "\${DISPLAY:-}" ]] && command -v xvfb-run >/dev/null 2>&1; then
+    DISPLAY_ARGS=(-vga virtio -display sdl,gl=on)
+elif [[ -n "\${REGICIDE_VM_VNC:-}" ]]; then
+    DISPLAY_ARGS=(-vga virtio -display "vnc=\${REGICIDE_VM_VNC}")
+fi
+
 qemu-system-x86_64 \\
     -enable-kvm \\
     -m 4G \\
     -smp 2 \\
     -cpu host \\
     -drive file="\${IMAGE_PATH}",format=qcow2,if=virtio \\
-    -netdev "user,id=net0,hostfwd=tcp::\\${SSH_PORT}-:22" \\
+    -netdev "user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22" \\
     -device virtio-net-pci,netdev=net0 \\
-    -vga virtio \\
-    -display sdl,gl=on \\
+    "\${DISPLAY_ARGS[@]}" \\
     -machine type=q35,accel=kvm \\
     \${UEFI_FLAGS} \\
     \$@
