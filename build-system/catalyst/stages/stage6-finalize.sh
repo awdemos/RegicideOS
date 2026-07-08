@@ -99,7 +99,7 @@ chmod 0755 /etc/ssh 2>/dev/null || true
 # ssh-keygen creates a temporary file in the target directory and renames it
 # into place. On overlayfs this rename can fail with EXDEV, so generate keys
 # on a tmpfs-backed temporary path and copy the result to /etc/ssh.
-KEY_TMP="$(mktemp -d -p /run regicide-ssh-XXXXXX)"
+KEY_TMP="$(mktemp -d -p /tmp regicide-ssh-XXXXXX)"
 trap 'rm -rf "${KEY_TMP}"' EXIT
 if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
     ssh-keygen -t ed25519 -f "${KEY_TMP}/ssh_host_ed25519_key" -N "" -C "regicideos-$(date -u +%Y%m%d%H%M%S)" >/dev/null 2>&1
