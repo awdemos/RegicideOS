@@ -441,14 +441,19 @@ if ! parted -s "${TARGET_RAW}" print > /dev/null 2>&1; then
 fi
 
 # The builder VM powers off regardless of success; verify it actually finished
-# by looking for the sentinel file on the ROOTS partition.
+# by looking for the sentinel file on the ROOTS partition.  A raw file needs a
+# loop device before its partitions are addressable.
 SENTINEL_MNT="$(TMPDIR=/var/tmp mktemp -d)"
+SENTINEL_LOOP=""
 SENTINEL_FOUND=false
-if mount -o ro "${TARGET_RAW}2" "${SENTINEL_MNT}" 2>/dev/null; then
-    if [[ -f "${SENTINEL_MNT}/var/lib/regicide-build-complete" ]]; then
-        SENTINEL_FOUND=true
+if SENTINEL_LOOP="$(losetup -f --show -P "${TARGET_RAW}" 2>/dev/null)"; then
+    if mount -o ro "${SENTINEL_LOOP}p2" "${SENTINEL_MNT}" 2>/dev/null; then
+        if [[ -f "${SENTINEL_MNT}/var/lib/regicide-build-complete" ]]; then
+            SENTINEL_FOUND=true
+        fi
+        umount "${SENTINEL_MNT}" 2>/dev/null || true
     fi
-    umount "${SENTINEL_MNT}" 2>/dev/null || true
+    losetup -d "${SENTINEL_LOOP}" 2>/dev/null || true
 fi
 rmdir "${SENTINEL_MNT}" 2>/dev/null || true
 if [[ "${SENTINEL_FOUND}" != true ]]; then
