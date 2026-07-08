@@ -294,6 +294,17 @@ checks=(
     "podman:command -v podman:podman"
     "cosmic-session:command -v cosmic-session:cosmic-session"
     "cosmic-greeter:command -v cosmic-greeter:cosmic-greeter"
+    # RegicideOS update/rollback/image suite checks (avoid literal colons and single quotes in commands)
+    "regicide-update-installed:command -v regicide-update:/usr/bin/regicide-update"
+    "regicide-rollback-installed:command -v regicide-rollback:/usr/bin/regicide-rollback"
+    "regicide-image-installed:command -v regicide-image:/usr/bin/regicide-image"
+    "regicide-boot-revert-installed:command -v regicide-boot-revert:/usr/bin/regicide-boot-revert"
+    "regicide-update-help:sudo -n regicide-update --help | head -1 | grep -q usage && echo help-ok:help-ok"
+    "regicide-rollback-help:sudo -n regicide-rollback --help | head -1 | grep -q usage && echo help-ok:help-ok"
+    "regicide-image-help:sudo -n regicide-image --help | head -1 | grep -q usage && echo help-ok:help-ok"
+    "regicide-rollback-create:sudo -n regicide-rollback create --tag stage8smoke | grep -q Created && echo snapshot-ok:snapshot-ok"
+    "regicide-rollback-list:sudo -n regicide-rollback list | grep -q stage8smoke && echo list-ok:list-ok"
+    "regicide-rollback-delete:cd /roots/.regicide-snapshots && sudo -n regicide-rollback delete $(ls -t | grep stage8smoke | head -1) | grep -q Deleted && echo delete-ok:delete-ok"
 )
 
 failures=""
