@@ -874,6 +874,15 @@ GRUB_PRELOAD_MODULES="cryptodisk luks luks2 gcry_rijndael gcry_sha256 gcry_sha1 
 GRUBDEFAULT
 
 # ---------------------------------------------------------------------------
+# Build completion sentinel
+# ---------------------------------------------------------------------------
+# Write a marker file so VM-based wrappers can distinguish a successful build
+# from an early poweroff caused by a builder failure.
+echo "Writing build completion sentinel..."
+mkdir -p "${MOUNT_DIR}/var/lib"
+touch "${MOUNT_DIR}/var/lib/regicide-build-complete"
+
+# ---------------------------------------------------------------------------
 # Unmount chroot filesystems
 # ---------------------------------------------------------------------------
 echo "Unmounting chroot filesystems..."
