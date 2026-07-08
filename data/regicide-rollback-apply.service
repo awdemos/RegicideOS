@@ -1,0 +1,15 @@
+[Unit]
+Description=Apply pending Regicide snapshot revert before overlay mounts
+DefaultDependencies=no
+Before=local-fs-pre.target
+After=systemd-remount-fs.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 -m regicide_update.boot_revert
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target
