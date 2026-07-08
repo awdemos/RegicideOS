@@ -713,8 +713,7 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
         execute(&format!("sgdisk --clear {drive}"))?;
 
         // Create partitions
-        let mut part_num = 1u32;
-        for partition in layout {
+        for (part_num, partition) in (1u32..).zip(layout.iter()) {
             let size = match partition.size.as_str() {
                 "512M" => "0:+512M",
                 "8G" => "0:+8G",
@@ -735,8 +734,6 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             execute(&format!(
                 "sgdisk --new={part_num}:{size} --typecode={part_num}:{typecode} --change-name={part_num}:'{label}' {drive}"
             ))?;
-
-            part_num += 1;
         }
 
         // Use --refresh flag to notify kernel
@@ -870,16 +867,15 @@ fn verify_filesystem(partition: &str, fs_type: &str) -> Result<()> {
                 }
             }
         }
-        "btrfs" => {
-            if execute("which btrfs").is_ok() {
-                let result = execute(&format!("btrfs check {partition}"));
-                if result.is_err() {
-                    warn(&format!("BTRFS filesystem check failed for {partition}"));
-                } else {
-                    info(&format!("BTRFS filesystem verified for {partition}"));
-                }
+        "btrfs" if execute("which btrfs").is_ok() => {
+            let result = execute(&format!("btrfs check {partition}"));
+            if result.is_err() {
+                warn(&format!("BTRFS filesystem check failed for {partition}"));
+            } else {
+                info(&format!("BTRFS filesystem verified for {partition}"));
             }
         }
+        "btrfs" => {}
         _ => {}
     }
     Ok(())

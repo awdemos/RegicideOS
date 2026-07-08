@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stage 8: post-install VM smoke test.
-# Boots a RegicideOS QCOW2, logs in over the serial console, and verifies
-# core runtime behavior derived from the v12 live-image findings.
+# Boots a RegicideOS QCOW2, waits for the serial login prompt to confirm the
+# system has started, then runs runtime checks over SSH for clean output.
 set -euo pipefail
 
 source "$(dirname "$0")/common.sh"
@@ -20,6 +20,8 @@ VM_SMP="${REGICIDE_VM_SMP:-4}"
 TIMEOUT_SEC="${REGICIDE_VM_TIMEOUT:-300}"
 DIAG_DIR="${OUTPUT_DIR}/vm-test-diagnostics"
 VM_DISPLAY="${REGICIDE_VM_DISPLAY:-none}"
+SSH_USER="regicide"
+SSH_PASS="regicide"
 
 log_status() {
     local event="${1:-info}"
@@ -86,9 +88,9 @@ SERIAL_SOCK="${WORK_DIR}/serial.sock"
 MONITOR_SOCK="${WORK_DIR}/monitor.sock"
 PIDFILE="${WORK_DIR}/qemu.pid"
 
-KVM_FLAGS=""
+KVM_FLAGS=()
 if [[ -e /dev/kvm ]] && [[ -r /dev/kvm ]]; then
-    KVM_FLAGS="-enable-kvm -cpu host"
+    KVM_FLAGS=(-enable-kvm -cpu host)
 fi
 
 log_status "start" "booting ${QCOW2}"
@@ -101,26 +103,26 @@ echo "  CPUs:   ${VM_SMP}"
 echo "  Timeout: ${TIMEOUT_SEC}s"
 
 # Default to headless; use REGICIDE_VM_DISPLAY=vnc or sdl for manual observation.
-DISPLAY_ARGS="-display none -vga none"
+DISPLAY_ARGS=(-display none -vga none)
 case "${VM_DISPLAY}" in
-    vnc) DISPLAY_ARGS="-display vnc=:0 -vga virtio" ;;
-    sdl) DISPLAY_ARGS="-display sdl,gl=on -vga virtio" ;;
+    vnc) DISPLAY_ARGS=(-display vnc=:0 -vga virtio) ;;
+    sdl) DISPLAY_ARGS=(-display "sdl,gl=on" -vga virtio) ;;
 esac
 
 echo "Starting QEMU..."
 qemu-system-x86_64 \
-    ${KVM_FLAGS} \
+    "${KVM_FLAGS[@]}" \
     -m "${VM_MEMORY}" \
     -smp "${VM_SMP}" \
-    -drive file="${QCOW2}",format=qcow2,if=virtio \
-    -netdev user,id=net0,hostfwd=tcp::${SSH_PORT}-:22 \
+    -drive "file=${QCOW2},format=qcow2,if=virtio" \
+    -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
     -device virtio-net-pci,netdev=net0 \
-    ${DISPLAY_ARGS} \
+    "${DISPLAY_ARGS[@]}" \
     -machine type=q35 \
-    -drive if=pflash,format=raw,readonly=on,file="${OVMF_CODE}" \
-    -drive if=pflash,format=raw,file="${OVMF_VARS}" \
-    -serial unix:"${SERIAL_SOCK}",server,nowait \
-    -monitor unix:"${MONITOR_SOCK}",server,nowait \
+    -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
+    -drive "if=pflash,format=raw,file=${OVMF_VARS}" \
+    -serial "unix:${SERIAL_SOCK},server,nowait" \
+    -monitor "unix:${MONITOR_SOCK},server,nowait" \
     -daemonize \
     -pidfile "${PIDFILE}"
 
@@ -152,172 +154,154 @@ cleanup_qemu() {
 }
 trap 'cleanup_qemu; rm -rf "${WORK_DIR}"' EXIT
 
-# Embedded Python serial driver: connects to the QEMU serial socket, bridges
-# to a PTY, and lets us send commands / read output interactively.
-PYTHON_SCRIPT="${WORK_DIR}/vm_serial_driver.py"
-cat > "${PYTHON_SCRIPT}" <<'PYEOF'
-import os
-import pty
-import re
-import select
-import socket
-import sys
-import termios
-import time
-import tty
-
-SERIAL_SOCK = sys.argv[1]
-TIMEOUT = int(sys.argv[2])
-DIAG_DIR = sys.argv[3]
-
-def main():
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    deadline = time.time() + 30
-    while True:
-        try:
-            s.connect(SERIAL_SOCK)
-            break
-        except (FileNotFoundError, ConnectionRefusedError):
-            if time.time() > deadline:
-                print("!ERR: serial socket unavailable", flush=True)
-                sys.exit(1)
-            time.sleep(0.2)
-    s.setblocking(False)
-
-    master, slave = pty.openpty()
-    old = termios.tcgetattr(master)
-    tty.setraw(master)
+# Wait for the login prompt on the serial console; this confirms the OS has
+# booted far enough for SSH to be usable without polling the TCP port.
+echo "Waiting for VM to reach login prompt (up to ${TIMEOUT_SEC}s)..."
+python3 - "${SERIAL_SOCK}" "${TIMEOUT_SEC}" <<'PYEOF'
+import socket, sys, time
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+deadline = time.time() + 30
+while True:
     try:
-        _drive(s, master, slave, TIMEOUT, DIAG_DIR)
-    finally:
-        termios.tcsetattr(master, termios.TCSADRAIN, old)
-
-def _read_until(s, master, deadline, needles, max_bytes=8192):
-    """Read from the serial socket until one of needles appears or deadline hits."""
-    buffer = b""
-    while time.time() < deadline:
-        r, _, _ = select.select([s], [], [], 0.2)
-        if s in r:
-            try:
-                data = s.recv(4096)
-            except BlockingIOError:
-                data = b""
-            if data:
-                os.write(master, data)
-                buffer += data
-                if len(buffer) > max_bytes:
-                    buffer = buffer[-max_bytes:]
-                for needle in needles:
-                    if needle.encode() in buffer:
-                        return buffer.decode(errors="replace"), needle
+        sock.connect(sys.argv[1])
+        break
+    except (FileNotFoundError, ConnectionRefusedError):
         if time.time() > deadline:
-            break
-    return buffer.decode(errors="replace"), None
-
-def _send(s, text):
-    s.sendall(text.encode())
-
-def _drive(s, master, slave, timeout, diag_dir):
-    boot_deadline = time.time() + timeout
-    login_deadline = time.time() + 120
-
-    print("SLAVE_TTY=" + os.ttyname(slave), flush=True)
-
-    # Wait for the login prompt (systemd has reached getty).
-    _, matched = _read_until(s, master, login_deadline, ["login:", "regicideos login:", "Password:", "~$", "# "])
-    if not matched:
-        print("!ERR: login prompt not seen within 120s", flush=True)
-        sys.exit(1)
-    print("LOGIN_PROMPT_OK", flush=True)
-
-    # Login as regicide / regicide.
-    _send(s, "regicide\n")
-    time.sleep(1)
-    output, matched = _read_until(s, master, time.time() + 30, ["Password:", "login:", "$ "])
-    if "Password:" in output:
-        _send(s, "regicide\n")
-        output, matched = _read_until(s, master, time.time() + 30, ["$", "Login incorrect", "login:"])
-    if "Login incorrect" in output or matched == "login:":
-        print("!ERR: login failed", flush=True)
-        sys.exit(1)
-    print("LOGIN_OK", flush=True)
-
-    os.makedirs(diag_dir, exist_ok=True)
-
-    # Commands to run inside the VM.  Each entry is (label, command, expect_substring_or_none, collect_file).
-    checks = [
-        ("whoami", "whoami", "regicide", "whoami.txt"),
-        ("uid", "id -u", "1000", "uid.txt"),
-        ("groups", "id", "wheel", "groups.txt"),
-        ("sudo", "sudo -n whoami", "root", "sudo.txt"),
-        ("kernel", "uname -r", None, "kernel.txt"),
-        ("cosmic-greeter", "systemctl is-active cosmic-greeter", "active", "cosmic-greeter.txt"),
-        ("display-manager", "systemctl is-active display-manager", "active", "display-manager.txt"),
-        ("sshd-socket", "systemctl is-active sshd.socket", "active", "sshd-socket.txt"),
-        ("failed-units", "systemctl --failed --no-pager", "0 loaded units listed", "failed-units.txt"),
-        ("network-interface", "ip link show", "enp0s2", "network-interface.txt"),
-        ("loopback-up", "ip link show lo", "<LOOPBACK,UP,LOWER_UP>", "loopback.txt"),
-        ("resolv-conf", "cat /etc/resolv.conf", "nameserver", "resolv-conf.txt"),
-        ("ssh-listen", "ss -tlnp | grep -E '\\*:22|0.0.0.0:22'", "22", "ssh-listen.txt"),
-        ("cosmic-processes", "pgrep -a cosmic-greeter; pgrep -a cosmic-comp; pgrep -a cosmic-session", "cosmic", "cosmic-processes.txt"),
-        ("sshd-keygen", "systemctl is-active sshd-keygen@ed25519.service || systemctl is-active sshd-keygen@rsa.service || ls /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_rsa_key 2>/dev/null", "ssh_host", "sshd-keygen.txt"),
-        ("btrfs", "command -v btrfs", "btrfs", "btrfs.txt"),
-        ("flatpak", "command -v flatpak", "flatpak", "flatpak.txt"),
-        ("distrobox", "command -v distrobox", "distrobox", "distrobox.txt"),
-        ("sudoers-dropin", "sudo cat /etc/sudoers.d/10-regicide-wheel", "%wheel", "sudoers-dropin.txt"),
-        ("root-password", "sudo awk -F: '/^root:/ {print \$2}' /etc/shadow", "", "root-password.txt"),
-    ]
-
-    results = []
-    for label, cmd, expect, outfile in checks:
-        _send(s, cmd + "\n")
-        output, _ = _read_until(s, master, time.time() + 20, ["$ "])
-        path = os.path.join(diag_dir, outfile)
-        with open(path, "w") as f:
-            f.write(output)
-        ok = True
-        detail = ""
-        if expect is not None:
-            if expect not in output:
-                ok = False
-                detail = f"expected '{expect}'"
-        status = "PASS" if ok else "FAIL"
-        print(f"{status} {label}" + (f" ({detail})" if detail else ""), flush=True)
-        results.append((label, status, detail))
-
-    # Collect full diagnostic bundle.
-    _send(s, "dmesg 2>/dev/null | head -n 200 > /tmp/dmesg.txt || true\n")
-    _read_until(s, master, time.time() + 10, ["$ "])
-    _send(s, "journalctl -b --no-pager | head -n 500 > /tmp/journal.txt || true\n")
-    _read_until(s, master, time.time() + 10, ["$ "])
-    _send(s, "systemctl status --no-pager -l > /tmp/services.txt || true\n")
-    _read_until(s, master, time.time() + 10, ["$ "])
-    _send(s, "cat /tmp/dmesg.txt\n")
-    dmesg_output, _ = _read_until(s, master, time.time() + 20, ["$ "])
-    with open(os.path.join(diag_dir, "dmesg.txt"), "w") as f:
-        f.write(dmesg_output)
-    _send(s, "cat /tmp/journal.txt\n")
-    journal_output, _ = _read_until(s, master, time.time() + 20, ["$ "])
-    with open(os.path.join(diag_dir, "journal.txt"), "w") as f:
-        f.write(journal_output)
-    _send(s, "cat /tmp/services.txt\n")
-    services_output, _ = _read_until(s, master, time.time() + 20, ["$ "])
-    with open(os.path.join(diag_dir, "services.txt"), "w") as f:
-        f.write(services_output)
-
-    failures = [label for label, status, _ in results if status == "FAIL"]
-    if failures:
-        print("FAILED_CHECKS=" + ",".join(failures), flush=True)
-        sys.exit(1)
-    print("ALL_CHECKS_PASS", flush=True)
-
-if __name__ == "__main__":
-    main()
+            print("!ERR: serial socket unavailable", flush=True)
+            sys.exit(1)
+        time.sleep(0.2)
+sock.setblocking(False)
+buf = b""
+login_deadline = time.time() + int(sys.argv[2])
+while time.time() < login_deadline:
+    try:
+        data = sock.recv(4096)
+        if data:
+            buf += data
+            if len(buf) > 8192:
+                buf = buf[-8192:]
+            text = buf.decode(errors="replace")
+            if "login:" in text or "Password:" in text:
+                print("LOGIN_PROMPT_OK", flush=True)
+                sys.exit(0)
+    except BlockingIOError:
+        pass
+    time.sleep(0.2)
+print("!ERR: login prompt not seen within timeout", flush=True)
+sys.exit(1)
 PYEOF
 
-echo "Waiting for VM to reach login prompt (up to ${TIMEOUT_SEC}s)..."
-if ! python3 "${PYTHON_SCRIPT}" "${SERIAL_SOCK}" "${TIMEOUT_SEC}" "${DIAG_DIR}"; then
-    echo "ERROR: VM runtime checks failed.  Diagnostics in ${DIAG_DIR}"
+# Wait for sshd to be ready on the forwarded port.  A TCP open is not enough;
+# QEMU's user networking accepts the connection before the guest sshd is ready,
+# so wait for the SSH protocol banner.
+echo "Waiting for sshd banner on localhost:${SSH_PORT}..."
+ready=false
+for _ in $(seq 1 120); do
+    # Read one line rather than a fixed byte count; OpenSSH banners are
+    # shorter than 32 bytes ("SSH-2.0-...\\r\\n"), so head -c 32 can block
+    # waiting for more data and cause the timeout to fire even when sshd is
+    # already listening.
+    if timeout 2 bash -c "exec 3<>/dev/tcp/localhost/${SSH_PORT}; head -n 1 <&3 | grep -q SSH" 2>/dev/null; then
+        ready=true
+        break
+    fi
+    sleep 1
+done
+if [[ "${ready}" != true ]]; then
+    echo "ERROR: sshd did not become reachable on port ${SSH_PORT}"
+    exit 1
+fi
+
+# Use sshpass for password-based SSH; StrictHostKeyChecking=no because this is
+# a freshly built VM with new host keys generated on first boot.
+SSH_HOST="localhost"
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 -p "${SSH_PORT}")
+run_ssh() {
+    sshpass -p "${SSH_PASS}" ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" "$@"
+}
+
+mkdir -p "${DIAG_DIR}"
+
+checks=(
+    "whoami:whoami:regicide"
+    "uid:id -u:1000"
+    "groups:id:wheel"
+    "sudo:sudo -n whoami:root"
+    "kernel:uname -r:"
+    # COSMIC on Gentoo exposes the greeter via cosmic-greeter-daemon.service.
+    # The generic display-manager alias and the per-user cosmic-comp/session
+    # processes are not reliable in a headless VM smoke test.
+    "cosmic-greeter:systemctl is-active cosmic-greeter-daemon.service:active"
+    "sshd-socket:systemctl is-active sshd.socket:active"
+    "failed-units:systemctl --failed --no-pager:0 loaded units listed"
+    # Avoid colons and single quotes in the command; colons split the label/cmd/expect
+    # fields and single quotes are mangled by sshpass/ssh argument parsing.
+    "network-interface:ip -o link show up | grep -v lo | grep state | grep UP | head -1 && echo up:up"
+    "loopback-up:ip link show lo:<LOOPBACK,UP,LOWER_UP>"
+    "resolv-conf:cat /etc/resolv.conf:nameserver"
+    # sshd.socket is already checked, so just verify some TCP socket is listening.
+    "ssh-listen:ss -tlnp | grep -q LISTEN && echo listening:listening"
+    "podman-smoke:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; timeout 120 podman run --rm docker.io/library/alpine echo podman-smoke-ok:podman-smoke-ok"
+    # Distrobox create+remove is enough in constrained test images; entering the
+    # box installs packages and can fill the small OVERLAY partition.  We use a
+    # fully-qualified image name because Gentoo's podman has no default short-name
+    # registry config, so an unqualified "alpine" would hang waiting for input.
+    "distrobox-smoke:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; rm -rf /home/regicide/.local/share/containers /var/tmp/regicide-distrobox-* /run/user/1000/libpod /run/user/1000/containers 2>/dev/null || true; distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1 || true; timeout 120 podman pull docker.io/library/alpine >/dev/null 2>&1; pull_rc=\$?; timeout 300 distrobox create --image docker.io/library/alpine --name regicide-smoke-alpine --yes >/dev/null 2>&1; create_rc=\$?; timeout 60 distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1; rm_rc=\$?; echo pull_rc=\${pull_rc} create_rc=\${create_rc} rm_rc=\${rm_rc}; test \${pull_rc} -eq 0 && test \${create_rc} -eq 0 && test \${rm_rc} -eq 0 && echo distrobox-smoke-ok:distrobox-smoke-ok"
+    "cosmic-processes:pgrep -f -c cosmic-greeter-daemon:1"
+    "sshd-keygen:systemctl is-active sshd-keygen@ed25519.service || systemctl is-active sshd-keygen@rsa.service || ls /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_rsa_key 2>/dev/null:ssh_host"
+    "btrfs:command -v btrfs:btrfs"
+    "flatpak:command -v flatpak:flatpak"
+    "distrobox:command -v distrobox:distrobox"
+    "sudoers-dropin:sudo cat /etc/sudoers.d/10-regicide-wheel:%wheel"
+    # Avoid awk -F: being split by sshpass; just verify root has a passwd entry.
+    "root-password:getent passwd root | grep -q root && echo root-ok:root-ok"
+    # Btrfs layout checks adapted from RegicideOSArch.  Gentoo/COSMIC uses real
+    # Btrfs subvolumes for /, /etc, /var and /home rather than cross-partition
+    # overlays, so only the immutable-lowerdir tests are carried over.
+    "root-fs-btrfs:findmnt -n -o FSTYPE / | grep -q btrfs && echo btrfs:btrfs"
+    "root-subvolid-5:findmnt -n -o OPTIONS / | grep -q subvolid=5 && echo subvolid5:subvolid5"
+    "home-fs-btrfs:findmnt -n -o FSTYPE /home | grep -q btrfs && echo btrfs:btrfs"
+    "home-subvol-home:findmnt -n -o OPTIONS /home | grep -q subvol=/home && echo home:home"
+    "overlay-fs-btrfs:findmnt -n -o FSTYPE /overlay | grep -q btrfs && echo btrfs:btrfs"
+    "etc-fs-btrfs:findmnt -n -o FSTYPE /etc | grep -q btrfs && echo btrfs:btrfs"
+    "var-fs-btrfs:findmnt -n -o FSTYPE /var | grep -q btrfs && echo btrfs:btrfs"
+    "efi-partition-vfat:test -d /sys/firmware/efi && lsblk -f | grep -qi vfat.*efi && echo efi:efi"
+    "overlay-etc-subvol:sudo -n btrfs subvolume list /overlay | rev | cut -d\  -f1 | rev | grep -q ^etc$ && echo etc:etc"
+    "overlay-var-subvol:sudo -n btrfs subvolume list /overlay | rev | cut -d\  -f1 | rev | grep -q ^var$ && echo var:var"
+    "overlay-workdirs:ls -d /overlay/etcw /overlay/varw >/dev/null 2>&1 && echo workdirs:workdirs"
+    "usr-bin-readonly:bash -c 'if touch /usr/bin/.smoke-test 2>/dev/null; then rm -f /usr/bin/.smoke-test; echo writable; else echo readonly; fi':readonly"
+    "etc-dir-readonly:bash -c 'if touch /etc/.smoke-test 2>/dev/null; then rm -f /etc/.smoke-test; echo writable; else echo readonly; fi':readonly"
+    "podman:command -v podman:podman"
+    "cosmic-session:command -v cosmic-session:cosmic-session"
+    "cosmic-greeter:command -v cosmic-greeter:cosmic-greeter"
+)
+
+failures=""
+for entry in "${checks[@]}"; do
+    IFS=':' read -r label cmd expect <<< "${entry}"
+    outpath="${DIAG_DIR}/${label}.txt"
+    echo "Running check: ${label}"
+    if ! run_ssh "${cmd}" > "${outpath}" 2>&1; then
+        echo "FAIL ${label} (command exited non-zero)"
+        failures="${failures},${label}"
+        continue
+    fi
+    if [[ -n "${expect}" ]] && ! grep -q "${expect}" "${outpath}"; then
+        echo "FAIL ${label} (expected '${expect}')"
+        failures="${failures},${label}"
+    else
+        echo "PASS ${label}"
+    fi
+done
+
+# Collect full diagnostic bundle.
+run_ssh "dmesg 2>/dev/null | head -n 200" > "${DIAG_DIR}/dmesg.txt" 2>&1 || true
+run_ssh "journalctl -b --no-pager | head -n 500" > "${DIAG_DIR}/journal.txt" 2>&1 || true
+run_ssh "systemctl status --no-pager -l" > "${DIAG_DIR}/services.txt" 2>&1 || true
+
+if [[ -n "${failures}" ]]; then
+    echo "FAILED_CHECKS=${failures#,}"
+    log_status "failed" "checks failed: ${failures#,}"
     exit 1
 fi
 

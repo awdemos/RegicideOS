@@ -48,7 +48,7 @@ build-system/catalyst/
 - **Do not run `build.sh` as non-root**: Catalyst requires root and writes to `/var/tmp/catalyst`.
 - **Do not use `echo` to write LUKS passphrase files**: `printf` avoids a trailing newline.
 - **Do not rely on the aspirational files `../dagger.py` or `../regicide_image_builder.py`**: they are deprecated.
-- **Do not ignore the root password change**: default is hardcoded in post-build scripts; treat as a release/security concern.
+- **Do not ignore the default user and root password policy**: the default user is `regicide` with password `regicide`; root password is intentionally unset. Treat this as a release/security concern when changing post-build scripts.
 - **Do not let `/tmp` fill up**: GTK/SPICE tools crash with misleading quota errors when `/tmp` is a small tmpfs.
 
 ## COMMANDS

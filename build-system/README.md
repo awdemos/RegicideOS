@@ -64,7 +64,7 @@ sudo ./build-vm-image.sh \
     output/regicide-cosmic-enc.qcow2 20G
 ```
 
-> **Current status**: both `output/regicide-cosmic.qcow2` (unencrypted) and `output/regicide-cosmic-enc.qcow2` (encrypted) build and boot to a serial-console `regicideos login:` prompt, and `systemd-logind` starts successfully (verified on both). The default root password is `regicide`; the example LUKS passphrase is `regicide-secure-test`. The COSMIC Desktop packages are listed in the stage4 spec but are not installed because the local `cosmic-overlay/` contains only Portage configuration and no ebuilds; `cosmic-greeter` is enabled but cannot start until the ebuilds are present.
+> **Current status**: the Dagger/Catalyst pipeline builds both `output/regicide-cosmic.qcow2` (unencrypted) and `output/regicide-cosmic-enc.qcow2` (encrypted). The images boot to a serial-console login prompt and reach the COSMIC greeter. The default user is `regicide` with password `regicide`; the root password is intentionally unset, so set it with `sudo passwd root` after login. The example LUKS passphrase is `regicide-secure-test`.
 
 Arguments:
 - `stage4-tarball` (required): path to the stage4 `.tar.xz` tarball
@@ -195,6 +195,42 @@ The `stage4-systemd-cosmic.spec` defines:
 - **Desktop**: COSMIC Desktop from cosmic-overlay
 - **RegicideOS tools**: regicide-installer
 - **Post-build**: Enables cosmic-greeter, NetworkManager, PipeWire, Flatpak
+
+## Signing and Verification
+
+Release artifacts are signed with [Sigstore](https://www.sigstore.dev/) cosign. Because the release artifacts are local SquashFS blobs rather than OCI images, the pipeline uses cosign's blob signing commands (`sign-blob`, `attest-blob`). Each Dagger pipeline run that produces the SquashFS image writes:
+
+- `output/regicide-cosmic.img.sig` — detached ECDSA signature for the SquashFS image
+- `output/regicide-cosmic.img.cert` — Fulcio signing certificate (keyless mode only)
+- `output/sbom.spdx.json.sig` — detached signature for the SPDX SBOM
+- `output/sbom.spdx.json.cert` — Fulcio signing certificate (keyless mode only)
+- `output/regicide-cosmic.img.att` — in-toto attestation binding the SPDX SBOM to the image
+
+In CI, keyless signing uses the GitHub Actions OIDC identity. The identity is recorded in the Fulcio certificate and can be enforced at verification time:
+
+```bash
+export REGICIDE_SIGN_IDENTITY="https://github.com/RegicideOS/RegicideOS/.github/workflows/release.yml@refs/heads/main"
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+```
+
+For local builds without OIDC, provide a cosign private key. Local-key signing disables transparency-log upload so the artifacts can be verified offline:
+
+```bash
+export COSIGN_KEY_PATH="$HOME/.regicide/cosign.key"
+export COSIGN_PASSWORD=""
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+```
+
+Verify a release with:
+
+```bash
+# Keyless (CI) verification
+./build-system/catalyst/scripts/verify-sigstore.sh output
+
+# Key-based (local) verification
+export COSIGN_KEY_PATH="$HOME/.regicide/cosign.pub"
+./build-system/catalyst/scripts/verify-sigstore.sh output
+```
 
 ## Why Catalyst?
 

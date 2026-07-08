@@ -41,6 +41,9 @@ fi
 TARGET="/dev/vda"
 OUTPUT="/run/regicide-output/regicide-cosmic.qcow2"
 DISK_SIZE="20G"
+if [[ -f "${DATA_DIR}/disk-size" ]]; then
+    DISK_SIZE="$(cat "${DATA_DIR}/disk-size")"
+fi
 
 mkdir -p /run/regicide-output
 

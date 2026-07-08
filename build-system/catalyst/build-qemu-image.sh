@@ -206,12 +206,39 @@ fi
 # ---------------------------------------------------------------------------
 echo "Partitioning disk image..."
 
-parted -s "${RAW_IMG}" mklabel gpt
-parted -s "${RAW_IMG}" mkpart EFI     fat32 1MiB  513MiB
-parted -s "${RAW_IMG}" mkpart ROOTS   btrfs 513MiB 16.5GiB
-parted -s "${RAW_IMG}" mkpart OVERLAY btrfs 16.5GiB 18.0GiB
-parted -s "${RAW_IMG}" mkpart HOME    btrfs 18.0GiB 100%
-parted -s "${RAW_IMG}" set 1 esp on
+# Size partitions proportionally so ROOTS has enough space for the growing
+# stage4 rootfs (including flatpak runtimes) while still leaving room for
+# overlay and home directories.
+PARTITION_TARGET="${DIRECT_DEVICE:-${RAW_IMG}}"
+
+# Probe the disk size without requiring a partition table.  parted print fails
+# on an unlabelled direct block device, so use blockdev for devices and stat
+# for plain image files.
+if [[ -b "${PARTITION_TARGET}" ]]; then
+    DISK_BYTES=$(blockdev --getsize64 "${PARTITION_TARGET}")
+else
+    DISK_BYTES=$(stat -c '%s' "${PARTITION_TARGET}")
+fi
+DISK_MIB=$((DISK_BYTES / 1024 / 1024))
+EFI_END_MIB=513
+# Reserve 1 MiB at the end of the disk for the GPT backup header.
+GPT_RESERVED_MIB=1
+REMAIN_MIB=$((DISK_MIB - EFI_END_MIB - GPT_RESERVED_MIB))
+# Give OVERLAY more room than before: container builds (distrobox/podman) need
+# space for overlay layers and package installation in the writable /etc and
+# /var subvolumes.  ROOTS still needs the bulk of the disk for the stage4 rootfs.
+ROOTS_END_MIB=$((EFI_END_MIB + REMAIN_MIB * 65 / 100))
+OVERLAY_END_MIB=$((ROOTS_END_MIB + REMAIN_MIB * 25 / 100))
+HOME_END_MIB=$((DISK_MIB - GPT_RESERVED_MIB))
+
+echo "Disk size: ${DISK_MIB} MiB; partition layout: EFI 1-${EFI_END_MIB} MiB, ROOTS ${EFI_END_MIB}-${ROOTS_END_MIB} MiB, OVERLAY ${ROOTS_END_MIB}-${OVERLAY_END_MIB} MiB, HOME ${OVERLAY_END_MIB}-${HOME_END_MIB} MiB"
+
+parted -s "${PARTITION_TARGET}" mklabel gpt
+parted -s "${PARTITION_TARGET}" mkpart EFI     fat32 1MiB            "${EFI_END_MIB}MiB"
+parted -s "${PARTITION_TARGET}" mkpart ROOTS   btrfs "${EFI_END_MIB}MiB"   "${ROOTS_END_MIB}MiB"
+parted -s "${PARTITION_TARGET}" mkpart OVERLAY btrfs "${ROOTS_END_MIB}MiB" "${OVERLAY_END_MIB}MiB"
+parted -s "${PARTITION_TARGET}" mkpart HOME    btrfs "${OVERLAY_END_MIB}MiB" "${HOME_END_MIB}MiB"
+parted -s "${PARTITION_TARGET}" set 1 esp on
 
 if [[ -n "${DIRECT_DEVICE}" ]]; then
     # Partitions on a bare block device use either a "p<N>" suffix (loop) or
@@ -286,7 +313,7 @@ mkfs.btrfs -L ROOTS -O ^block-group-tree "${ROOTS_TARGET}"
 btrfs inspect-internal dump-super "${ROOTS_TARGET}" 2>/dev/null | grep -E '^Features' || true
 
 # ---------------------------------------------------------------------------
-# Create BTRFS subvolumes on OVERLAY
+# Create BTRFS subvolumes on OVERLAY and HOME
 # ---------------------------------------------------------------------------
 echo "Creating overlay subvolumes..."
 
@@ -295,13 +322,18 @@ mount "${OVERLAY_PART}" "${OVERLAY_TMP}"
 btrfs subvolume create "${OVERLAY_TMP}/etc"
 btrfs subvolume create "${OVERLAY_TMP}/var"
 btrfs subvolume create "${OVERLAY_TMP}/usr"
-btrfs subvolume create "${OVERLAY_TMP}/home"
 
 # Create overlay work directories
 mkdir -p "${OVERLAY_TMP}/etcw"
 mkdir -p "${OVERLAY_TMP}/varw"
 mkdir -p "${OVERLAY_TMP}/usrw"
 
+umount "${OVERLAY_TMP}"
+
+# /home is mounted from a separate partition, so create its subvolume there.
+echo "Creating /home subvolume..."
+mount "${HOME_PART}" "${OVERLAY_TMP}"
+btrfs subvolume create "${OVERLAY_TMP}/home"
 umount "${OVERLAY_TMP}"
 
 # ---------------------------------------------------------------------------
@@ -334,14 +366,38 @@ else
     tar -C "${MOUNT_DIR}" --owner=root --group=root -xpJf "${TARBALL}"
 fi
 
+# Podman rootless containers require newuidmap/newgidmap to have setuid or
+# file capabilities.  Gentoo's shadow package installs them without either in
+# some configurations, so ensure they are setuid here.  This is needed for
+# distrobox and other rootless container workflows to work out-of-the-box.
+if [[ -f "${MOUNT_DIR}/usr/bin/newuidmap" && -f "${MOUNT_DIR}/usr/bin/newgidmap" ]]; then
+    chmod u+s "${MOUNT_DIR}/usr/bin/newuidmap" "${MOUNT_DIR}/usr/bin/newgidmap"
+fi
+
 # ---------------------------------------------------------------------------
-# Seed the /var subvolume with the stage4 /var contents.
+# Seed the /etc and /var subvolumes with the stage4 contents.
 # /var cannot be an overlay because systemd-logind and other services rename
 # directories under /var, and overlayfs returns EXDEV for directory renames
-# even with redirect_dir=on.  Mount it as a real Btrfs subvolume instead.
+# even with redirect_dir=on.
+# /etc cannot be an overlay either: overlayfs lowerdir and upperdir must live
+# on the same filesystem, but ROOTS and OVERLAY are separate Btrfs partitions.
+# Cross-partition overlay writes fail with EXDEV ("Invalid cross-device link"),
+# breaking systemd-tmpfiles, ssh-keygen, and other early-boot setup.
+# Mount both as real Btrfs subvolumes instead.
 # ---------------------------------------------------------------------------
-echo "Seeding /var subvolume..."
+echo "Seeding /etc subvolume..."
 mount "${OVERLAY_PART}" "${OVERLAY_TMP}"
+cp -aT "${MOUNT_DIR}/etc" "${OVERLAY_TMP}/etc"
+# The stage4 tarball sometimes leaves /etc as 0700. Many systemd services run
+# as non-root users and must traverse /etc to read their configuration, so
+# ensure the directory is world-executable (and root-owned).
+chmod 0755 "${OVERLAY_TMP}/etc"
+# Portage configuration must be readable by regular users so `emerge --info`,
+# `emerge -pv <pkg>`, etc. work for the default desktop user. Catalyst creates
+# /etc/portage as 0700, so fix it in the seeded subvolume.
+chmod 0755 "${OVERLAY_TMP}/etc/portage"
+chmod -R go+rX "${OVERLAY_TMP}/etc/portage"
+echo "Seeding /var subvolume..."
 cp -aT "${MOUNT_DIR}/var" "${OVERLAY_TMP}/var"
 umount "${OVERLAY_TMP}"
 
@@ -349,6 +405,13 @@ umount "${OVERLAY_TMP}"
 mkdir -p "${MOUNT_DIR}/overlay"
 mkdir -p "${MOUNT_DIR}/home"
 mkdir -p "${MOUNT_DIR}/boot/efi"
+
+# Older stage4 tarballs enabled both sshd.socket and sshd.service, which
+# causes both units to bind port 22 and incoming connections to be reset.
+# Prefer socket activation; remove the standalone service symlink if present.
+if [[ -L "${MOUNT_DIR}/etc/systemd/system/sockets.target.wants/sshd.socket" && -L "${MOUNT_DIR}/etc/systemd/system/multi-user.target.wants/sshd.service" ]]; then
+    rm -f "${MOUNT_DIR}/etc/systemd/system/multi-user.target.wants/sshd.service"
+fi
 
 # Dracut's switch-root executes /sbin/init.  With Gentoo's merged-/usr layout
 # (/sbin -> usr/bin and /usr/sbin -> bin -> usr/bin) we must have an init binary
@@ -367,6 +430,18 @@ mkdir -p "${MOUNT_DIR}/var/lib/systemd/catalog"
 mkdir -p "${MOUNT_DIR}/var/lib/systemd/timesync"
 mkdir -p "${MOUNT_DIR}/var/log/journal"
 mkdir -p "${MOUNT_DIR}/var/tmp"
+
+# Seed the /home subvolume with the default user's home directory.
+# /home is mounted from a separate partition at runtime, so the stage4
+# /home/regicide contents must be present in the HOME subvolume before first
+# boot or PAM will report "No directory, logging in with HOME=/".
+echo "Seeding /home subvolume..."
+mount -o subvol=home "${HOME_PART}" "${OVERLAY_TMP}"
+if [[ -d "${MOUNT_DIR}/home/regicide" ]]; then
+    cp -aT "${MOUNT_DIR}/home/regicide" "${OVERLAY_TMP}/regicide"
+    chown -R 1000:1000 "${OVERLAY_TMP}/regicide" 2>/dev/null || true
+fi
+umount "${OVERLAY_TMP}"
 
 # ---------------------------------------------------------------------------
 # Create /etc/fstab with overlay mounts
@@ -389,18 +464,18 @@ ${ROOTS_FSTAB_SPEC}   /       btrfs   defaults,noatime           0 0
 LABEL=OVERLAY /overlay btrfs   defaults,noatime           0 0
 
 # User data
-LABEL=HOME    /home   btrfs   defaults,noatime           0 0
+LABEL=HOME    /home   btrfs   subvol=home,defaults,noatime           0 0
 
 # Mutable system directories.
 # /usr is intentionally omitted: dracut treats a separate /usr mount
 # specially and breaks merged-/usr switch-root.
-# /etc stays an overlay; redirect_dir=on allows directory renames across
-# lower/upper layers, which systemd tmpfiles/catalog updates perform.
-# /var is mounted as a real Btrfs subvolume because systemd-logind and other
-# services rename directories under /var, and overlayfs returns EXDEV for
-# directory renames even with redirect_dir=on.
-overlay       /etc    overlay lowerdir=/etc,upperdir=/overlay/etc,workdir=/overlay/etcw,redirect_dir=on,x-systemd.requires-mounts-for=/overlay 0 0
+# /etc and /var are mounted as real Btrfs subvolumes on OVERLAY. Using an
+# overlay here fails because lowerdir (/etc on ROOTS) and upperdir
+# (/overlay/etc on OVERLAY) live on separate partitions, which causes EXDEV
+# ("Invalid cross-device link") errors during early-boot file creation.
+LABEL=OVERLAY /etc    btrfs   subvol=etc,defaults,noatime,x-systemd.requires-mounts-for=/overlay 0 0
 LABEL=OVERLAY /var    btrfs   subvol=var,defaults,noatime,x-systemd.requires-mounts-for=/overlay 0 0
+LABEL=HOME    /home   btrfs   subvol=home,defaults,noatime 0 0
 EOF
 
 if [[ "${ENCRYPT}" == true ]]; then
@@ -657,7 +732,6 @@ chmod +x "${CHROOT_SCRIPT}"
 chroot "${MOUNT_DIR}" /bin/bash /run/regicide-grub-install.sh
 rm -f "${CHROOT_SCRIPT}"
 
-
 # ---------------------------------------------------------------------------
 # Create GRUB configuration
 # ---------------------------------------------------------------------------
@@ -860,7 +934,7 @@ echo "  Memory: 4G"
 echo "  CPUs: 2"
 echo "  SSH: localhost:2222 -> :22"
 echo ""
-echo "To connect via SSH: ssh -p 2222 root@localhost"
+echo "To connect via SSH:  ssh -p 2222 regicide@localhost"
 echo "To stop: Ctrl+A then X (if using -nographic) or close window"
 echo ""
 

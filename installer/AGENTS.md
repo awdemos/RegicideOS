@@ -77,5 +77,5 @@ installer/
 - **Do not allow path traversal**: every file path must be validated with `validate_safe_path()` before use.
 - **Do not leak sensitive data in logs**: error messages must pass through `sanitize_error_message()`.
 - **Do not write to block devices outside dry-run wrappers**: destructive operations are gated by safety checks and mocked in tests.
-- **Do not bypass package-manager allowlist**: `dnf`/`apt`/`pacman` writes are blocked except for installing `gdisk`.
+- **Do not bypass package-manager allowlist**: Portage/emerge writes are blocked except for installing `gdisk`.
 - **Do not disable or skip safety tests**: destructive-operation guards must remain under test.

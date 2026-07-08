@@ -46,19 +46,19 @@ just ci              # lint test build
 # OS image (root, Gentoo host)
 just build-iso       # cd build-system/catalyst && sudo ./build.sh
 
-# Installer
+# Dagger CI/CD (recommended; works in any Docker/Podman host)
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+
+# Installer (run from a Linux live environment for bare metal)
 cd installer && cargo build --release
 sudo ./target/release/installer --image ../build-system/catalyst/output/regicide-cosmic.img /dev/sdX
-
-# Dagger CI/CD
-just dagger-build    # DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
 ## NOTES
 - The repo contains large generated artifacts (`target/`, disk images, `.opencode/node_modules/`); real source depth is shallow (≤5 levels).
 - `legacy_installer.py` at root is superseded by the Rust installer under `installer/`.
-- The COSMIC desktop packages are listed in the stage4 spec but not yet installed because the local `cosmic-overlay/` has Portage config only.
-- Security scanners (`trivy`, `hadolint`, SBOM) are referenced in templates but not yet wired in CI.
+- The COSMIC desktop packages are installed in the stage4 image and the greeter boots.
+- The Dagger pipeline now runs `stage7-verify.sh` and `stage7-sbom.sh` after stage6 to verify the user model, COSMIC presence, and package set, and to generate an SBOM.
 
 ---
 

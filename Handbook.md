@@ -23,8 +23,10 @@
 RegicideOS is a specialized Gentoo-based Linux distribution focused on:
 
 - **Rust-First Architecture**: System components migrated to Rust for memory safety and performance
-- **Immutable System Architecture**: Read-only base filesystem for enhanced security and reliability
+- **Immutable System Architecture**: Read-only Btrfs root with atomic updates and instant rollback
 - **AI-Integrated**: AI capabilities at the system level for predictive maintenance and context-aware assistance
+- **Reproducible Source Builds**: Built locally from a Gentoo stage4 with the Catalyst/Dagger pipeline
+- **Privacy by Default**: LUKS encryption recommended, local-first control, minimal telemetry
 
 ### 1.2 Key Differentiators
 
@@ -51,7 +53,7 @@ RegicideOS is a specialized Gentoo-based Linux distribution focused on:
 - **Processor**: Multi-core x86-64
 - **Memory**: 8GB+ RAM
 - **Storage**: 30GB+ SSD storage
-- **Firmware**: UEFI with Secure Boot support
+- **Firmware**: UEFI (Secure Boot is not yet supported)
 
 ### 2.2 Supported Architectures
 
@@ -269,9 +271,9 @@ The RegicideOS installer performs these steps:
    - Generate GRUB configuration with dynamic UUID detection
 
 7. **User Account Creation**
-   - Create administrative user with sudo access
-   - Setup user home directory
-   - Configure user groups (wheel, video, audio, etc.)
+   - Default user `regicide` is baked into the stage4 image with password `regicide`
+   - User is in `wheel` and can `sudo`
+   - Root password is intentionally unset; set it after first login with `sudo passwd root`
 
 8. **Application Installation**
    - Install Flatpak applications from Flathub
@@ -294,37 +296,41 @@ The RegicideOS installer performs these steps:
 
 ### 4.1 Current Implementation: 4-Partition Overlayfs Layout
 
-RegicideOS uses a **4-Partition Overlayfs architecture** inherited from its upstream project:
+RegicideOS uses a **4-Partition Overlayfs architecture** inherited from its upstream project. The base system is a Gentoo stage4 with COSMIC as the default desktop, built locally through the Catalyst/Dagger pipeline and deployed as a read-only SquashFS image.
 
 ```
 /dev/sda1   512 MB  FAT32   label "EFI"
-/dev/sda2   ~12-20GB  BTRFS    label "ROOTS"  (read-only base system)
+/dev/sda2   ~12-20GB  BTRFS    label "ROOTS"  (read-only base system image)
 /dev/sda3   ~4-8GB   BTRFS    label "OVERLAY"  (writable overlay layers)
 /dev/sda4   Remaining  LUKS-encrypted BTRFS label "HOME"  (user data)
 ```
 
 **Overlay Structure:**
 ```
-/mnt/gentoo/           # Read-only base system from ROOTS partition
-/mnt/root/overlay/      # Writable overlay for /etc, /var, /usr
-/mnt/root/home/         # User home directory (bind-mounted to overlay/home)
+/                       # Merged view: read-only ROOTS lowerdir + writable OVERLAY upperdir
+├── boot/efi            # EFI System Partition
+├── root/               # Read-only lowerdir from ROOTS partition
+└── overlay/            # Writable upperdir for /etc, /var, /usr
 ```
 
 **Boot Process:**
 1. **UEFI → GRUB → kernel**
 2. **initrd** loads and mounts:
-   - ROOTS partition as read-only base system (via `root.img` template or direct mount)
-   - Overlayfs layers for `/etc`, `/var`, `/usr` (writable)
+   - ROOTS partition containing the validated SquashFS `root.img`
+   - Overlayfs layers for `/etc`, `/var`, `/usr` backed by the OVERLAY partition
    - `/home` partition (writable, LUKS-encrypted BTRFS)
-3. **systemd** starts with overlays in place
+3. **systemd** starts with the immutable root and writable overlays in place
+
+Because the live image is a SquashFS produced directly by the Catalyst pipeline, the bootable artifact is byte-for-byte what was validated during the build.
 
 ### 4.2 Benefits of Current Architecture
 
 - **Simplicity**: Proven overlayfs approach
 - **Reliability**: Read-only base cannot be corrupted during normal operation
-- **Instant Rollback**: Simply download previous system image
-- **Atomic Updates**: System updates via new `root.img` tarball images
+- **Instant Rollback**: Boot the previous validated `root.img` instead of debugging partial mutations
+- **Atomic Updates**: Updates are prepared offline, verified, and swapped by replacing the entire `root.img`
 - **LUKS Encryption**: Full LUKS encryption support with dynamic partition detection
+- **Auditability**: The base OS is compiled from source on your own hardware with declarative inputs
 
 ### 4.3 Known Limitations
 
@@ -390,24 +396,24 @@ nmcli dev wifi connect "SSID" password "password"
 
 ## 6. Package Management
 
-### 6.1 Current Implementation: Direct Download Model
+### 6.1 Current Implementation: Portage-Based Immutable Image
 
 The installer **does not use Foxmerge** for package management. Instead:
 
 **Base System:**
-- Downloads compressed `root.img` tarball from RegicideOS repositories
-- Root image contains: COSMIC desktop environment with minimal packages
-- No package management during installation
+- Built locally from a Gentoo stage4 with COSMIC desktop packages
+- Deployed as a compressed `root.img` SquashFS on the ROOTS partition
+- No package installation happens during bare-metal install
 - System updates via atomic image replacement
 
 **Overlay Packages:**
 - Installed into overlay directories (`/etc`, `/var`, `/usr`)
-- Managed by direct system package tools (dnf, emerge, etc.)
-- No overlay-specific package manager
+- Managed with Portage (`emerge`) on the running system if needed
+- GUI applications should prefer Flatpak for isolation from the base image
 
 **Architecture Decision:**
-- Direct download model was chosen for **simplicity and reliability**
-- Package management happens **post-installation** by system package tools
+- Immutable image model chosen for **simplicity, reliability, and auditability**
+- Package management happens **post-installation** via Portage on the overlay or inside Distrobox containers
 - Foxmerge was described in early planning but was not implemented
 
 ### 6.2 Package Installation Workflow
@@ -415,16 +421,24 @@ The installer **does not use Foxmerge** for package management. Instead:
 **During Installation:**
 ```bash
 # No package installation - uses pre-built system image
+```
 
-# Post-Installation (user-initiated):
-sudo dnf install <package>           # Fedora-style
-sudo emerge <package>              # Gentoo-style overlays
-flatpak install <app>              # Flatpak applications
+**Post-Installation (user-initiated):**
+```bash
+# GUI applications (recommended)
+flatpak install <app>
+
+# System-level packages on the overlay (advanced)
+sudo emerge <package>
+
+# Project-specific toolchains inside containers
+distrobox create --name dev --image fedora:44
+distrobox enter dev
 ```
 
 **System Updates:**
-- Atomic: Download new `root.img` tarball, reboot
-- Incremental: Overlay packages updated via system tools
+- Atomic: Build or download a new `regicide-cosmic.img`, replace `root.img` on ROOTS, reboot
+- Incremental: Overlay packages updated via `emerge` on the running system
 
 ---
 
@@ -488,7 +502,7 @@ User-facing development tools are **not** installed in the base image by default
 distrobox create --name dev --image fedora:44
 distrobox enter dev
 
-# Inside the container
+# Inside the container (Fedora example)
 sudo dnf install zed rustup nodejs
 ```
 
@@ -534,7 +548,7 @@ User-facing development tools are installed inside **Distrobox** containers, not
 distrobox create --name dev --image fedora:44
 distrobox enter dev
 
-# Inside the container, install whatever you need
+# Inside the container, install whatever you need (Fedora example)
 sudo dnf install zed rustup nodejs python3-pip
 ```
 
@@ -668,8 +682,8 @@ uninstall-regicide-dotfiles --restore-backup
 RegicideOS provides comprehensive Rust development support:
 
 ```bash
-# Install Rust toolchain (if not present)
-sudo dnf install -y rust cargo rustfmt clippy
+# Install Rust toolchain (if not present; use Portage on RegicideOS or the container's package manager)
+sudo emerge -av rust cargo rustfmt clippy
 
 # Install additional targets
 rustc target add thumbv6m-none-eabi  # ARM Cortex-M
@@ -729,21 +743,20 @@ RegicideOS uses an atomic update system via `root.img` tarball images:
 
 #### 9.1.2 Overlay Updates
 
-Package overlays are updated using system package management tools:
+Package overlays are updated using Portage on the writable overlay layer:
 
 ```bash
-# Update overlay packages
-sudo dnf update
-sudo emerge --sync @world
+# Sync Portage and update world on the overlay
+sudo emerge --sync
+sudo emerge -avuDN @world
 
-# Update specific package
-sudo dnf update package-name
+# Update a specific package
+sudo emerge -av1 <package-name>
 
 # Check for available updates
-sudo dnf check-updates
+sudo emerge -avuDN @world --pretend
 
 # Clean up old packages
-sudo dnf clean
 sudo emerge --depclean
 ```
 
@@ -770,8 +783,7 @@ sudo nano /etc/systemd/system.conf
 sudo ls -la /overlay/etc
 
 # View package status
-sudo dnf list installed
-sudo qlist -I  # if using Portage
+sudo qlist -I  # Portage installed packages
 ```
 
 ### 9.3 System Snapshots
