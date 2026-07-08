@@ -390,8 +390,8 @@ async def main() -> None:
     )
     parser.add_argument(
         "--qcow2-size",
-        default="20G",
-        help="Disk size for the optional QCOW2 image (default: 20G)",
+        default="30G",
+        help="Disk size for the optional QCOW2 image (default: 30G)",
     )
     parser.add_argument(
         "--qcow2-output",

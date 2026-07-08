@@ -27,7 +27,7 @@ Usage: $0 [OPTIONS] <stage4-archive> [output-qcow2] [disk-size]
   stage4-archive       Path to the stage4 rootfs archive. Accepted formats:
                        .tar.xz tarball or SquashFS image (.img, .squashfs).
   output-qcow2         Path for the output .qcow2 file (optional)
-  disk-size            Disk size for the image, e.g. 20G (optional, default: 20G)
+  disk-size            Disk size for the image, e.g. 30G (optional, default: 30G)
 
 Options:
   --encrypt            Encrypt the ROOTS partition with LUKS2
@@ -437,6 +437,22 @@ echo "Verifying built raw disk..."
 
 if ! parted -s "${TARGET_RAW}" print > /dev/null 2>&1; then
     echo "Error: built raw disk does not have a valid partition table."
+    exit 1
+fi
+
+# The builder VM powers off regardless of success; verify it actually finished
+# by looking for the sentinel file on the ROOTS partition.
+SENTINEL_MNT="$(TMPDIR=/var/tmp mktemp -d)"
+SENTINEL_FOUND=false
+if mount -o ro "${TARGET_RAW}2" "${SENTINEL_MNT}" 2>/dev/null; then
+    if [[ -f "${SENTINEL_MNT}/var/lib/regicide-build-complete" ]]; then
+        SENTINEL_FOUND=true
+    fi
+    umount "${SENTINEL_MNT}" 2>/dev/null || true
+fi
+rmdir "${SENTINEL_MNT}" 2>/dev/null || true
+if [[ "${SENTINEL_FOUND}" != true ]]; then
+    echo "Error: builder VM did not complete successfully (sentinel missing on ROOTS)."
     exit 1
 fi
 
