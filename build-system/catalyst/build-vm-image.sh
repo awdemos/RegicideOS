@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 TARBALL=""
 OUTPUT="${SCRIPT_DIR}/output/regicide-qemu.qcow2"
-DISK_SIZE="20G"
+DISK_SIZE="30G"
 ENCRYPT=false
 PASSPHRASE_FILE=""
 SQUASHFS=""
@@ -180,6 +180,7 @@ cp "${SCRIPT_DIR}/vm-builder.sh" "${DATA_STAGING}/vm-builder.sh"
 chmod 0755 "${DATA_STAGING}/vm-builder.sh"
 cp "${SCRIPT_DIR}/build-qemu-image.sh" "${DATA_STAGING}/build-qemu-image.sh"
 chmod 0755 "${DATA_STAGING}/build-qemu-image.sh"
+printf '%s\n' "${DISK_SIZE}" > "${DATA_STAGING}/disk-size"
 
 if [[ "${ENCRYPT}" == true ]]; then
     # Strip a single trailing newline from the passphrase file.  cryptsetup

@@ -473,20 +473,37 @@ async def main() -> None:
         squashfs_path = out_dir / "regicide-cosmic.img"
         if squashfs_input is not None:
             print(f"Using existing SquashFS image: {squashfs_input}")
-            subprocess.run(
-                ["cp", "-f", str(squashfs_input), str(squashfs_path)],
-                check=True,
-            )
+            if squashfs_input.resolve() != squashfs_path.resolve():
+                subprocess.run(
+                    ["cp", "-f", str(squashfs_input), str(squashfs_path)],
+                    check=True,
+                )
+            else:
+                print("SquashFS input path matches output path; reusing in place.")
         else:
             print("Creating SquashFS image locally...")
+            # Creating a faithful SquashFS that preserves setuid binaries and
+            # mixed ownership requires root privileges. Use sudo when not root.
+            sudo_prefix = "" if os.geteuid() == 0 else "sudo "
             subprocess.run(
                 [
                     "sh", "-c",
-                    "mkdir -p /tmp/regicide-squashfs-root && "
-                    f"tar -C /tmp/regicide-squashfs-root -xpJf '{tarball_path}' && "
-                    f"mksquashfs /tmp/regicide-squashfs-root '{squashfs_path}' "
-                    "-comp zstd -Xcompression-level 19 && "
-                    "rm -rf /tmp/regicide-squashfs-root",
+                    # Use /var/tmp for the extracted rootfs so large artifacts do
+                    # not exhaust the tmpfs-backed /tmp filesystem. Run tar and
+                    # mksquashfs as root when available so setuid/ownership are
+                    # preserved, and make cleanup tolerant of root-owned files.
+                    "set -euo pipefail; "
+                    "SQUASH_ROOT=/var/tmp/regicide-squashfs-root; "
+                    f"{sudo_prefix}rm -f '{squashfs_path}'; "
+                    f"{sudo_prefix}rm -rf \"$SQUASH_ROOT\"; "
+                    f"{sudo_prefix}mkdir -p \"$SQUASH_ROOT\"; "
+                    "df -h \"$SQUASH_ROOT\"; "
+                    f"{sudo_prefix}tar -C \"$SQUASH_ROOT\" -xpJf '{tarball_path}'; "
+                    f"{sudo_prefix}mksquashfs \"$SQUASH_ROOT\" '{squashfs_path}' "
+                    "-comp zstd -Xcompression-level 19 -noappend; "
+                    f"{sudo_prefix}chown '$(id -u):$(id -g)' '{squashfs_path}'; "
+                    f"unsquashfs -s '{squashfs_path}' >/dev/null; "
+                    f"{sudo_prefix}rm -rf \"$SQUASH_ROOT\" || true",
                 ],
                 check=True,
             )

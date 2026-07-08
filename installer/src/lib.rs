@@ -86,7 +86,7 @@ pub fn get_flatpak_packages(applications_set: &str) -> String {
                 "org.libreoffice.LibreOffice",
             ],
         ),
-        ("minimal", vec![]),
+        ("minimal", vec!["ai.opencode.opencode"]),
     ]
     .into_iter()
     .collect();
@@ -166,7 +166,7 @@ mod tests {
 
         let minimal_packages = get_flatpak_packages("minimal");
         assert!(!minimal_packages.is_empty());
-        assert!(minimal_packages.contains("dev.zed.Zed"));
+        assert!(minimal_packages.contains("ai.opencode.opencode"));
 
         let unknown_packages = get_flatpak_packages("unknown");
         assert!(unknown_packages.is_empty());

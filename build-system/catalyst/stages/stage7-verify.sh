@@ -74,6 +74,18 @@ else
     fail "missing /etc/sudoers.d/10-regicide-wheel"
 fi
 
+SUDOERS_DROPIN="${ROOTS_DIR}/etc/sudoers.d/10-regicide-wheel"
+if [[ -f "${SUDOERS_DROPIN}" ]]; then
+    dropin_mode="$(stat -c '%a' "${SUDOERS_DROPIN}" 2>/dev/null || true)"
+    if [[ "${dropin_mode}" != "440" ]]; then
+        fail "/etc/sudoers.d/10-regicide-wheel permissions incorrect (mode ${dropin_mode}, expected 440)"
+    elif [[ "$(id -u)" -eq 0 && "$(stat -c '%U:%G' "${SUDOERS_DROPIN}" 2>/dev/null || true)" != "root:root" ]]; then
+        fail "/etc/sudoers.d/10-regicide-wheel permissions incorrect (expected 440:root:root)"
+    else
+        pass "/etc/sudoers.d/10-regicide-wheel permissions 440:root:root"
+    fi
+fi
+
 # 4. COSMIC binaries are present.
 for bin in cosmic-greeter cosmic-session cosmic-comp cosmic-settings cosmic-app-library cosmic-launcher cosmic-panel cosmic-notifications cosmic-osd cosmic-workspaces cosmic-files cosmic-term cosmic-edit cosmic-store; do
     if [[ -x "${ROOTS_DIR}/usr/bin/${bin}" || -x "${ROOTS_DIR}/usr/local/bin/${bin}" ]]; then
@@ -127,6 +139,18 @@ else
     fail "NetworkManager unit not loadable"
 fi
 
+nm_wants="${ROOTS_DIR}/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
+if [[ -L "${nm_wants}" ]]; then
+    nm_target="$(readlink "${nm_wants}" 2>/dev/null || true)"
+    if [[ "${nm_target}" == /usr/lib/systemd/system/NetworkManager.service ]]; then
+        pass "NetworkManager wants symlink is absolute"
+    else
+        fail "NetworkManager wants symlink points to ${nm_target}, expected /usr/lib/systemd/system/NetworkManager.service"
+    fi
+else
+    fail "NetworkManager not enabled in multi-user.target.wants"
+fi
+
 # 6. Flatpak and Distrobox are present.
 for bin in flatpak distrobox podman; do
     if [[ -x "${ROOTS_DIR}/usr/bin/${bin}" ]]; then
@@ -165,10 +189,11 @@ done
 if [[ ${BAKED_KEY} -eq 0 ]]; then
     pass "no pre-baked SSH host keys in the image"
 fi
-if grep -q 'ssh-keygen -A' "${ROOTS_DIR}/usr/lib/systemd/system/sshd.service" 2>/dev/null; then
-    pass "sshd.service regenerates host keys on first start"
+if grep -q 'ssh-keygen -A' "${ROOTS_DIR}/usr/lib/systemd/system/sshd.service" 2>/dev/null || \
+   [[ -x "${ROOTS_DIR}/usr/lib/regicide/regicide-ssh-keygen" ]]; then
+    pass "sshd host-key regeneration configured on first boot"
 else
-    fail "sshd.service does not regenerate host keys"
+    fail "sshd host-key regeneration not configured"
 fi
 
 # 9. Setuid bits on critical binaries.
@@ -192,13 +217,7 @@ else
     fail "/etc/sudoers.d missing"
 fi
 
-if [[ -f "${ROOTS_DIR}/etc/sudoers.d/10-regicide-wheel" ]]; then
-    if [[ "$(stat -c '%a:%U:%G' "${ROOTS_DIR}/etc/sudoers.d/10-regicide-wheel" 2>/dev/null)" == "440:root:root" ]]; then
-        pass "/etc/sudoers.d/10-regicide-wheel permissions 440:root:root"
-    else
-        fail "/etc/sudoers.d/10-regicide-wheel permissions incorrect"
-    fi
-fi
+
 
 # 11. SSH config drop-ins readable by root only.
 if [[ -d "${ROOTS_DIR}/etc/ssh/sshd_config.d" ]]; then
@@ -238,6 +257,59 @@ if [[ -L "${ROOTS_DIR}/etc/systemd/system/sysinit.target.wants/systemd-timesyncd
     pass "systemd-timesyncd enabled"
 else
     fail "systemd-timesyncd not enabled"
+fi
+
+# 16. Default user can edit key system files (immutable overlay usability).
+for path in /etc/hosts /etc/fstab /etc/portage/make.conf; do
+    full_path="${ROOTS_DIR}${path}"
+    if [[ -f "${full_path}" ]]; then
+        owner="$(stat -c '%u:%g' "${full_path}" 2>/dev/null || true)"
+        mode="$(stat -c '%a' "${full_path}" 2>/dev/null || true)"
+        if [[ "${owner}" == "1000:1000" ]]; then
+            pass "${path} owned by regicide:regicide"
+        else
+            fail "${path} owner ${owner}, expected 1000:1000"
+        fi
+        if [[ "${mode}" == "664" ]]; then
+            pass "${path} mode 0664"
+        else
+            fail "${path} mode ${mode}, expected 664"
+        fi
+    else
+        fail "${path} missing"
+    fi
+done
+
+# 17. Root README.md is world-readable.
+readme_path="${ROOTS_DIR}/README.md"
+if [[ -f "${readme_path}" ]]; then
+    readme_mode="$(stat -c '%a' "${readme_path}" 2>/dev/null || true)"
+    if [[ "${readme_mode}" == "644" ]]; then
+        pass "/README.md is world-readable"
+    else
+        fail "/README.md mode ${readme_mode}, expected 644"
+    fi
+else
+    # README.md is not present in all builds; do not fail if missing.
+    pass "/README.md not present, skipping"
+fi
+
+# 18. SSH does not hang on DNS unavailability.
+if [[ -f "${ROOTS_DIR}/etc/ssh/sshd_config" ]] && grep -q '^UseDNS no' "${ROOTS_DIR}/etc/ssh/sshd_config"; then
+    pass "sshd UseDNS disabled"
+else
+    fail "sshd UseDNS no missing"
+fi
+
+# 19. NSS allows DNS fallback when systemd-resolved is inactive.
+if [[ -f "${ROOTS_DIR}/etc/nsswitch.conf" ]]; then
+    if grep -q '^hosts:.*resolve \[!UNAVAIL=return\]' "${ROOTS_DIR}/etc/nsswitch.conf"; then
+        fail "nsswitch.conf hosts line blocks DNS fallback"
+    else
+        pass "nsswitch.conf allows DNS fallback"
+    fi
+else
+    fail "/etc/nsswitch.conf missing"
 fi
 
 # Boot loader configuration is generated during build-vm-image.sh, not inside

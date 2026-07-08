@@ -47,15 +47,106 @@ PROFILE
     echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-regicide-wheel
     chmod 0440 /etc/sudoers.d/10-regicide-wheel
 
-    # Do not bake host-specific SSH keys into the image; they are generated on
-    # first boot by sshd-keygen@.service.  This avoids distributing a shared
-    # private key across every RegicideOS installation.
+    # Portage configuration must be readable by regular users so commands like
+    # `emerge --info` and `emerge -pv <pkg>` work for the default desktop user.
+    # Catalyst creates /etc/portage as 0700, which blocks traversal for non-root.
+    chmod 0755 /etc/portage
+    chmod -R go+rX /etc/portage
+
+    # Make key /etc files writable by the default desktop user so the immutable
+    # overlay behaves more like a regular system for day-to-day administration.
+    # This matches the Xenia Linux installer convention of giving the created
+    # user ownership of hosts/fstab and Portage configuration.
+    chown regicide:regicide /etc/hosts /etc/fstab
+    chmod 0664 /etc/hosts /etc/fstab
+    chown regicide:regicide /etc/portage/make.conf
+    chmod 0664 /etc/portage/make.conf
+
+    # Ensure the root README.md shipped by the COSMIC overlay is world-readable.
+    chmod 0644 /README.md 2>/dev/null || true
+
+    # Disable sshd reverse-DNS lookups so SSH logins do not hang when DNS is
+    # temporarily unavailable inside the VM.
+    if ! grep -q '^UseDNS no' /etc/ssh/sshd_config 2>/dev/null; then
+        echo 'UseDNS no' >> /etc/ssh/sshd_config
+    fi
+
+    # Make glibc NSS fall back to files/dns when systemd-resolved is not active.
+    # The default Gentoo line uses `[!UNAVAIL=return]` which breaks name
+    # resolution whenever resolved is disabled.
+    if [[ -f /etc/nsswitch.conf ]]; then
+        sed -i 's/resolve \[!UNAVAIL=return\] files myhostname dns/resolve files myhostname dns/' /etc/nsswitch.conf
+    fi
+
+    # Do not bake host-specific SSH keys into the image.  sshd.socket uses
+    # Accept=yes and spawns sshd -i per connection, which does not create missing
+    # host keys.  ssh-keygen -A also fails on overlay /etc with EXDEV.  Use a
+    # dedicated one-shot service that generates keys directly into /etc/ssh
+    # before sshd.socket starts.
     rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
-    systemctl enable sshd-keygen@.service || true
+
+    mkdir -p /usr/lib/regicide
+    cat > /usr/lib/regicide/regicide-ssh-keygen <<'KEYGENEOF'
+#!/bin/bash
+# RegicideOS first-boot SSH host key generator.
+# Runs before sshd.socket and creates host keys if they do not exist.
+set -euo pipefail
+mkdir -p /etc/ssh
+# /etc is an overlayfs lowerdir in the runtime image; chmod on an existing
+# lowerdir directory can fail with EXDEV (Invalid cross-device link). The
+# directory is already 0755 in the stage4 rootfs, so tolerate the failure.
+chmod 0755 /etc/ssh 2>/dev/null || true
+# ssh-keygen creates a temporary file in the target directory and renames it
+# into place. On overlayfs this rename can fail with EXDEV, so generate keys
+# on a tmpfs-backed temporary path and copy the result to /etc/ssh.
+KEY_TMP="$(mktemp -d -p /run regicide-ssh-XXXXXX)"
+trap 'rm -rf "${KEY_TMP}"' EXIT
+if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
+    ssh-keygen -t ed25519 -f "${KEY_TMP}/ssh_host_ed25519_key" -N "" -C "regicideos-$(date -u +%Y%m%d%H%M%S)" >/dev/null 2>&1
+    # Use shell redirection instead of cp/mv; overlayfs can reject renames
+    # and hard links across the lower/upper boundary with EXDEV.
+    cat "${KEY_TMP}/ssh_host_ed25519_key" > /etc/ssh/ssh_host_ed25519_key
+    cat "${KEY_TMP}/ssh_host_ed25519_key.pub" > /etc/ssh/ssh_host_ed25519_key.pub
+fi
+if [[ ! -f /etc/ssh/ssh_host_rsa_key ]]; then
+    ssh-keygen -t rsa -b 4096 -f "${KEY_TMP}/ssh_host_rsa_key" -N "" -C "regicideos-$(date -u +%Y%m%d%H%M%S)" >/dev/null 2>&1
+    cat "${KEY_TMP}/ssh_host_rsa_key" > /etc/ssh/ssh_host_rsa_key
+    cat "${KEY_TMP}/ssh_host_rsa_key.pub" > /etc/ssh/ssh_host_rsa_key.pub
+fi
+chmod 0600 /etc/ssh/ssh_host_*_key
+chmod 0644 /etc/ssh/ssh_host_*_key.pub
+KEYGENEOF
+    chmod 0755 /usr/lib/regicide/regicide-ssh-keygen
+
+    mkdir -p /usr/lib/systemd/system
+    cat > /usr/lib/systemd/system/regicide-ssh-keygen.service <<'SVCEOF'
+[Unit]
+Description=RegicideOS first-boot SSH host key generator
+DefaultDependencies=no
+Before=sshd.socket
+Before=ssh.service
+After=systemd-tmpfiles-setup.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/regicide/regicide-ssh-keygen
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sockets.target
+SVCEOF
+
     mkdir -p /etc/systemd/system/sockets.target.wants
     ln -sf /usr/lib/systemd/system/sshd.socket /etc/systemd/system/sockets.target.wants/sshd.socket
+    systemctl enable regicide-ssh-keygen.service || true
+    # Ensure the standalone sshd.service does not start and bind port 22 in
+    # parallel with socket activation.
+    systemctl disable sshd.service 2>/dev/null || true
 
     chmod u+s /usr/bin/sudo /usr/bin/su /usr/bin/passwd /usr/bin/chfn /usr/bin/chsh /usr/bin/newgrp /usr/bin/mount /usr/bin/umount
+    chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
     chmod u+s /usr/libexec/dbus-daemon-launch-helper
     chmod u+s /usr/lib/polkit-1/polkit-agent-helper-1 2>/dev/null || true
 
@@ -101,6 +192,10 @@ EOF
 
     systemctl enable bluetooth || true
     systemctl enable NetworkManager || true
+    # Work around overlayfs whiteouts that can hide the NetworkManager unit in
+    # /etc/systemd/system: ensure the wants symlink points directly at the unit
+    # file in /usr/lib/systemd/system rather than a relative path through /etc.
+    ln -sf /usr/lib/systemd/system/NetworkManager.service /etc/systemd/system/multi-user.target.wants/NetworkManager.service
     systemctl enable cups || true
     systemctl enable systemd-timesyncd || true
     systemctl enable cosmic-greeter || true
@@ -117,10 +212,9 @@ EOF
     systemctl enable pipewire-pulse.socket || true
     systemctl enable wireplumber.service || true
 
-    # Enable sshd as both socket-activated and multi-user service so the
-    # post-install verifier passes regardless of which unit name is checked.
+    # Use socket activation for sshd so host keys are generated by
+    # sshd-keygen@.service before the first connection is accepted.
     systemctl enable sshd.socket || true
-    systemctl enable sshd.service || true
 
     rm -f /boot/*.old
     # Gentoo kernels are installed as /boot/kernel-*; create the canonical
