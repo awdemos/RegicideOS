@@ -1001,11 +1001,13 @@ if [[ -n "\${OVMF_VARS}" ]]; then
     UEFI_FLAGS="\${UEFI_FLAGS} -drive if=pflash,format=raw,file=\${TMP_VARS}"
 fi
 
+# Default to headless. Use VNC via REGICIDE_VM_VNC=:N when there is no
+# local display; otherwise SDL is used on a real X11/Wayland session.
 DISPLAY_ARGS=(-nographic -vga none)
-if [[ -n "\${DISPLAY:-}" ]] && command -v xvfb-run >/dev/null 2>&1; then
-    DISPLAY_ARGS=(-vga virtio -display sdl,gl=on)
-elif [[ -n "\${REGICIDE_VM_VNC:-}" ]]; then
+if [[ -n "\${REGICIDE_VM_VNC:-}" ]]; then
     DISPLAY_ARGS=(-vga virtio -display "vnc=\${REGICIDE_VM_VNC}")
+elif [[ -n "\${DISPLAY:-}" ]]; then
+    DISPLAY_ARGS=(-vga virtio -display sdl,gl=on)
 fi
 
 qemu-system-x86_64 \\
