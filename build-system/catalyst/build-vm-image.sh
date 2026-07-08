@@ -447,13 +447,22 @@ SENTINEL_MNT="$(TMPDIR=/var/tmp mktemp -d)"
 SENTINEL_LOOP=""
 SENTINEL_FOUND=false
 if SENTINEL_LOOP="$(losetup -f --show -P "${TARGET_RAW}" 2>/dev/null)"; then
+    echo "Checking build sentinel on ${SENTINEL_LOOP}p2..."
     if mount -o ro "${SENTINEL_LOOP}p2" "${SENTINEL_MNT}" 2>/dev/null; then
         if [[ -f "${SENTINEL_MNT}/var/lib/regicide-build-complete" ]]; then
             SENTINEL_FOUND=true
+            echo "Build sentinel found."
+        else
+            echo "Warning: build sentinel not found at ${SENTINEL_MNT}/var/lib/regicide-build-complete"
+            ls -la "${SENTINEL_MNT}/var/lib/" 2>/dev/null | head -5 || true
         fi
         umount "${SENTINEL_MNT}" 2>/dev/null || true
+    else
+        echo "Warning: failed to mount ${SENTINEL_LOOP}p2"
     fi
     losetup -d "${SENTINEL_LOOP}" 2>/dev/null || true
+else
+    echo "Warning: failed to attach loop device to ${TARGET_RAW}"
 fi
 rmdir "${SENTINEL_MNT}" 2>/dev/null || true
 if [[ "${SENTINEL_FOUND}" != true ]]; then
