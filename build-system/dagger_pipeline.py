@@ -415,6 +415,11 @@ async def main() -> None:
         action="store_true",
         help="Build an unencrypted QCOW2 from the stage4 tarball and run stage8-vm-test.sh",
     )
+    parser.add_argument(
+        "--skip-sign",
+        action="store_true",
+        help="Skip Sigstore signing (useful for local test builds without cosign credentials)",
+    )
     args = parser.parse_args()
 
     if args.plain:
@@ -515,41 +520,44 @@ async def main() -> None:
             check=True,
         )
 
-        identity = os.environ.get(
-            "REGICIDE_SIGN_IDENTITY",
-            "https://github.com/RegicideOS/RegicideOS/.github/workflows/release.yml@refs/heads/main",
-        )
-        print(f"Signing artifacts with identity: {identity}")
-        iso_image = client.host().file(str(out_dir / "regicide-cosmic.img"))
-        sbom_file = client.host().file(str(sbom_path))
-        (
-            img_sig,
-            img_cert,
-            img_bundle,
-            sbom_sig,
-            sbom_cert,
-            sbom_bundle,
-            attestation,
-        ) = await sign_artifacts(client, iso_image, sbom_file, identity)
+        if not args.skip_sign:
+            identity = os.environ.get(
+                "REGICIDE_SIGN_IDENTITY",
+                "https://github.com/RegicideOS/RegicideOS/.github/workflows/release.yml@refs/heads/main",
+            )
+            print(f"Signing artifacts with identity: {identity}")
+            iso_image = client.host().file(str(out_dir / "regicide-cosmic.img"))
+            sbom_file = client.host().file(str(sbom_path))
+            (
+                img_sig,
+                img_cert,
+                img_bundle,
+                sbom_sig,
+                sbom_cert,
+                sbom_bundle,
+                attestation,
+            ) = await sign_artifacts(client, iso_image, sbom_file, identity)
 
-        await img_sig.export(str(out_dir / "regicide-cosmic.img.sig"))
-        await img_bundle.export(str(out_dir / "regicide-cosmic.img.bundle"))
-        await sbom_sig.export(str(out_dir / "sbom.spdx.json.sig"))
-        await sbom_bundle.export(str(out_dir / "sbom.spdx.json.bundle"))
-        await attestation.export(str(out_dir / "regicide-cosmic.img.att"))
-        if img_cert is not None:
-            await img_cert.export(str(out_dir / "regicide-cosmic.img.cert"))
-            await sbom_cert.export(str(out_dir / "sbom.spdx.json.cert"))
+            await img_sig.export(str(out_dir / "regicide-cosmic.img.sig"))
+            await img_bundle.export(str(out_dir / "regicide-cosmic.img.bundle"))
+            await sbom_sig.export(str(out_dir / "sbom.spdx.json.sig"))
+            await sbom_bundle.export(str(out_dir / "sbom.spdx.json.bundle"))
+            await attestation.export(str(out_dir / "regicide-cosmic.img.att"))
+            if img_cert is not None:
+                await img_cert.export(str(out_dir / "regicide-cosmic.img.cert"))
+                await sbom_cert.export(str(out_dir / "sbom.spdx.json.cert"))
 
-        print("Output: build-system/catalyst/output/regicide-cosmic.img.sig")
-        print("Output: build-system/catalyst/output/regicide-cosmic.img.bundle")
-        if img_cert is not None:
-            print("Output: build-system/catalyst/output/regicide-cosmic.img.cert")
-        print("Output: build-system/catalyst/output/sbom.spdx.json.sig")
-        print("Output: build-system/catalyst/output/sbom.spdx.json.bundle")
-        if sbom_cert is not None:
-            print("Output: build-system/catalyst/output/sbom.spdx.json.cert")
-        print("Output: build-system/catalyst/output/regicide-cosmic.img.att")
+            print("Output: build-system/catalyst/output/regicide-cosmic.img.sig")
+            print("Output: build-system/catalyst/output/regicide-cosmic.img.bundle")
+            if img_cert is not None:
+                print("Output: build-system/catalyst/output/regicide-cosmic.img.cert")
+            print("Output: build-system/catalyst/output/sbom.spdx.json.sig")
+            print("Output: build-system/catalyst/output/sbom.spdx.json.bundle")
+            if sbom_cert is not None:
+                print("Output: build-system/catalyst/output/sbom.spdx.json.cert")
+            print("Output: build-system/catalyst/output/regicide-cosmic.img.att")
+        else:
+            print("Skipping Sigstore signing (--skip-sign)")
 
         if args.encrypt:
             await build_qcow2_locally(
