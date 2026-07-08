@@ -19,6 +19,7 @@ if [[ -z "${IMAGE}" ]]; then
 fi
 
 IMAGE="$(realpath -e "${IMAGE}")"
+shift
 
 # Pick a free local SSH forwarding port.  A fixed port collides when another
 # RegicideOS VM (e.g. RegicideOSArch) is already running on the host.
@@ -96,6 +97,16 @@ if [[ -n "${OVMF_VARS}" ]]; then
     UEFI_FLAGS="${UEFI_FLAGS} -drive if=pflash,format=raw,file=${TMP_VARS}"
 fi
 
+# Default to a headless display.  SDL with OpenGL is only usable when a
+# real X11/Wayland display is available; otherwise QEMU aborts with
+# "OpenGL is not supported by display backend 'none'".
+DISPLAY_ARGS=(-nographic -vga none)
+if [[ -n "${DISPLAY:-}" ]] && command -v xvfb-run >/dev/null 2>&1; then
+    DISPLAY_ARGS=(-vga virtio -display sdl,gl=on)
+elif [[ -n "${REGICIDE_VM_VNC:-}" ]]; then
+    DISPLAY_ARGS=(-vga virtio -display "vnc=${REGICIDE_VM_VNC}")
+fi
+
 qemu-system-x86_64 \
     ${KVM_FLAGS} \
     -m 4G \
@@ -103,8 +114,7 @@ qemu-system-x86_64 \
     -drive file="${IMAGE}",format=qcow2,if=virtio \
     -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
     -device virtio-net-pci,netdev=net0 \
-    -vga virtio \
-    -display sdl,gl=on \
+    "${DISPLAY_ARGS[@]}" \
     -machine type=q35 \
     ${UEFI_FLAGS} \
     "$@"
