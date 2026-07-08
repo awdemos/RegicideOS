@@ -7,7 +7,7 @@ STAGE_NAME="stage6-finalize"
 
 log_status "start" "post-build configuration and tarball creation"
 echo "Applying post-build configuration..."
-run_in_chroot bash -c '
+run_in_chroot bash <<'STAGE6EOF'
     if command -v dracut &> /dev/null; then
         dracut --force --no-hostonly --kver "$(ls /lib/modules/ | head -n1)"
     fi
@@ -237,13 +237,13 @@ EOF
     # Pre-install Rio terminal from Flathub so it is available out-of-the-box.
     # Allow failure because flatpak install can require network/reachable repo.
     flatpak install --noninteractive flathub com.rioterm.Rio || true
-'
+STAGE6EOF
 
 echo "Cleaning up..."
-run_in_chroot bash -c '
+run_in_chroot bash <<'STAGE6CLEANEOF'
     rm -rf /var/tmp/portage/* /var/tmp/portage/.*[!.]* 2>/dev/null || true
     rm -rf /tmp/* /tmp/.*[!.]* 2>/dev/null || true
-'
+STAGE6CLEANEOF
 
 echo "Creating stage4 tarball..."
 log_status "tarball" "creating stage4-amd64-systemd-cosmic.tar.xz"
