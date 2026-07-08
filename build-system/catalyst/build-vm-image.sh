@@ -419,6 +419,7 @@ zstd -19 -f "${WORK_DIR}/merged.cpio" -o "${CUSTOM_INITRD}"
 # Boot the VM and run the builder
 # ---------------------------------------------------------------------------
 echo "Booting KVM builder VM..."
+VM_SERIAL_LOG="${WORK_DIR}/builder-vm-serial.log"
 qemu-system-x86_64 \
     -enable-kvm \
     -m 8G \
@@ -431,7 +432,8 @@ qemu-system-x86_64 \
     -append "root=/dev/vdb ro console=ttyS0,115200n8 init=/init" \
     -drive "file=${TARGET_RAW},format=raw,if=virtio" \
     -drive "file=${SQUASHFS},format=raw,if=virtio,readonly=on" \
-    -drive "file=${DATA_SQUASHFS},format=raw,if=virtio,readonly=on"
+    -drive "file=${DATA_SQUASHFS},format=raw,if=virtio,readonly=on" \
+    2>&1 | tee "${VM_SERIAL_LOG}"
 
 echo "Verifying built raw disk..."
 
@@ -440,34 +442,19 @@ if ! parted -s "${TARGET_RAW}" print > /dev/null 2>&1; then
     exit 1
 fi
 
-# The builder VM powers off regardless of success; verify it actually finished
-# by looking for the sentinel file on the ROOTS partition.  A raw file needs a
-# loop device before its partitions are addressable.
-SENTINEL_MNT="$(TMPDIR=/var/tmp mktemp -d)"
-SENTINEL_LOOP=""
-SENTINEL_FOUND=false
-if SENTINEL_LOOP="$(losetup -f --show -P "${TARGET_RAW}" 2>/dev/null)"; then
-    echo "Checking build sentinel on ${SENTINEL_LOOP}p2..."
-    if mount -o ro "${SENTINEL_LOOP}p2" "${SENTINEL_MNT}" 2>/dev/null; then
-        if [[ -f "${SENTINEL_MNT}/var/lib/regicide-build-complete" ]]; then
-            SENTINEL_FOUND=true
-            echo "Build sentinel found."
-        else
-            echo "Warning: build sentinel not found at ${SENTINEL_MNT}/var/lib/regicide-build-complete"
-            ls -la "${SENTINEL_MNT}/var/lib/" 2>/dev/null | head -5 || true
-        fi
-        umount "${SENTINEL_MNT}" 2>/dev/null || true
-    else
-        echo "Warning: failed to mount ${SENTINEL_LOOP}p2"
-    fi
-    losetup -d "${SENTINEL_LOOP}" 2>/dev/null || true
-else
-    echo "Warning: failed to attach loop device to ${TARGET_RAW}"
-fi
-rmdir "${SENTINEL_MNT}" 2>/dev/null || true
-if [[ "${SENTINEL_FOUND}" != true ]]; then
-    echo "Error: builder VM did not complete successfully (sentinel missing on ROOTS)."
+# The builder VM powers off on success and on failure, so we verify completion
+# by looking for the success banner in the serial log.  This avoids needing a
+# loop device, which is not available in some containerized build environments.
+if [[ ! -f "${VM_SERIAL_LOG}" ]]; then
+    echo "Error: builder VM serial log missing."
     exit 1
+fi
+if ! grep -q 'RegicideOS QEMU image build complete!' "${VM_SERIAL_LOG}"; then
+    echo "Error: builder VM did not complete successfully (success banner missing from serial log)."
+    exit 1
+fi
+if grep -qiE '^Error:|Fatal error|Powering off\.' "${VM_SERIAL_LOG}" | grep -qv 'Powering off\.$'; then
+    echo "Warning: builder VM serial log contains errors; review ${VM_SERIAL_LOG}"
 fi
 
 if [[ "${ENCRYPT}" == true ]]; then
