@@ -114,9 +114,9 @@ The installer **does not use Foxmerge**. Instead:
 # No package installation - uses pre-built system image
 
 # Post-Installation (user-initiated):
-sudo dnf install <package>           # Fedora-style
-sudo emerge <package>              # Gentoo-style overlays
-flatpak install <app>              # Flatpak applications
+flatpak install <app>              # GUI applications (recommended)
+sudo emerge <package>              # Gentoo-style overlays (advanced)
+distrobox create --name dev --image fedora:44   # Project containers
 ```
 
 **System Updates:**
