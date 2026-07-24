@@ -22,8 +22,18 @@ cp "${REPO_ROOT}/build-system/catalyst/seed-overlays.sh" \
     "${REGICIDE_UPDATE_STAGING}/build-system/catalyst/"
 cp "${REPO_ROOT}/data/regicide-rollback-apply.service" \
     "${REGICIDE_UPDATE_STAGING}/data/"
+install -d "${REGICIDE_UPDATE_STAGING}/data/fastfetch/logos"
+cp "${REPO_ROOT}/data/fastfetch/logos/regicideos.txt" \
+    "${REGICIDE_UPDATE_STAGING}/data/fastfetch/logos/" 2>/dev/null || true
 
 run_in_chroot bash <<'STAGE6EOF'
+    # The stage3/4 lineage leaves /etc as 0700, which breaks every service
+    # that runs as a non-root user or reads config as a non-root user (dbus,
+    # timesyncd, cosmic-greeter, shells reading /etc/profile). Ensure /etc
+    # itself is traversable and its contents world-readable.
+    chmod 0755 /etc
+    chmod -R go+rX /etc/portage 2>/dev/null || true
+
     if command -v dracut &> /dev/null; then
         dracut --force --no-hostonly --kver "$(ls /lib/modules/ | head -n1)"
     fi
@@ -42,6 +52,22 @@ run_in_chroot bash <<'STAGE6EOF'
         getent group "$grp" >/dev/null && usermod -aG "$grp" regicide
     done
     chown -R regicide:regicide /home/regicide
+
+    # RegicideOS fastfetch identity: crown logo + make it the default logo
+    # for the default user.
+    if [[ -f /var/tmp/regicide_update_src/data/fastfetch/logos/regicideos.txt ]]; then
+        install -Dm644 /var/tmp/regicide_update_src/data/fastfetch/logos/regicideos.txt \
+            /usr/share/fastfetch/logos/regicideos.txt
+        mkdir -p /home/regicide/.config/fastfetch
+        cat > /home/regicide/.config/fastfetch/config.jsonc <<'FFEOF'
+{
+  "logo": {
+    "source": "/usr/share/fastfetch/logos/regicideos.txt"
+  }
+}
+FFEOF
+        chown -R regicide:regicide /home/regicide/.config
+    fi
     # Suppress the common "tty: ttyname error" message from flatpak terminal
     # emulators (e.g. Rio) when shell startup files run `mesg n` without a TTY.
     # Write a minimal .profile that guards `mesg n` against missing TTY.

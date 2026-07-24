@@ -269,6 +269,92 @@ async def build_iso(
     return builder.file("/tmp/regicide-cosmic.img")
 
 
+async def build_live_iso(
+    client: dagger.Client,
+    tarball: dagger.File,
+    squashfs: dagger.File,
+    arch: str,
+) -> dagger.File:
+    """Create a bootable live ISO (GRUB + dracut dmsquash-live).
+
+    The ISO boots the stage4 kernel with an initramfs that mounts the
+    SquashFS as a read-only live root (dracut's dmsquash-live module),
+    so the whole desktop can be tried or used for installation without
+    touching a disk.
+    """
+    base_image = {
+        "amd64": "gentoo/stage3:amd64-systemd",
+        "arm64": "gentoo/stage3:arm64-desktop-systemd",
+    }[arch]
+
+    # 1. Generate the live initramfs inside the extracted stage4 rootfs so it
+    # matches the exact kernel and userland being shipped.
+    initrd_builder = (
+        client.container()
+        .from_(base_image)
+        .with_file("/tmp/stage4.tar.xz", tarball)
+        .with_exec(["sh", "-c", "tar -C / -xpJf /tmp/stage4.tar.xz --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./opt --exclude=./etc/hosts --exclude=./etc/resolv.conf && rm /tmp/stage4.tar.xz"])
+        .with_exec([
+            "sh", "-c",
+            "set -e; mkdir -p /work; kver=$(ls /lib/modules | head -1); "
+            "cp /boot/vmlinuz /work/vmlinuz; "
+            "dracut --force --no-hostonly --add 'dmsquash-live' /work/initramfs.img ${kver}",
+        ], insecure_root_capabilities=True)
+    )
+
+    # 2. Assemble the ISO tree and run grub-mkrescue. amd64 uses a quick
+    # alpine assembler; arm64 needs Gentoo's grub (alpine only ships x86_64
+    # grub modules), so the arm64 stage3 container doubles as assembler.
+    grub_cfg = """set timeout=5
+set default=0
+menuentry "RegicideOS COSMIC (live)" {
+    linux /boot/vmlinuz root=live:CDLABEL=REGICIDEOS rd.live.image rd.live.dir=/live rd.live.squashimg=rootfs.img console=tty0 console=ttyS0,115200n8
+    initrd /boot/initramfs.img
+}
+menuentry "RegicideOS COSMIC (live, verbose)" {
+    linux /boot/vmlinuz root=live:CDLABEL=REGICIDEOS rd.live.image rd.live.dir=/live rd.live.squashimg=rootfs.img console=tty0 console=ttyS0,115200n8 rd.debug
+    initrd /boot/initramfs.img
+}
+"""
+    iso_name = f"regicide-live-{arch}.iso"
+    if arch == "amd64":
+        iso_builder = (
+            client.container()
+            .from_("alpine:3.21")
+            .with_exec(["apk", "add", "xorriso", "grub-efi", "grub-bios", "mtools"])
+        )
+    else:
+        iso_builder = (
+            client.container()
+            .from_(base_image)
+            .with_exec([
+                "sh", "-c",
+                "GRUB_PLATFORMS=arm64-efi emerge -qv sys-boot/grub app-cdr/xorriso",
+            ])
+        )
+    iso_builder = (
+        iso_builder
+        .with_exec(["mkdir", "-p", "/iso/boot/grub", "/iso/live"])
+        .with_file("/iso/boot/vmlinuz", initrd_builder.file("/work/vmlinuz"))
+        .with_file("/iso/boot/initramfs.img", initrd_builder.file("/work/initramfs.img"))
+        .with_file("/iso/live/rootfs.img", squashfs)
+        .with_new_file("/iso/boot/grub/grub.cfg", grub_cfg)
+        # The squashfs exceeds ISO9660's 4GiB file limit; force iso-level 3
+        # (multi-extent). -iso-level is only valid in mkisofs-emulation mode,
+        # so the wrapper injects it only after "-as mkisofs" (plain
+        # "xorriso -version" must keep working for grub-mkrescue's probe).
+        .with_new_file("/usr/local/bin/xorriso", '#!/bin/sh\nif [ "$1" = "-as" ] && [ "$2" = "mkisofs" ]; then\n  shift 2\n  exec /usr/bin/xorriso -as mkisofs -iso-level 3 "$@"\nfi\nexec /usr/bin/xorriso "$@"\n')
+        .with_exec(["chmod", "+x", "/usr/local/bin/xorriso"])
+        .with_exec([
+            "grub-mkrescue",
+            "-V", "REGICIDEOS",
+            "-o", f"/{iso_name}", "/iso",
+        ])
+    )
+
+    return iso_builder.file(f"/{iso_name}")
+
+
 def _with_cosign(container: dagger.Container) -> dagger.Container:
     """Install cosign v2.4.0 into a Linux container from the official release."""
     cosign_url = (
@@ -508,6 +594,11 @@ async def main() -> None:
         help="Build an unencrypted QCOW2 from the stage4 tarball and run stage8-vm-test.sh",
     )
     parser.add_argument(
+        "--iso",
+        action="store_true",
+        help="Also build a bootable live ISO (GRUB + dracut dmsquash-live) from the artifacts",
+    )
+    parser.add_argument(
         "--skip-sign",
         action="store_true",
         help="Skip Sigstore signing (useful for local test builds without cosign credentials)",
@@ -568,6 +659,7 @@ async def main() -> None:
         sbom_path = out_dir / "sbom.spdx.json"
 
         squashfs_path = out_dir / "regicide-cosmic.img"
+        squashfs_file: dagger.File | None = None
         if squashfs_input is not None:
             print(f"Using existing SquashFS image: {squashfs_input}")
             if squashfs_input.resolve() != squashfs_path.resolve():
@@ -612,6 +704,13 @@ async def main() -> None:
                     check=True,
                 )
         print(f"Output: {squashfs_path}")
+
+        if args.iso:
+            print(f"Building bootable live ISO (--iso, {args.arch})...")
+            squashfs_for_iso = squashfs_file if squashfs_file is not None else client.host().file(str(squashfs_path))
+            iso_file = await build_live_iso(client, tarball, squashfs_for_iso, arch=args.arch)
+            await iso_file.export(str(out_dir / f"regicide-cosmic-{args.arch}.iso"))
+            print(f"Output: build-system/catalyst/output/regicide-cosmic-{args.arch}.iso")
 
         print("Running stage7 verification on host artifacts...")
         subprocess.run(
