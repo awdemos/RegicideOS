@@ -58,7 +58,8 @@ RegicideOS is a specialized Gentoo-based Linux distribution focused on:
 ### 2.2 Supported Architectures
 
 Currently supported:
-- `x86_64` (AMD64)
+- `x86_64` (AMD64) — primary target
+- `arm64` (AArch64) — experimental; the Dagger pipeline supports `--arch arm64` and can cross-build ARM64 stage4 tarballs on an x86_64 host via qemu-user binfmt. A matching `build-qemu-image-arm64.sh` produces AAVMF/`virt`-machine QCOW2 images.
 
 ---
 
@@ -102,7 +103,11 @@ cd RegicideOS
 **Build the stage4 + live SquashFS:**
 
 ```bash
+# AMD64 (default)
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+
+# ARM64 (experimental; cross-built under qemu-user emulation — much slower)
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --arch arm64
 ```
 
 This runs six cacheable stages in `build-system/catalyst/stages/`. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI, which is easier to read in agent/CI environments:
@@ -117,7 +122,7 @@ This runs six cacheable stages in `build-system/catalyst/stages/`. Use `--plain`
 The first run can take several hours because the COSMIC stage compiles Rust packages from source. Subsequent runs reuse the `distfiles` and `binpkgs` Dagger cache volumes and are much faster.
 
 Outputs:
-- `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz`
+- `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz` (or `stage4-arm64-systemd-cosmic.tar.xz`)
 - `build-system/catalyst/output/regicide-cosmic.img` (live SquashFS)
 
 **Build a bootable QCOW2 VM image:**
@@ -266,7 +271,7 @@ The RegicideOS installer performs these steps:
    - Install GRUB with crypto modules for encrypted boot
 
 6. **Post-Installation Configuration**
-   - Set up overlay filesystem mounts (/etc, /var, /usr)
+   - Set up writable system state (Btrfs `/etc` and `/var` subvolumes in VM images; overlayfs mounts on legacy bare-metal installs)
    - Configure LUKS initramfs scripts and crypttab
    - Generate GRUB configuration with dynamic UUID detection
 
@@ -276,8 +281,10 @@ The RegicideOS installer performs these steps:
    - Root password is intentionally unset; set it after first login with `sudo passwd root`
 
 8. **Application Installation**
-   - Install Flatpak applications from Flathub
-   - Setup application containers (Distrobox) for isolated workspaces
+   - Pre-installed Flatpaks: Rio terminal, OpenCode, ungoogled-chromium
+   - Deferred first-boot Flatpaks (`regicide-deferred-flatpaks.service`): ProtonVPN, BoxBuddy, SoundRecorder, virt-manager
+   - btrfs-assistant for graphical Btrfs snapshot management
+   - Distrobox containers for isolated workspaces
 
 9. **System Configuration**
    - Install official dotfiles (regicide-dotfiles)
@@ -294,9 +301,9 @@ The RegicideOS installer performs these steps:
 
 ## 4. System Architecture
 
-### 4.1 Current Implementation: 4-Partition Overlayfs Layout
+### 4.1 Current Implementation: 4-Partition Immutable Layout
 
-RegicideOS uses a **4-Partition Overlayfs architecture** inherited from its upstream project. The base system is a Gentoo stage4 with COSMIC as the default desktop, built locally through the Catalyst/Dagger pipeline and deployed as a read-only SquashFS image.
+RegicideOS uses a **4-partition architecture** inherited from its upstream project. The base system is a Gentoo stage4 with COSMIC as the default desktop, built locally through the Catalyst/Dagger pipeline. Bare-metal installs deploy it as a read-only SquashFS image; pipeline-built QCOW2 images use the Btrfs-subvolume layout shown below.
 
 ```
 /dev/sda1   512 MB  FAT32   label "EFI"
@@ -305,47 +312,51 @@ RegicideOS uses a **4-Partition Overlayfs architecture** inherited from its upst
 /dev/sda4   Remaining  LUKS-encrypted BTRFS label "HOME"  (user data)
 ```
 
-**Overlay Structure:**
+**Overlay Structure (QCOW2 / VM images):**
 ```
-/                       # Merged view: read-only ROOTS lowerdir + writable OVERLAY upperdir
-├── boot/efi            # EFI System Partition
-├── root/               # Read-only lowerdir from ROOTS partition
-└── overlay/            # Writable upperdir for /etc, /var, /usr
+/                       # ROOTS partition (base system from stage4 tarball)
+├── efi/                # EFI System Partition (automounted on access)
+├── etc/                # Btrfs subvolume "etc" on OVERLAY (writable, snapshotted)
+├── var/                # Btrfs subvolume "var" on OVERLAY (writable, snapshotted)
+├── home/               # Btrfs subvolume "home" on HOME (LUKS-encrypted)
+└── overlay/            # OVERLAY partition top-level (snapshot store lives here)
 ```
 
+> **Note**: `/etc` and `/var` are real Btrfs subvolumes, not overlayfs mounts. Overlayfs across the separate ROOTS and OVERLAY partitions fails with EXDEV ("Invalid cross-device link") during early-boot file creation, and directory renames under `/var` break systemd-logind. `/usr` stays on ROOTS (dracut mishandles a separate `/usr` mount during switch-root).
+
 **Boot Process:**
-1. **UEFI → GRUB → kernel**
-2. **initrd** loads and mounts:
-   - ROOTS partition containing the validated SquashFS `root.img`
-   - Overlayfs layers for `/etc`, `/var`, `/usr` backed by the OVERLAY partition
-   - `/home` partition (writable, LUKS-encrypted BTRFS)
-3. **systemd** starts with the immutable root and writable overlays in place
+1. **UEFI → GRUB** (installed to the removable path `EFI/BOOT/BOOTX64.EFI`, or `BOOTAA64.EFI` on ARM64)
+2. **Encrypted images**: GRUB unlocks the ROOTS LUKS device itself via `cryptomount -u <uuid>` (LUKS2 with PBKDF2 — GRUB cannot do Argon2id)
+3. **kernel + dracut initramfs** load from `/boot`; the `regicide-crypt` dracut module auto-unlocks ROOTS with an embedded keyfile (`rd.luks.uuid=<uuid>` on the kernel cmdline) so the passphrase is only typed once
+4. **initrd mounts** ROOTS, then hands off to systemd, which mounts the `/etc` and `/var` subvolumes, `/home`, and automounts the ESP at `/efi`
+5. **systemd** reaches the COSMIC greeter
 
 Because the live image is a SquashFS produced directly by the Catalyst pipeline, the bootable artifact is byte-for-byte what was validated during the build.
 
 ### 4.2 Benefits of Current Architecture
 
-- **Simplicity**: Proven overlayfs approach
+- **Simplicity**: Proven immutable-base approach with writable Btrfs subvolumes
 - **Reliability**: Read-only base cannot be corrupted during normal operation
-- **Instant Rollback**: Boot the previous validated `root.img` instead of debugging partial mutations
-- **Atomic Updates**: Updates are prepared offline, verified, and swapped by replacing the entire `root.img`
+- **Instant Rollback**: `regicide-rollback` restores snapshotted `/etc`/`/var` subvolumes at next boot; base images roll back via `regicide-image`
+- **Atomic Updates**: Base-image swaps are prepared offline, verified, and installed atomically by `regicide-image install`
 - **LUKS Encryption**: Full LUKS encryption support with dynamic partition detection
 - **Auditability**: The base OS is compiled from source on your own hardware with declarative inputs
 
 ### 4.3 Known Limitations
 
-- **No Subvolume Management**: Overlays are flat directories, not BTRFS sub-volumes
-- **Limited Rollback**: Only to previous system image, not granular
-- **No Snapshots**: Cannot snapshot individual system states
+- **Limited Rollback Scope**: Btrfs snapshots cover `/etc` and `/var`; `/usr` changes (base-image replacement) roll back by restoring the previous ROOTS image
+- **No Secure Boot**: GRUB and kernel are unsigned; disable Secure Boot in firmware
+- **Bare-metal installer** still deploys the legacy overlayfs + SquashFS `root.img` layout (see §9.4); the subvolume layout currently applies to pipeline-built QCOW2 images
 
-### 4.4 Future Roadmap: BTRFS-Native Architecture (Planned for 2026-2027)
+### 4.4 Roadmap: BTRFS-Native Architecture (partially delivered)
 
-**Note**: BTRFS-Native architecture is planned for a future major version and will provide:
+The BTRFS-native layout has begun landing:
 
-- Subvolume-based system layout (@etc, @var, @usr, @home)
-- Instant snapshots via `btrfs subvolume snapshot`
-- Granular rollback to specific system states
-- Better storage efficiency with copy-on-write
+- ✅ Subvolume-based `/etc`, `/var`, `/home` (replacing overlayfs in VM images)
+- ✅ Instant snapshots via `btrfs subvolume snapshot` (used by `regicide-update`, see §7)
+- ✅ Granular rollback to specific snapshot sets (`regicide-rollback`)
+- ⏳ Extending the subvolume layout to the bare-metal installer
+- ⏳ Deduplication/send-receive for image distribution
 
 > **See [INSTALLATION_ARCHITECTURE.md](INSTALLATION_ARCHITECTURE.md) for complete details on current architecture, LUKS boot implementation, and future roadmap.
 
@@ -444,56 +455,98 @@ distrobox enter dev
 
 ## 7. Post-Installation Updates
 
-> **Current status**: RegicideOS does **not** have an automated update manager. There is no `foxmerge`, `foxbox`, or equivalent CLI yet. Post-install updates are manual.
+> **Current status**: RegicideOS ships the **`regicide-update` tool suite** (installed into the base image by stage6). It wraps Portage with automatic Btrfs snapshot safety nets and manages base-image replacement.
 
 ### 7.1 Update Model
 
-RegicideOS is an **image-based, immutable-root** distribution with a writable overlay layer:
+RegicideOS is an **image-based, immutable-root** distribution with writable Btrfs subvolumes:
 
-- **ROOTS** partition: read-only base system image (`root.img` SquashFS)
-- **OVERLAY** partition: writable `/etc`, `/var`, `/usr` overlays
-- **HOME** partition: user data
+- **ROOTS** partition: base system image (read-only on bare-metal installs; `/usr` lives here)
+- **OVERLAY** partition: writable `/etc` and `/var` subvolumes + the snapshot store (`/overlay/.regicide-snapshots`)
+- **HOME** partition: user data (`subvol=home`)
 
-This means there are two ways to update the system:
+This gives two update paths, both tool-supported:
 
-1. **Replace the base image** (atomic, clean, recommended)
-2. **Use Portage on the overlay** (incremental, can drift from the base image)
+1. **Package updates on the live system** — `regicide-update` (snapshot-wrapped Portage)
+2. **Base image replacement** — `regicide-image` (atomic swap of the ROOTS image)
 
-### 7.2 Replacing the Base Image (Recommended)
+### 7.2 Package Updates with `regicide-update`
 
-When a new `regicide-cosmic.img` is available, replace the ROOTS image and reboot:
+Every transaction automatically snapshots the `/etc` and `/var` subvolumes before and after; on failure it arms an automatic rollback for the next boot:
 
 ```bash
-# Boot from a live environment or another root
+# Sync Portage repositories
+sudo regicide-update sync
+
+# Search for packages
+regicide-update search <query>
+
+# Full system upgrade (pre/post snapshots created automatically)
+sudo regicide-update upgrade
+
+# Install / remove packages (same snapshot protection)
+sudo regicide-update install <package>...
+sudo regicide-update remove <package>...
+
+# Skip the auto-rollback safety net (not recommended)
+sudo regicide-update upgrade --no-rollback
+```
+
+If a transaction fails, the tool prints `Reboot to roll back to <snapshot>` — the `regicide-rollback-apply.service` restores the pre-transaction subvolumes during the next boot.
+
+### 7.3 Rollback with `regicide-rollback`
+
+```bash
+# List snapshot sets (pre_/post_ upgrade, install, manual)
+regicide-rollback list
+
+# Create a manual snapshot set
+sudo regicide-rollback create --tag before-experiment
+
+# Show the currently active snapshot set
+regicide-rollback current
+
+# Schedule a revert for next boot (defaults to newest set)
+sudo regicide-rollback revert <name>
+sudo regicide-rollback revert --cancel
+
+# Delete a snapshot set
+sudo regicide-rollback delete <name>
+```
+
+A **btrfs-assistant** GUI is also installed for browsing snapshots.
+
+### 7.4 Base Image Replacement with `regicide-image`
+
+For whole-system upgrades, replace the ROOTS base image atomically:
+
+```bash
+# Fetch a release image
+sudo regicide-image fetch <url> --checksum-url <checksum-url>
+
+# Verify a downloaded image
+sudo regicide-image verify <path> --checksum-url <checksum-url>
+
+# Install it into ROOTS (backs up the current image first)
+sudo regicide-image install <path>
+```
+
+Then reboot. The `/etc`, `/var`, and `/home` subvolumes persist across image swaps.
+
+### 7.5 Manual Base Image Replacement
+
+The manual path still works (e.g., from a live environment):
+
+```bash
 sudo mkdir -p /mnt/roots
 sudo mount /dev/disk/by-label/ROOTS /mnt/roots
-
-# Back up the current image
-sudo mv /mnt/roots/root.img /mnt/roots/root.img.previous
-
-# Copy the new image
+sudo mv /mnt/roots/root.img /mnt/roots/root.img.previous   # squashfs-layout installs
 sudo cp /path/to/new/regicide-cosmic.img /mnt/roots/root.img
 sync
 sudo umount /mnt/roots
 ```
 
-Then reboot. The overlay layer persists, so your `/etc`, `/var`, and `/usr` customizations remain — but compatibility with the new base image is your responsibility.
-
-### 7.3 Using Portage on the Overlay (Advanced)
-
-Because `/usr` is an overlay, you can run `emerge` directly on a running system, but this is **not the intended workflow** and can leave the system in an inconsistent state:
-
-```bash
-# Sync Portage (if network is configured)
-sudo emerge --sync
-
-# Update a single package
-sudo emerge -av1 <package>
-```
-
-If you go this route, treat the system as a normal Gentoo install and accept that atomic rollback via image replacement may no longer apply cleanly.
-
-### 7.4 User Toolchains
+### 7.6 User Toolchains
 
 User-facing development tools are **not** installed in the base image by default. Install them per-user inside containers:
 
@@ -508,18 +561,7 @@ sudo dnf install zed rustup nodejs
 
 This keeps the base image small and lets each user pick their own toolchain.
 
-### 7.5 Future: RegicideOS Update CLI
-
-A first-party update tool is the next priority after the MVP build boots. The planned `regicide-update` CLI will:
-
-- Accept a local SquashFS image produced by the Dagger pipeline
-- Back up the current ROOTS image before replacing it
-- Install the new image atomically
-- Offer rollback to the previous image on failure
-
-See `.omo/plans/root-update-system.md` for the full plan. For now, updates are manual using the steps in Section 7.2.
-
-### 7.6 Customizing Your Base Image
+### 7.7 Customizing Your Base Image
 
 Power users are expected to modify the Dagger pipeline and stage scripts to build their own base image:
 
@@ -531,7 +573,7 @@ $EDITOR build-system/catalyst/stages/stage4-cosmic.sh
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
-The output `build-system/catalyst/output/regicide-cosmic.img` is the image you install or apply with the planned `regicide-update apply` command.
+The output `build-system/catalyst/output/regicide-cosmic.img` is the image you install bare-metal or apply to an existing system with `regicide-image install` (§7.4).
 
 ---
 
@@ -727,49 +769,37 @@ cargo run --bin installer -- --dry-run
 
 ### 9.1 System Updates
 
-RegicideOS uses an atomic update system via `root.img` tarball images:
+RegicideOS updates are handled by the `regicide-update` tool suite (see §7 for the full reference):
 
 #### 9.1.1 Base System Updates
 
-> **Note**: RegicideOS does not currently host a remote update repository. Updates are performed by rebuilding the OS image locally with Catalyst and reinstalling, or by downloading updated release images from GitHub.
->
-> ```bash
-> # Manual update process (using locally-built image)
-> sudo mount -L ROOTS /mnt/roots
-> sudo tar xf /path/to/new-regicide-image.tar -C /mnt/roots
-> sudo umount /mnt/roots
-> sudo reboot
-> ```
+```bash
+# Atomic base-image replacement (backs up the current image first)
+sudo regicide-image fetch <url> --checksum-url <checksum-url>
+sudo regicide-image install <path>
+sudo reboot
+```
 
-#### 9.1.2 Overlay Updates
+Manual replacement from a live environment still works — see §7.5.
 
-Package overlays are updated using Portage on the writable overlay layer:
+#### 9.1.2 Package Updates (with snapshot safety)
 
 ```bash
-# Sync Portage and update world on the overlay
+# Sync Portage and upgrade the system (auto-snapshots /etc and /var)
+sudo regicide-update sync
+sudo regicide-update upgrade
+
+# Or plain Portage, without snapshot protection (not recommended)
 sudo emerge --sync
 sudo emerge -avuDN @world
-
-# Update a specific package
-sudo emerge -av1 <package-name>
-
-# Check for available updates
-sudo emerge -avuDN @world --pretend
-
-# Clean up old packages
-sudo emerge --depclean
 ```
 
 #### 9.1.3 Update Workflow
 
-The installer automates base system updates:
-1. Download newest `root.img` from RegicideOS repositories
-2. Copy to ROOTS partition
-3. Touch to ensure newest timestamp
-4. Sync filesystem
-5. Reboot
-
-GRUB's `10_linux` helper automatically picks the newest `root-*.img` by modification time.
+1. `regicide-update upgrade` creates pre/post-transaction Btrfs snapshot sets of the `/etc` and `/var` subvolumes
+2. Failed transactions automatically arm a rollback for the next boot (`regicide-rollback-apply.service`)
+3. `regicide-image install` swaps the ROOTS base image atomically, keeping `/etc`, `/var`, and `/home`
+4. Rollback anytime with `regicide-rollback revert <name>` + reboot
 
 ### 9.2 System Configuration
 
@@ -788,24 +818,30 @@ sudo qlist -I  # Portage installed packages
 
 ### 9.3 System Snapshots
 
-The current 4-Partition architecture does not support granular snapshots. For rollback:
+Btrfs snapshots of the `/etc` and `/var` subvolumes are a first-class feature, managed by `regicide-rollback` (see §7.3):
 
 ```bash
-# Boot from live environment
-sudo mount -L ROOTS /mnt/regicide
-sudo mount -L EFI /mnt/regicide/boot/efi
-
-# Reinstall bootloader
-sudo chroot /mnt/regicide
-grub-install --target=x86_64-efi --efi-directory=/boot/efi
-grub-mkconfig -o /boot/grub/grub.cfg
-
-# Reboot
+regicide-rollback list                          # list snapshot sets
+sudo regicide-rollback create --tag manual      # manual snapshot
+sudo regicide-rollback revert <name>            # revert at next boot
+sudo regicide-rollback delete <name>            # delete a set
 ```
 
-> **Note**: BTRFS-native architecture with subvolume snapshot support is planned for future versions (see [INSTALLATION_ARCHITECTURE.md](INSTALLATION_ARCHITECTURE.md)).
+Snapshots are stored in `/overlay/.regicide-snapshots` (same filesystem as the snapshotted subvolumes — Btrfs cannot snapshot across filesystems). The **btrfs-assistant** GUI offers the same operations graphically.
 
-### 9.4 OS Personality Swapping
+To repair a broken boot from a live environment:
+
+```bash
+sudo mount -L ROOTS /mnt/regicide
+sudo mount -L EFI /mnt/regicide/efi
+sudo chroot /mnt/regicide
+grub-install --target=x86_64-efi --efi-directory=/efi --removable
+grub-mkconfig -o /boot/grub/grub.cfg
+```
+
+### 9.4 OS Personality Swapping (legacy squashfs layout)
+
+> **Note**: This section applies to bare-metal installs that use the SquashFS `root.img` + overlayfs layout. Pipeline-built QCOW2 images use Btrfs subvolumes instead — use `regicide-image` / `regicide-rollback` there (§7).
 
 The phrase "OS personality" refers to ability to replace the read-only base system image (`root.img`) while keeping your local changes and home directory intact. This is one of the most powerful features of RegicideOS's architecture.
 
@@ -935,11 +971,11 @@ sudo cryptsetup close ROOTS_HOME
 # Check boot partition mount
 mount | grep efi
 
-# Verify GRUB files exist
-ls -la /boot/efi/EFI/
+# Verify GRUB files exist (ESP is automounted at /efi)
+ls -la /efi/EFI/
 
 # Check GRUB configuration
-cat /boot/efi/grub/grub.cfg
+cat /boot/grub/grub.cfg
 ```
 
 #### 10.1.2 LUKS-Specific Issues
@@ -966,7 +1002,7 @@ lsinitramfs /boot/initrd.img-* | grep cryptsetup
 cat /etc/crypttab
 
 # Reinstall GRUB with proper modules (v2.0+ does this automatically)
-sudo grub-install --modules="cryptodisk luks gcry_rijndael gcry_sha256 gcry_sha1 aesni part_gpt lvm" --target=x86_64-efi --efi-directory=/boot/efi
+sudo grub-install --modules="cryptodisk luks2 pbkdf2 gcry_rijndael gcry_sha256 gcry_sha1 part_gpt lvm" --target=x86_64-efi --efi-directory=/efi --removable
 
 # Regenerate initramfs
 sudo update-initramfs -u -k all
@@ -997,13 +1033,13 @@ If system fails to boot:
 1. **Boot from live environment**
    ```bash
    sudo mount -L ROOTS /mnt/regicide
-   sudo mount -L EFI /mnt/regicide/boot/efi
+   sudo mount -L EFI /mnt/regicide/efi
    ```
 
 2. **Reinstall bootloader:**
    ```bash
    sudo chroot /mnt/regicide
-   grub-install --target=x86_64-efi --efi-directory=/boot/efi
+   grub-install --target=x86_64-efi --efi-directory=/efi --removable
    grub-mkconfig -o /boot/grub/grub.cfg
    ```
 
@@ -1014,20 +1050,24 @@ If system fails to boot:
 
 #### 10.2.2 Snapshot Recovery
 
-Since current architecture doesn't support granular snapshots, rollback requires personality swapping (see Section 9.4).
+Use `regicide-rollback` to revert to a pre-failure snapshot set (§7.3):
 
 ```bash
-# List available personalities (system images)
-ls -la /mnt/root-*.img
+# List snapshot sets
+regicide-rollback list
 
-# Boot from live USB and mount
-sudo mount -L ROOTS /mnt/regicide
-
-# Copy previous working image
-sudo cp /mnt/root-working.img /mnt/
-
-# Reboot to use previous personality
+# Schedule the revert and reboot
+sudo regicide-rollback revert <name>
 sudo reboot
+```
+
+If the system cannot boot at all, mount the OVERLAY partition from a live environment and swap the subvolumes manually:
+
+```bash
+sudo mount -L OVERLAY /mnt
+sudo btrfs subvolume snapshot /mnt/.regicide-snapshots/<name>/etc /mnt/etc.new
+sudo mv /mnt/etc /mnt/etc.broken && sudo mv /mnt/etc.new /mnt/etc
+# repeat for var, then reboot
 ```
 
 ### 10.3 Service Management
@@ -1092,7 +1132,7 @@ RUST_LOG=debug RUST_BACKTRACE=1 sudo ./installer
 
 ### Q1: Does RegicideOS use BTRFS subvolumes?
 
-**A:** No, the current implementation uses flat overlay directories (`/etc`, `/var`, `/usr`) instead of BTRFS sub-volumes. BTRFS-native architecture with subvolume support is planned for a future major version (2026-2027). See [INSTALLATION_ARCHITECTURE.md](INSTALLATION_ARCHITECTURE.md) for details.
+**A:** Yes, in the current pipeline-built images: `/etc` and `/var` are Btrfs subvolumes on the OVERLAY partition, and `/home` is subvol `home` on the HOME partition. They are snapshotted by `regicide-update` transactions and can be rolled back with `regicide-rollback`. The legacy bare-metal installer path still uses flat overlayfs directories; migrating it is on the roadmap (§4.4).
 
 ### Q2: Does RegicideOS support multiple desktop environments?
 
@@ -1109,12 +1149,12 @@ sudo ./installer
 
 ### Q4: How do I rollback to a previous system version?
 
-**A:** The current 4-Partition architecture supports personality swapping:
-1. Download previous system image from RegicideOS repositories
-2. Copy to ROOTS partition: `sudo cp root.img /mnt/ROOTS/`
-3. Reboot and select older image in GRUB
+**A:** Two levels of rollback:
 
-> **Note**: BTRFS-native architecture with subvolume snapshots will provide granular rollback when implemented.
+1. **Package-level**: `sudo regicide-rollback list` then `sudo regicide-rollback revert <name>` and reboot — restores the snapshotted `/etc` and `/var` subvolumes from before a `regicide-update` transaction.
+2. **Image-level**: reinstall the previous base image with `regicide-image install <old-image>` (the previous image is backed up automatically during install).
+
+On legacy squashfs-layout installs, keep the old `root.img` on the ROOTS partition and reboot into it (§9.4).
 
 ### Q5: Where are user settings stored?
 
@@ -1125,16 +1165,14 @@ sudo ./installer
 
 ### Q6: What happened to Foxmerge?
 
-**A:** Foxmerge was described in early planning but was not implemented. RegicideOS does not currently have a first-party update CLI. Post-installation base-system updates are done by replacing the `root.img` on the ROOTS partition, and per-user packages are installed in Distrobox containers. Standard Portage commands can be used on the overlay layer, but that is not the recommended workflow.
+**A:** Foxmerge was described in early planning but was never implemented. Its role is filled today by the `regicide-update` tool suite: `regicide-update` (snapshot-wrapped Portage transactions), `regicide-rollback` (snapshot management), and `regicide-image` (atomic base-image replacement). See Section 7.
 
 ### Q7: How do post-install updates work?
 
-**A:** There is no automated update manager yet. The recommended manual workflow is:
+**A:** Use the built-in tooling:
 
-1. Build or download a new `regicide-cosmic.img`.
-2. Mount the ROOTS partition from a live environment.
-3. Replace `/mnt/roots/root.img` with the new image.
-4. Reboot.
+1. **Packages**: `sudo regicide-update sync && sudo regicide-update upgrade` — pre/post Btrfs snapshots are created automatically, with automatic rollback on failure.
+2. **Base image**: `sudo regicide-image install <new-image>` and reboot.
 
 See Section 7 for the full update procedure.
 
@@ -1225,6 +1263,40 @@ menuentry "RegicideOS (Encrypted)" {
 
 ## Changelog
 
+### Version 2.3 (July 2026)
+
+**Added:**
+- Binpkg-main pipeline (default): stage2+ reuses seeded binary packages via `--usepkg`; the from-source pipeline (`REGICIDE_USE_BINPKGS=0`) still populates the binpkg cache volume
+- Persistent Dagger engine storage + tuned GC (cache survives engine restarts; no-change rebuilds finish in minutes)
+- `build-qemu-image-arm64.sh` (experimental ARM64 QCOW2 builder, AAVMF + `virt` machine)
+- minimon COSMIC applet ships in the image (`cosmic-ext-applet-minimon`)
+
+**Changed:**
+- Stage cache mounts removed from the base chain (Dagger ≥0.21 never caches execs with cache mounts); distfiles/binpkgs now sync via dedicated cheap execs
+- QCOW2 builder seeds `/etc` and `/var` subvolumes AFTER all rootfs edits (fixes missing fstab/hostname/sshd config in live `/etc`)
+- initramfs-only NetworkManager units masked (they claimed the same D-Bus name and broke NetworkManager at boot)
+- Duplicate `LABEL=HOME` fstab entry removed
+
+**Removed:**
+- ZFS packages (zfs-2.3.8 supports ≤ kernel 6.18 vs shipped 7.1; zfs-kmod 2.4.0 is RC-only) — re-add when zfs-kmod 2.4 stabilizes
+
+### Version 2.2 (July 2026)
+
+**Added:**
+- `regicide-update` tool suite: snapshot-wrapped Portage transactions (`sync`, `search`, `upgrade`, `install`, `remove`)
+- `regicide-rollback` CLI: list/create/delete/revert snapshot sets of the `/etc` and `/var` Btrfs subvolumes
+- `regicide-image` CLI: fetch/verify/install base images into ROOTS atomically
+- Automatic rollback on failed transactions via `regicide-rollback-apply.service`
+- btrfs-assistant GUI for snapshot management
+- ARM64 (aarch64) pipeline support: `--arch arm64` Dagger builds + AAVMF-based QCOW2 builder
+- Pre-installed Flatpaks (Rio, OpenCode, ungoogled-chromium) + deferred first-boot set
+
+**Changed:**
+- `/etc` and `/var` are now real Btrfs subvolumes on OVERLAY (replacing overlayfs in VM images — fixes EXDEV early-boot failures)
+- `/home` mounted as subvol `home` on the HOME partition
+- EFI System Partition mounted at `/efi` via `x-systemd.automount` (was `/boot/efi`)
+- Encrypted boot: GRUB `cryptomount -u <uuid>` + dracut auto-unlock (single passphrase prompt)
+
 ### Version 2.0 (January 2026)
 
 **Added:**
@@ -1261,5 +1333,5 @@ menuentry "RegicideOS (Encrypted)" {
 
 ---
 
-*Document Version: 2.1*
-*Last Updated: April 2026*
+*Document Version: 2.3*
+*Last Updated: July 2026*

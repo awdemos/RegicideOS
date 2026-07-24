@@ -47,7 +47,10 @@ just ci              # lint test build
 just build-iso       # cd build-system/catalyst && sudo ./build.sh
 
 # Dagger CI/CD (recommended; works in any Docker/Podman host)
+# Main pipeline reuses binary packages from the cache volume (fast rebuilds)
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+# From-source pipeline (full recompile; still populates the binpkg cache)
+REGICIDE_USE_BINPKGS=0 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 
 # Installer (run from a Linux live environment for bare metal)
 cd installer && cargo build --release
@@ -59,6 +62,8 @@ sudo ./target/release/installer --image ../build-system/catalyst/output/regicide
 - `legacy_installer.py` at root is superseded by the Rust installer under `installer/`.
 - The COSMIC desktop packages are installed in the stage4 image and the greeter boots.
 - The Dagger pipeline now runs `stage7-verify.sh` and `stage7-sbom.sh` after stage6 to verify the user model, COSMIC presence, and package set, and to generate an SBOM.
+- Builds consume previously built Gentoo binary packages via `--usepkg` (set in `stage2-sync.sh`'s generated `make.conf`); in Dagger the chroot PKGDIR is the `regicide-binpkgs-v5` cache volume (`REGICIDE_BINPKGS_DIR`). Set `REGICIDE_USE_BINPKGS=0` to force full source builds.
+- Heavy Flatpak apps install on first boot via `regicide-deferred-flatpaks.service` (set `REGICIDE_DEFER_FLATPAKS=0` to bake them in). When run unprivileged, the SquashFS is built inside the Dagger engine (`build_iso`) instead of host sudo.
 
 ---
 
@@ -312,3 +317,14 @@ General redeploy process:
 1. Commit and push changes to the default branch.
 2. Trigger the relevant CI/CD pipeline or run the documented deploy command.
 3. If the project is served via GitHub Pages, the site redeploys automatically after the push.
+
+
+## Setup commands
+- Install deps: `pnpm install`
+- Start dev server: `pnpm dev`
+- Run tests: `pnpm test`
+
+## Code style
+- TypeScript strict mode
+- Single quotes, no semicolons
+- Use functional patterns where possible
