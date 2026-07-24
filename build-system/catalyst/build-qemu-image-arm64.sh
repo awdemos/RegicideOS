@@ -1,5 +1,5 @@
 #!/bin/bash
-# RegicideOS QEMU Disk Image Builder
+# RegicideOS ARM64 QEMU Disk Image Builder (aarch64, AAVMF + GRUB arm64-efi)
 # Creates a bootable QCOW2 disk image from a Catalyst stage4 tarball
 
 set -euo pipefail
@@ -444,6 +444,9 @@ ${ROOTS_FSTAB_SPEC}   /       btrfs   defaults,noatime           0 0
 # Writable overlay partition
 LABEL=OVERLAY /overlay btrfs   defaults,noatime           0 0
 
+# User data
+LABEL=HOME    /home   btrfs   subvol=home,defaults,noatime           0 0
+
 # Mutable system directories.
 # /usr is intentionally omitted: dracut treats a separate /usr mount
 # specially and breaks merged-/usr switch-root.
@@ -730,7 +733,7 @@ GRUB_MODULES="cryptodisk luks luks2 gcry_rijndael gcry_sha256 gcry_sha1 part_gpt
 grub-install \
     --modules="${GRUB_MODULES}" \
     --force \
-    --target="x86_64-efi" \
+    --target="arm64-efi" \
     --efi-directory="/boot/efi" \
     --boot-directory="/boot/efi" \
     --removable \
@@ -817,17 +820,17 @@ fi
 
 cat >> "${MOUNT_DIR}/boot/efi/grub/grub.cfg" << GRUBEOF
 menuentry "RegicideOS" {
-    linux /boot/vmlinuz ${ROOTS_GRUB} quiet splash rw console=ttyS0,115200n8
+    linux /boot/vmlinuz ${ROOTS_GRUB} quiet splash rw console=ttyAMA0,115200n8 console=tty0
     initrd /boot/initramfs.img
 }
 
 menuentry "RegicideOS (Recovery)" {
-    linux /boot/vmlinuz ${ROOTS_GRUB} quiet splash rw single console=ttyS0,115200n8
+    linux /boot/vmlinuz ${ROOTS_GRUB} quiet splash rw single console=ttyAMA0,115200n8 console=tty0
     initrd /boot/initramfs.img
 }
 
 menuentry "RegicideOS (Verbose)" {
-    linux /boot/vmlinuz ${ROOTS_GRUB} verbose rw console=ttyS0,115200n8
+    linux /boot/vmlinuz ${ROOTS_GRUB} verbose rw console=ttyAMA0,115200n8 console=tty0
     initrd /boot/initramfs.img
 }
 GRUBEOF
@@ -837,7 +840,7 @@ mkdir -p "${MOUNT_DIR}/boot/efi/EFI/fedora"
 cp "${MOUNT_DIR}/boot/efi/grub/grub.cfg" "${MOUNT_DIR}/boot/efi/EFI/fedora/grub.cfg"
 
 echo "Verifying EFI System Partition contents..."
-EFI_BOOT_FILE="${MOUNT_DIR}/boot/efi/EFI/BOOT/BOOTX64.EFI"
+EFI_BOOT_FILE="${MOUNT_DIR}/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 GRUBX64_FILE="${MOUNT_DIR}/boot/efi/EFI/grub/grubx64.efi"
 GRUB_CFG="${MOUNT_DIR}/boot/efi/grub/grub.cfg"
 if [[ ! -f "${EFI_BOOT_FILE}" && ! -f "${GRUBX64_FILE}" ]]; then
@@ -973,14 +976,13 @@ echo "To connect via SSH:  ssh -p \${SSH_PORT} regicide@localhost"
 echo "To stop: Ctrl+A then X (if using -nographic) or close window"
 echo ""
 
-# Detect OVMF firmware
+# Detect AAVMF (ARM64 UEFI) firmware
 OVMF_CODE=""
 OVMF_VARS=""
 for path in \\
-    /usr/share/OVMF/OVMF_CODE.fd \\
-    /usr/share/edk2/ovmf/OVMF_CODE.fd \\
-    /usr/share/qemu/OVMF_CODE.fd \\
-    /usr/share/ovmf/x64/OVMF_CODE.fd
+    /usr/share/AAVMF/AAVMF_CODE.fd \\
+    /usr/share/edk2/aarch64/QEMU_EFI.fd \\
+    /usr/share/AAVMF/AAVMF_CODE_4M.fd
 do
     if [[ -f "\${path}" ]]; then
         OVMF_CODE="\${path}"
@@ -988,10 +990,9 @@ do
     fi
 done
 for path in \\
-    /usr/share/OVMF/OVMF_VARS.fd \\
-    /usr/share/edk2/ovmf/OVMF_VARS.fd \\
-    /usr/share/qemu/OVMF_VARS.fd \\
-    /usr/share/ovmf/x64/OVMF_VARS.fd
+    /usr/share/AAVMF/AAVMF_VARS.fd \\
+    /usr/share/edk2/aarch64/vars-template-pflash.raw \\
+    /usr/share/AAVMF/AAVMF_VARS_4M.fd
 do
     if [[ -f "\${path}" ]]; then
         OVMF_VARS="\${path}"
@@ -1000,13 +1001,13 @@ do
 done
 
 if [[ -z "\${OVMF_CODE}" ]]; then
-    echo "Error: OVMF firmware not found. Install ovmf or edk2-ovmf."
+    echo "Error: AAVMF firmware not found. Install edk2-aarch64 or AAVMF."
     exit 1
 fi
 
 UEFI_FLAGS="-drive if=pflash,format=raw,readonly=on,file=\${OVMF_CODE}"
 if [[ -n "\${OVMF_VARS}" ]]; then
-    TMP_VARS=\$(mktemp --suffix=_OVMF_VARS.fd)
+    TMP_VARS=\$(mktemp --suffix=_AAVMF_VARS.fd)
     cp "\${OVMF_VARS}" "\${TMP_VARS}"
     UEFI_FLAGS="\${UEFI_FLAGS} -drive if=pflash,format=raw,file=\${TMP_VARS}"
 fi
@@ -1020,7 +1021,8 @@ elif [[ -n "\${DISPLAY:-}" ]]; then
     DISPLAY_ARGS=(-vga virtio -display sdl,gl=on)
 fi
 
-qemu-system-x86_64 \\
+qemu-system-aarch64 \\
+    -machine virt,gic-version=3,accel=kvm \\
     -enable-kvm \\
     -m 4G \\
     -smp 2 \\
@@ -1029,9 +1031,9 @@ qemu-system-x86_64 \\
     -netdev "user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22" \\
     -device virtio-net-pci,netdev=net0 \\
     "\${DISPLAY_ARGS[@]}" \\
-    -machine type=q35,accel=kvm \\
     \${UEFI_FLAGS} \\
     \$@
+
 QEMUEOF
 
     chmod +x "${RUNNER_PATH}"
