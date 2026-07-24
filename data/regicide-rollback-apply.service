@@ -3,6 +3,10 @@ Description=Apply pending Regicide snapshot revert before overlay mounts
 DefaultDependencies=no
 Before=local-fs-pre.target
 After=systemd-remount-fs.service
+# Skip inside the initramfs: python3 only exists in the real root. Without
+# this condition the unit fails at EXEC in the initramfs and blocks
+# local-fs-pre.
+ConditionPathExists=/usr/bin/python3
 
 [Service]
 Type=oneshot

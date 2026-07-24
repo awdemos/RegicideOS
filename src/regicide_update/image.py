@@ -52,12 +52,12 @@ def install_tarball(image: Path, roots_mount: str, reseed: bool = True) -> None:
     if not os.path.ismount(roots_mount):
         rc.die(f"{roots_mount} is not mounted")
     rc.info(f"Extracting {image} into {roots_mount}")
-    flags = "-xpJf" if str(image).endswith(".xz") else "-xpf"
-    rc.execute(f"tar -C {roots_mount} {flags} {image}")
+    flags = ["-x", "-p", "-J", "-f"] if str(image).endswith(".xz") else ["-x", "-p", "-f"]
+    rc.execute("tar", ["-C", roots_mount, *flags, str(image)])
     if reseed:
         seed_script = os.path.join(
             roots_mount, "usr", "lib", "regicide-update", "seed-overlays.sh"
         )
         if os.path.isfile(seed_script):
-            rc.execute(f"bash {seed_script} {roots_mount} /overlay")
+            rc.execute("bash", [seed_script, roots_mount, "/overlay"])
     rc.info("Tarball install complete.")

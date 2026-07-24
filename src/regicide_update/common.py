@@ -10,7 +10,11 @@ PRETEND = False
 
 OVERLAY_DIR = "/overlay"
 ROOTS_DIR = "/roots"
-SNAPSHOT_DIR = os.path.join(ROOTS_DIR, ".regicide-snapshots")
+# The snapshot store must live on the SAME btrfs filesystem as the snapshotted
+# subvolumes (/overlay/etc, /overlay/var): btrfs cannot snapshot across
+# filesystems (EXDEV). /roots is on the ROOTS filesystem, so keep only the
+# revert flag there; snapshots live on OVERLAY.
+SNAPSHOT_DIR = os.path.join(OVERLAY_DIR, ".regicide-snapshots")
 REVERT_FLAG = os.path.join(ROOTS_DIR, ".regicide-revert")
 CURRENT_FILE = os.path.join(OVERLAY_DIR, ".regicide-current")
 
@@ -42,14 +46,17 @@ def warn(message: str) -> None:
     print(f"{Colours.yellow}[WARN]{Colours.endc} {message}")
 
 
-def execute(command: str, override: bool = False, check: bool = True) -> str:
-    """Run a shell command and return stdout."""
+def execute(
+    program: str, args: list[str], override: bool = False, check: bool = True
+) -> str:
+    """Run a command with the given arguments and return stdout."""
+    cmd = [program, *args]
     if PRETEND and not override:
-        info(f"[COMMAND] {command}")
+        info(f"[COMMAND] {' '.join(cmd)}")
         return ""
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
     if check and result.returncode != 0:
-        die(f"Command failed: {command}\n{result.stderr}")
+        die(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
     return result.stdout
 
 
@@ -60,6 +67,9 @@ def require_root() -> None:
 
 def is_btrfs(path: str) -> bool:
     result = subprocess.run(
-        f"stat -f --format=%T {path}", shell=True, capture_output=True, text=True
+        ["stat", "-f", "--format=%T", path],
+        shell=False,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0 and "btrfs" in result.stdout
