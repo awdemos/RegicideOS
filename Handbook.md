@@ -775,7 +775,7 @@ Distrobox is the recommended way to run AI **agents** on RegicideOS. An agent (O
 | Autonomous research agent | LangChain/CrewAI, AI-Q-style stacks | Long-running, spawns sub-agents; needs resource and network limits |
 | Local inference | Nemotron/llama.cpp/Ollama | GPU access without polluting the immutable host |
 | CI/automation bots | Scheduled agent jobs | Disposable environments, deterministic rebuilds |
-| Sandboxed agent runtimes | **NVIDIA OpenShell** | Policy-governed agent execution (see 8.6.3) |
+| Sandboxed agent runtimes | **NVIDIA OpenShell** | Policy-governed agent execution (see 8.6.4) |
 
 #### 8.6.2 Hardening Tiers
 
