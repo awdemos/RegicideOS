@@ -17,6 +17,8 @@
 
 RegicideOS is built from a Gentoo stage4 with COSMIC as the default desktop. The root filesystem is a read-only Btrfs volume; stateful data lives on separate subvolumes. Updates are prepared offline, verified, and swapped atomically. The live image is a SquashFS produced directly by the Catalyst/Dagger pipeline, so what boots is byte-for-byte what was validated.
 
+> **Variants**: [RegicideOSArch](https://github.com/awdemos/RegicideOSArch) is the Arch Linux-based experimental variant (binary `pacman` packages, 536-package default install). It also ships a **WSL variant** — a dedicated pipeline (`dagger_pipeline_wsl.py`) that produces a WSL2-ready rootfs tarball for `wsl --import`.
+
 [📥 Install](#installation) · [🏗️ Architecture](#architecture) · [🗺️ Roadmap](#roadmap) · [🤝 Contributing](#contributing)
 
 </div>
