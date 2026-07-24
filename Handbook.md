@@ -358,6 +358,53 @@ The BTRFS-native layout has begun landing:
 - ⏳ Extending the subvolume layout to the bare-metal installer
 - ⏳ Deduplication/send-receive for image distribution
 
+### 4.5 Filesystem Reference
+
+#### 4.5.1 Mount Table (QCOW2 / installed system)
+
+| Device | Label | Subvolume | Mountpoint | Options | Writable |
+|---|---|---|---|---|---|
+| `/dev/vda2` | `ROOTS` | `/` (subvolid 5) | `/` | `btrfs,noatime` | ro by policy |
+| `/dev/vda3` | `OVERLAY` | `/` (top-level) | `/overlay` | `btrfs,noatime` | rw |
+| `/dev/vda3` | `OVERLAY` | `etc` | `/etc` | `btrfs,noatime` | rw (snapshotted) |
+| `/dev/vda3` | `OVERLAY` | `var` | `/var` | `btrfs,noatime` | rw (snapshotted) |
+| `/dev/vda4` | `HOME` (LUKS) | `home` | `/home` | `btrfs,noatime` | rw |
+| `/dev/vda1` | `EFI` | — | `/efi` | `vfat,noauto,x-systemd.automount` | rw on demand |
+
+Notes:
+
+- `/usr` deliberately stays on ROOTS — dracut mishandles a separate `/usr` mount during switch-root.
+- `/etc` and `/var` are **real subvolumes, not overlayfs**: overlayfs across separate ROOTS/OVERLAY partitions fails with EXDEV ("Invalid cross-device link") during early-boot file creation.
+- The ESP is automounted on access (idle timeout 60s) so it is not exposed during normal operation.
+
+#### 4.5.2 Snapshot & Rollback Layout
+
+```
+/overlay/
+├── etc/                    # live /etc subvolume
+├── var/                    # live /var subvolume
+├── .regicide-snapshots/
+│   └── <timestamp>_<tag>/
+│       ├── etc/            # btrfs snapshot of etc at transaction time
+│       └── var/            # btrfs snapshot of var
+└── .regicide-current       # name of the active snapshot set
+/roots/
+└── .regicide-revert        # flag: apply this snapshot set at next boot
+```
+
+- The snapshot store must live on the **same filesystem** as the snapshotted subvolumes — btrfs cannot snapshot across filesystems (EXDEV). Only the revert flag lives on ROOTS.
+- `regicide-update {install,remove,upgrade}` creates `pre_<tag>` before and `post_<tag>` after each transaction; failed transactions arm the revert flag automatically and `regicide-rollback-apply.service` restores the `pre_` set at the next boot.
+- Retention is applied after successful transactions.
+
+#### 4.5.3 Disk Space Expectations
+
+| Partition | Typical size | Holds |
+|---|---|---|
+| EFI | 512 MB | GRUB (`BOOTX64.EFI`), kernels, initramfs |
+| ROOTS | 12-20 GB | Base system (~905 packages), `/usr`, `/boot` |
+| OVERLAY | 4-8 GB | `/etc`, `/var`, snapshot sets (each ~50-300 MB, CoW) |
+| HOME | remainder | User data (LUKS when encrypted) |
+
 > **See [INSTALLATION_ARCHITECTURE.md](INSTALLATION_ARCHITECTURE.md) for complete details on current architecture, LUKS boot implementation, and future roadmap.
 
 ---
@@ -1089,6 +1136,36 @@ sudo tar czf /mnt/root-custom.img -C /tmp/rootfs .
 sudo touch /mnt/root-custom.img
 ```
 
+### 9.6 User Accounts
+
+#### 9.6.1 Default User: `regicide`
+
+| Property | Value |
+|---|---|
+| Username / password | `regicide` / `regicide` (change both on first login) |
+| UID | 1000 |
+| Groups | `users wheel audio video input storage network flatpak` |
+| Sudo | passwordless via `/etc/sudoers.d/10-regicide-wheel` (mode 0440) |
+
+The root account has **no password** (locked). Manage the system via the `regicide` user's sudo, and set a root password only if you need one (`sudo passwd root`).
+
+#### 9.6.2 Recovery User
+
+A fallback account exists for lockout scenarios:
+
+| Property | Value |
+|---|---|
+| Username | `recovery` (UID 1001, home at `/recovery/home/recovery`) |
+| Groups | `wheel` |
+| Password | same hash as the `regicide` default |
+| Use case | sudo/admin recovery if `regicide` is locked, expired, or misconfigured |
+
+#### 9.6.3 First-Boot Secrets
+
+- SSH host keys are **not** baked into the image; `regicide-ssh-keygen.service` generates them on first boot.
+- `sshd` runs under socket activation (`sshd.socket`), not a permanent listener.
+- The `regicide-deferred-flatpaks.service` installs the deferred Flatpak set (ProtonVPN, BoxBuddy, SoundRecorder, virt-manager) once networking is up, then disables itself.
+
 ---
 
 ## 10. Troubleshooting
@@ -1373,41 +1450,90 @@ lsinitramfs /boot/initrd.img-* | grep cryptsetup
 
 ### A.1 LUKS Boot Configuration
 
-**GRUB Boot Entry (Encrypted):**
+The encrypted image uses a **single-prompt** unlock flow:
+
+1. **GRUB unlocks ROOTS itself.** GRUB is installed with the `cryptodisk luks2 pbkdf2 gcry_rijndael gcry_sha256 gcry_sha1 part_gpt lvm` modules and runs `cryptomount -u <uuid-no-dashes>` before loading the kernel. LUKS2 is formatted with `--pbkdf pbkdf2` because GRUB cannot do Argon2id.
+2. **The initramfs auto-unlocks with an embedded keyfile.** `/etc/crypttab` names the device (`regicideos UUID=<uuid> /etc/luks-keyfile luks`), the keyfile is embedded by the `regicide-crypt` dracut module, and the kernel cmdline carries `rd.luks.uuid=<uuid> root=/dev/mapper/regicideos`. Because the initramfs lives on the already-unlocked ROOTS, the keyfile is protected at rest — so you only type the passphrase once, at GRUB.
+
+**GRUB Boot Entry (generated):**
 ```
-menuentry "RegicideOS (Encrypted)" {
-    linux /boot/vmlinuz-*
-    initrd /boot/initrd.img-*
-    options "cryptdevice=UUID=<detected-uuid>:regicideos root=/dev/mapper/regicideos quiet splash rw"
+cryptomount -u <uuid-no-dashes>
+menuentry "RegicideOS" {
+    linux /boot/vmlinuz rd.luks.uuid=<uuid> root=/dev/mapper/regicideos quiet splash rw
+    initrd /boot/initramfs.img
 }
 ```
 
-**Kernel Parameters:**
-- `cryptdevice=UUID=<uuid>:regicideos` - Tell GRUB which device to open
-- `root=/dev/mapper/regicideos` - Root filesystem after LUKS decryption
-- `quiet splash rw` - Boot options
+**Key management:**
 
-**Initramfs Components:**
-- `cryptsetup` - LUKS management utility
-- `encrypt` hook - Handles LUKS decryption during boot
-- `crypttab` - Persistent LUKS device mapping
+```bash
+# Change the interactive passphrase (GRUB prompt)
+sudo cryptsetup luksChangeKey /dev/vda2
+# then refresh the initramfs keyfile path if you replaced the key slot:
+sudo dracut --force --no-hostonly --kver "$(ls /lib/modules | head -1)"
 
-### A.2 Partition Detection Logic
+# Inspect the LUKS header
+sudo cryptsetup luksDump /dev/vda2 | head -20
+```
 
-**Detection Algorithm:**
-1. Try `blkid -o device -t TYPE=crypto_LUKS` (most reliable)
-2. Fall back to device enumeration (sda3, sdb3, nvme0n1p3, nvme1n1p3)
-3. Extract UUID from detected partition via `blkid -s UUID -o value`
-4. Use device name as ultimate fallback if all methods fail
+**Gotchas learned the hard way:**
 
-**Supported Partition Schemes:**
-- `/dev/sda3`, `/dev/sdb3` (standard SATA/SCSI)
-- `/dev/nvme0n1p3`, `/dev/nvme1n1p3` (NVMe drives)
-- `/dev/mmcblk0p3` (eMMC storage)
+- A trailing newline in a passphrase **file** becomes part of the key — the builders canonicalize with `tr -d '\r\n'`. Use `printf`, not `echo`.
+- The dracut crypt module is intentionally minimal (`omit_dracutmodules+=" zfs "`, `force_drivers+=" dm_mod dm_crypt overlay "`).
+- GRUB needs `--removable` on fresh ESPs with empty NVRAM boot entries.
+
+### A.2 Pipeline Stage Reference
+
+The Dagger pipeline (`build-system/dagger_pipeline.py`) runs these stages. Each stage is a `withExec` layer in `build-system/catalyst/stages/`; stages mount their script just-in-time so editing a late stage only invalidates that stage and later ones.
+
+| Stage | Script | What it does |
+|---|---|---|
+| bootstrap | (pipeline) | `emerge-webrsync` + install bwrap/git/tar/curl in the base container |
+| seed | (pipeline) | `cp -an` distfiles/binpkgs from cache volumes into the rootfs (volumes detached immediately after) |
+| 1 | `stage1-setup.sh` | Download + extract the stage3 seed, set the Portage profile |
+| 2 | `stage2-sync.sh` | Write `make.conf` (USE flags, `EMERGE_DEFAULT_OPTS` with/without `--usepkg`, FEATURES=buildpkg), package.use/mask/env, sync Portage, `emerge -uDN @world` (382 packages) |
+| 3a-f | `stage3-base-{a..f}.sh` | Base system packages in cacheable batches (system tools, Qt6, audio, printing, etc.) |
+| 4a | `stage4-cosmic-a.sh` | Clone cosmic-overlay, generate the dynamic 9999 mask, install the COSMIC meta set |
+| 4b | `stage4-cosmic-b.sh` | Remaining COSMIC apps (Rust compiles) + vendored minimon |
+| 5 | `stage5-regicide.sh` | RegicideOS tools: installer, btrfs-assistant, fastfetch |
+| 6 | `stage6-finalize.sh` | `/etc` perms, users (regicide + recovery), COSMIC defaults, Flatpaks (build-time + deferred), services (incl. NM-initrd mask), dracut, regicide-update tools, stage4 tarball |
+| 7/7b | `stage7-verify.sh`, `stage7-sbom.sh` | Artifact verification gates + SBOM generation |
+| 8 | `stage8-vm-test.sh` | Optional post-install VM smoke suite |
+
+**Key knobs (environment):**
+
+| Variable | Default | Effect |
+|---|---|---|
+| `REGICIDE_ARCH` | `amd64` | `amd64` or `arm64` (emulated cross-build) |
+| `REGICIDE_USE_BINPKGS` | `1` | `0` = full from-source pipeline (still writes binpkgs to the volume) |
+| `REGICIDE_BINPKGS_DIR` | `/var/cache/binpkgs` | Where emerge reads/writes binary packages |
+| `REGICIDE_LUKS_PASSPHRASE` | — | Skip the interactive QCOW2 encryption prompt |
+| `REGICIDE_CHROOT_METHOD` | probe | Force `bwrap` or `chroot` for stage chroots |
+
+**Artifacts** (`build-system/catalyst/output/`):
+
+| File | Producer |
+|---|---|
+| `stage4-<arch>-systemd-cosmic.tar.xz` | stage6 |
+| `regicide-cosmic.img` (SquashFS) | `build_iso()` |
+| `regicide-cosmic-<arch>.iso` (live ISO) | `build_live_iso()` (`--iso`) |
+| `sbom.json`, `sbom.spdx.json` | stage7b |
+| `regicide-cosmic.qcow2` | `build-vm-image.sh` (host, KVM) |
 
 ---
 
 ## Changelog
+
+### Version 2.4 (July 2026)
+
+**Added:**
+- §4.5 Filesystem Reference (mount table, snapshot/rollback layout, disk sizing)
+- §8.6 Agentic Workloads in Distrobox (use cases, hardening tiers, locked-down examples, NVIDIA OpenShell)
+- §9.6 User Accounts (default user, recovery user, first-boot secrets)
+- §A.2 Pipeline Stage Reference (all stages, env knobs, artifacts)
+
+**Changed:**
+- §A.1 rewritten for the real GRUB cryptomount + dracut single-prompt LUKS flow (was stale Debian-style cryptdevice docs)
 
 ### Version 2.3 (July 2026)
 
@@ -1479,5 +1605,5 @@ menuentry "RegicideOS (Encrypted)" {
 
 ---
 
-*Document Version: 2.3*
+*Document Version: 2.4*
 *Last Updated: July 2026*
