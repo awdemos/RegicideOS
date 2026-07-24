@@ -16,16 +16,16 @@ done
 
 mkdir -p "${REGICIDE_BUILD_DIR}" "${ROOTFS}" "${STAGE3_DIR}"
 
-STAGE3_FILE="${STAGE3_DIR}/stage3-amd64-systemd.tar.xz"
+STAGE3_FILE="${STAGE3_DIR}/${GENTOO_STAGE3_BASENAME}.tar.xz"
 if [[ ! -f "${STAGE3_FILE}" ]]; then
-    echo "Downloading Gentoo stage3..."
-    LATEST_URL="https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64-systemd/latest-stage3-amd64-systemd.txt"
+    echo "Downloading Gentoo stage3 (${GENTOO_ARCH})..."
+    LATEST_URL="https://distfiles.gentoo.org/releases/${GENTOO_ARCH}/autobuilds/current-${GENTOO_STAGE3_BASENAME}/latest-${GENTOO_STAGE3_BASENAME}.txt"
     STAGE3_PATH=$(curl -s "$LATEST_URL" | awk '/\.tar\.xz/{print $1; exit}')
     if [[ -z "${STAGE3_PATH}" ]]; then
         echo "ERROR: Could not determine stage3 download path"
         exit 1
     fi
-    curl -o "${STAGE3_FILE}" "https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64-systemd/${STAGE3_PATH}"
+    curl -o "${STAGE3_FILE}" "https://distfiles.gentoo.org/releases/${GENTOO_ARCH}/autobuilds/current-${GENTOO_STAGE3_BASENAME}/${STAGE3_PATH}"
     echo "Stage3 downloaded: ${STAGE3_FILE}"
 else
     echo "Using existing stage3: ${STAGE3_FILE}"
@@ -65,7 +65,7 @@ else
     echo "Portage tree already present, skipping snapshot extraction"
 fi
 
-PROFILE="default/linux/amd64/23.0/desktop/systemd"
+PROFILE="${GENTOO_PROFILE}"
 echo "Setting profile to ${PROFILE}..."
 run_in_chroot eselect profile set "$PROFILE"
 
