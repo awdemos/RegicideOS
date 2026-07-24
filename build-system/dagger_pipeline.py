@@ -13,7 +13,16 @@ Dagger provides:
   - Clean environment isolation
 
 Usage:
+  # Main pipeline (binary packages): stage2+ reuse seeded binpkgs from the
+  # cache volume via --usepkg, so rebuilds after small changes are fast.
   DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+
+  # From-source pipeline: no --usepkg, everything compiles from source.
+  # Still writes fresh binpkgs into the cache volume (FEATURES=buildpkg),
+  # keeping it warm for the main pipeline.
+  REGICIDE_USE_BINPKGS=0 DAGGER_PROGRESS=plain \
+      dagger run python build-system/dagger_pipeline.py --plain
+
   DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --encrypt
 """
 
@@ -44,7 +53,17 @@ async def build_cosmic(
     arch: str = "amd64",
     variant: str = "systemd",
 ) -> dagger.Container:
-    """Build RegicideOS COSMIC variant in a Gentoo container using cacheable stages."""
+    """Build RegicideOS COSMIC variant in a Gentoo container using cacheable stages.
+
+    arch may be "amd64" (native x86_64) or "arm64" (aarch64, executed under
+    qemu-user binfmt on an x86_64 host).
+    """
+    image_tag = {
+        "amd64": "gentoo/stage3:amd64-systemd",
+        "arm64": "gentoo/stage3:arm64-desktop-systemd",
+    }[arch]
+    # Cache volume names are arch-specific so amd64 and arm64 content never mix.
+    vol = (lambda name: name) if arch == "amd64" else (lambda name: f"regicide-arm64-{name.removeprefix('regicide-')}")
 
     src = client.host().directory(
         ".",
@@ -59,20 +78,25 @@ async def build_cosmic(
         ],
     )
 
-    # Cache volumes survive across Dagger runs, preserving downloaded distfiles,
-    # binary packages, the stage3 seed tarball, the portage snapshot, and the
-    # cosmic-overlay git clone.
-    distfiles_cache = client.cache_volume("regicide-distfiles-v5")
-    binpkgs_cache = client.cache_volume("regicide-binpkgs-v5")
-    build_cache = client.cache_volume("regicide-manual-build-v6")
-    cosmic_overlay_cache = client.cache_volume("regicide-cosmic-overlay-v5")
+    # Cache volumes preserve downloaded distfiles and compiled binary
+    # packages across runs, but are only attached for dedicated cheap sync
+    # execs. Dagger >=0.21 never caches an exec that has a cache mount
+    # attached, so mounting them on the base container would poison every
+    # downstream vertex (observed: full @world rebuilds on every run).
+    distfiles_cache = client.cache_volume(vol("regicide-distfiles-v5"))
+    binpkgs_cache = client.cache_volume(vol("regicide-binpkgs-v5"))
 
     base = (
         client.container()
-        .from_("gentoo/stage3:amd64-systemd")
+        .from_(image_tag)
+        .with_env_variable("REGICIDE_ARCH", arch)
         .with_env_variable("GENTOO_MIRRORS", os.environ.get("GENTOO_MIRRORS", "https://distfiles.gentoo.org"))
-        .with_mounted_cache("/var/cache/distfiles", distfiles_cache)
-        .with_mounted_cache("/var/cache/binpkgs", binpkgs_cache)
+        # REGICIDE_USE_BINPKGS=0 forces full source builds, bypassing the
+        # local binpkg cache consumed via --usepkg.
+        .with_env_variable("REGICIDE_USE_BINPKGS", os.environ.get("REGICIDE_USE_BINPKGS", "1"))
+        # Point the chroot PKGDIR at a container-level dir shared by all stage
+        # execs; the binpkgs seed/save execs sync it with the cache volume.
+        .with_env_variable("REGICIDE_BINPKGS_DIR", os.environ.get("REGICIDE_BINPKGS_DIR", "/var/cache/binpkgs"))
     )
 
     # Prepare the build tooling.
@@ -88,21 +112,48 @@ async def build_cosmic(
     #
     # The rootfs lives in the container overlay (not a cache volume) because
     # Dagger's cache-volume snapshot commit fails on multi-gigabyte rootfs
-    # volumes.  distfiles/binpkgs/cosmic-overlay remain on cache volumes so the
-    # heavy parts of stage4 can still reuse prior work.
+    # volumes.  The cosmic-overlay is cloned fresh into the rootfs by stage4a
+    # (no cache volume) so that stage stays content-cacheable too.
     with_build_dir = (
         with_tools
-        .with_mounted_cache("/var/cache/cosmic-overlay", cosmic_overlay_cache)
         .with_exec(["mkdir", "-p", "/var/tmp/regicide-build/stage3"])
         .with_env_variable("REGICIDE_BUILD_DIR", "/var/tmp/regicide-build")
         .with_env_variable("REGICIDE_OUTPUT_DIR", "/var/tmp/regicide-build/output")
-        .with_env_variable("REGICIDE_COSMIC_OVERLAY_DIR", "/var/cache/cosmic-overlay")
         .with_workdir("/src/build-system/catalyst")
+    )
+
+    # Seed the rootfs distfiles AND binpkgs from the cache volumes with
+    # dedicated cheap execs, detaching each volume immediately afterwards so
+    # every subsequent stage exec stays content-cacheable.  When a volume is
+    # unchanged the seed output is byte-identical, so stage1 and everything
+    # downstream still cache-hits.  stage2's make.conf enables --usepkg (see
+    # REGICIDE_USE_BINPKGS), so seeded binpkgs make rebuilds fast; the
+    # from-source pipeline (REGICIDE_USE_BINPKGS=0) ignores them but still
+    # produces fresh binpkgs via FEATURES=buildpkg, keeping the volume warm.
+    build = (
+        with_build_dir
+        .with_mounted_cache("/cache/distfiles", distfiles_cache)
+        .with_exec([
+            "sh", "-c",
+            "mkdir -p /var/tmp/regicide-build/rootfs/var/cache/distfiles"
+            " && cp -an /cache/distfiles/. /var/tmp/regicide-build/rootfs/var/cache/distfiles/"
+            " 2>/dev/null || true",
+        ])
+        .without_mount("/cache/distfiles")
+        .with_mounted_cache("/cache/binpkgs", binpkgs_cache)
+        .with_exec([
+            "sh", "-c",
+            "mkdir -p /var/cache/binpkgs"
+            " && cp -an /cache/binpkgs/. /var/cache/binpkgs/"
+            " 2>/dev/null || true",
+        ])
+        .without_mount("/cache/binpkgs")
     )
 
     stages_path = "/src/build-system/catalyst/stages"
     overlays_path = "/src/overlays"
     catalyst_path = "/src/build-system/catalyst"
+    repo_path = "/src"
 
     # Mount the shared helper once.
     build = with_build_dir.with_mounted_file(
@@ -116,6 +167,8 @@ async def build_cosmic(
         .with_directory(f"{catalyst_path}/overlay", src.directory("build-system/catalyst/overlay"))
         .with_directory(f"{catalyst_path}/cosmic-overlay", src.directory("build-system/catalyst/cosmic-overlay"))
         .with_directory(f"{overlays_path}/regicide-rust", src.directory("overlays/regicide-rust"))
+        # stage6-finalize.sh copies src/regicide_update into the rootfs.
+        .with_directory(f"{repo_path}/src", src.directory("src"))
     )
 
     # Split long Portage emerges into cacheable withExec layers to limit
@@ -139,15 +192,48 @@ async def build_cosmic(
         # matches the repository layout.  Strip that prefix for the in-container
         # mount path.
         script_basename = script.removeprefix("stages/")
-        build = (
-            build.with_mounted_file(
-                f"{stages_path}/{script_basename}",
-                src.file(f"build-system/catalyst/{script}"),
-            )
-            .with_exec([f"./{script}"], insecure_root_capabilities=True)
+        build = build.with_mounted_file(
+            f"{stages_path}/{script_basename}",
+            src.file(f"build-system/catalyst/{script}"),
         )
+        if script_basename == "stage6-finalize.sh":
+            # stage6-finalize.sh stages the regicide-update source tree from
+            # the repo root (REPO_ROOT=/src in the container).  Mount the
+            # extra inputs it copies only now, just before stage6 runs, so
+            # the cache keys for stages 1-5 stay stable.
+            build = (
+                build
+                .with_mounted_file(f"{repo_path}/pyproject.toml", src.file("pyproject.toml"))
+                .with_mounted_file(
+                    f"{catalyst_path}/seed-overlays.sh",
+                    src.file("build-system/catalyst/seed-overlays.sh"),
+                )
+                .with_directory(f"{repo_path}/data", src.directory("data"))
+            )
+        build = build.with_exec([f"./{script}"], insecure_root_capabilities=True)
+        if script_basename in ("stage3-base-f.sh", "stage4-cosmic-b.sh", "stage5-regicide.sh"):
+            # Persist newly downloaded distfiles and newly built binpkgs to
+            # the cache volumes, then detach again so later stages stay
+            # content-cacheable.
+            build = (
+                build
+                .with_mounted_cache("/cache/distfiles", distfiles_cache)
+                .with_exec([
+                    "sh", "-c",
+                    "cp -au /var/tmp/regicide-build/rootfs/var/cache/distfiles/. /cache/distfiles/"
+                    " 2>/dev/null || true",
+                ])
+                .without_mount("/cache/distfiles")
+                .with_mounted_cache("/cache/binpkgs", binpkgs_cache)
+                .with_exec([
+                    "sh", "-c",
+                    "cp -au /var/cache/binpkgs/. /cache/binpkgs/"
+                    " 2>/dev/null || true",
+                ])
+                .without_mount("/cache/binpkgs")
+            )
 
-    tarball_name = "stage4-amd64-systemd-cosmic.tar.xz"
+    tarball_name = f"stage4-{arch}-systemd-cosmic.tar.xz"
     build = build.with_exec([
         "mkdir", "-p", f"{catalyst_path}/output",
     ]).with_exec([
@@ -379,6 +465,12 @@ async def main() -> None:
         description="Build RegicideOS COSMIC stage4, SquashFS, and optional encrypted QCOW2."
     )
     parser.add_argument(
+        "--arch",
+        choices=["amd64", "arm64"],
+        default="amd64",
+        help="Target architecture (arm64 builds run under qemu-user binfmt)",
+    )
+    parser.add_argument(
         "--plain",
         action="store_true",
         help="Use plain Dagger progress output (useful for logs and CI)",
@@ -449,10 +541,10 @@ async def main() -> None:
         )
     async with dagger.Connection(config) as client:
         if tarball_path is None:
-            print("Building RegicideOS COSMIC stage4...")
-            build_container = await build_cosmic(client)
+            print(f"Building RegicideOS COSMIC stage4 ({args.arch})...")
+            build_container = await build_cosmic(client, arch=args.arch)
             tarball = build_container.file(
-                "/src/build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz"
+                f"/src/build-system/catalyst/output/stage4-{args.arch}-systemd-cosmic.tar.xz"
             )
         else:
             print(f"Using existing stage4 tarball: {tarball_path}")
@@ -464,9 +556,9 @@ async def main() -> None:
 
         if tarball_path is None:
             print("Exporting stage4 tarball...")
-            await tarball.export(str(out_dir / "stage4-amd64-systemd-cosmic.tar.xz"))
-            print("Output: build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz")
-            tarball_path = out_dir / "stage4-amd64-systemd-cosmic.tar.xz"
+            await tarball.export(str(out_dir / f"stage4-{args.arch}-systemd-cosmic.tar.xz"))
+            print(f"Output: build-system/catalyst/output/stage4-{args.arch}-systemd-cosmic.tar.xz")
+            tarball_path = out_dir / f"stage4-{args.arch}-systemd-cosmic.tar.xz"
 
         print("Loading SBOM for signing...")
         subprocess.run(
@@ -486,32 +578,39 @@ async def main() -> None:
             else:
                 print("SquashFS input path matches output path; reusing in place.")
         else:
-            print("Creating SquashFS image locally...")
-            # Creating a faithful SquashFS that preserves setuid binaries and
-            # mixed ownership requires root privileges. Use sudo when not root.
-            sudo_prefix = "" if os.geteuid() == 0 else "sudo "
-            subprocess.run(
-                [
-                    "sh", "-c",
-                    # Use /var/tmp for the extracted rootfs so large artifacts do
-                    # not exhaust the tmpfs-backed /tmp filesystem. Run tar and
-                    # mksquashfs as root when available so setuid/ownership are
-                    # preserved, and make cleanup tolerant of root-owned files.
-                    "set -euo pipefail; "
-                    "SQUASH_ROOT=/var/tmp/regicide-squashfs-root; "
-                    f"{sudo_prefix}rm -f '{squashfs_path}'; "
-                    f"{sudo_prefix}rm -rf \"$SQUASH_ROOT\"; "
-                    f"{sudo_prefix}mkdir -p \"$SQUASH_ROOT\"; "
-                    "df -h \"$SQUASH_ROOT\"; "
-                    f"{sudo_prefix}tar -C \"$SQUASH_ROOT\" -xpJf '{tarball_path}'; "
-                    f"{sudo_prefix}mksquashfs \"$SQUASH_ROOT\" '{squashfs_path}' "
-                    "-comp zstd -Xcompression-level 19 -noappend; "
-                    f"{sudo_prefix}chown {os.getuid()}:{os.getgid()} '{squashfs_path}'; "
-                    f"unsquashfs -s '{squashfs_path}' >/dev/null; "
-                    f"{sudo_prefix}rm -rf \"$SQUASH_ROOT\" || true",
-                ],
-                check=True,
-            )
+            if os.geteuid() != 0:
+                # Not root: build the SquashFS inside the Dagger engine (which
+                # is privileged) instead of requiring passwordless host sudo.
+                # This matches the RegicideOSArch pipeline flow.
+                print("Creating SquashFS image in Dagger (not running as root)...")
+                squashfs_file = await build_iso(client, tarball)
+                await squashfs_file.export(str(squashfs_path))
+            else:
+                print("Creating SquashFS image locally...")
+                # Creating a faithful SquashFS that preserves setuid binaries and
+                # mixed ownership requires root privileges. Use sudo when not root.
+                subprocess.run(
+                    [
+                        "sh", "-c",
+                        # Use /var/tmp for the extracted rootfs so large artifacts do
+                        # not exhaust the tmpfs-backed /tmp filesystem. Run tar and
+                        # mksquashfs as root when available so setuid/ownership are
+                        # preserved, and make cleanup tolerant of root-owned files.
+                        "set -euo pipefail; "
+                        "SQUASH_ROOT=/var/tmp/regicide-squashfs-root; "
+                        f"rm -f '{squashfs_path}'; "
+                        "rm -rf \"$SQUASH_ROOT\"; "
+                        "mkdir -p \"$SQUASH_ROOT\"; "
+                        "df -h \"$SQUASH_ROOT\"; "
+                        f"tar -C \"$SQUASH_ROOT\" -xpJf '{tarball_path}'; "
+                        f"mksquashfs \"$SQUASH_ROOT\" '{squashfs_path}' "
+                        "-comp zstd -Xcompression-level 19 -noappend; "
+                        f"chown {os.getuid()}:{os.getgid()} '{squashfs_path}'; "
+                        f"unsquashfs -s '{squashfs_path}' >/dev/null; "
+                        "rm -rf \"$SQUASH_ROOT\" || true",
+                    ],
+                    check=True,
+                )
         print(f"Output: {squashfs_path}")
 
         print("Running stage7 verification on host artifacts...")
