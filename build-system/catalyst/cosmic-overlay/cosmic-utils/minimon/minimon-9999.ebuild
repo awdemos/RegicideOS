@@ -28,7 +28,9 @@ BDEPEND="
 
 src_install() {
 	exeinto /usr/bin
-	doexe "$(cosmic-common_target_dir)/cosmic-applet-minimon"
+	# Upstream renamed the binary to cosmic-ext-applet-minimon (>= 1.1.x);
+	# the desktop file id stays io.github.cosmic_utils.minimon-applet.
+	doexe "$(cosmic-common_target_dir)/cosmic-ext-applet-minimon"
 
 	export APPID="io.github.cosmic_utils.minimon-applet"
 

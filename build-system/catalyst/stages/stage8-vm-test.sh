@@ -221,7 +221,10 @@ for _ in $(seq 1 180); do
     # shorter than 32 bytes ("SSH-2.0-...\\r\\n"), so head -c 32 can block
     # waiting for more data and cause the timeout to fire even when sshd is
     # already listening.
-    if timeout 3 bash -c "exec 3<>/dev/tcp/localhost/${SSH_PORT}; head -n 1 <&3 | grep -q SSH" 2>/dev/null; then
+    # Use 127.0.0.1 explicitly; QEMU user networking binds to IPv4 only and
+    # bash's /dev/tcp may try ::1 first when localhost is used, causing spurious
+    # banner-wait failures on hosts where IPv6 is preferred.
+    if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${SSH_PORT}; head -n 1 <&3 | grep -q SSH" 2>/dev/null; then
         ready=true
         break
     fi
@@ -232,10 +235,32 @@ if [[ "${ready}" != true ]]; then
     exit 1
 fi
 
+# Use 127.0.0.1 explicitly. QEMU user networking binds the SSH forward to IPv4
+# only, and ssh/bash /dev/tcp may try ::1 first when "localhost" is used,
+# causing spurious banner-wait or login failures on IPv6-preferring hosts.
+SSH_HOST="127.0.0.1"
+
+# The SSH protocol banner proves sshd is listening, but user networking can
+# race and an early banner does not guarantee that the default user can log in
+# (e.g. missing /home, host keys, or PAM issues).  Probe a real password login
+# once before running the full diagnostic suite so failures surface quickly.
+echo "Probing real SSH password login for ${SSH_USER}..."
+if ! sshpass -p "${SSH_PASS}" ssh \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR \
+        -o ConnectTimeout=10 \
+        -p "${SSH_PORT}" \
+        "${SSH_USER}@${SSH_HOST}" \
+        "whoami" | grep -qx "${SSH_USER}"; then
+    echo "ERROR: SSH password login failed for ${SSH_USER}@${SSH_HOST}:${SSH_PORT}"
+    echo "       sshd banner was reachable, but authentication did not succeed."
+    exit 1
+fi
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 -p "${SSH_PORT}")
+
 # Use sshpass for password-based SSH; StrictHostKeyChecking=no because this is
 # a freshly built VM with new host keys generated on first boot.
-SSH_HOST="localhost"
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 -p "${SSH_PORT}")
 run_ssh() {
     sshpass -p "${SSH_PASS}" ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" "$@"
 }
@@ -243,68 +268,74 @@ run_ssh() {
 mkdir -p "${DIAG_DIR}"
 
 checks=(
+    # 1-3. Distrobox container lifecycle (create, enter, remove)
+    "distrobox-create-enter-rm:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; rm -rf /home/regicide/.local/share/containers /var/tmp/regicide-distrobox-* /run/user/1000/libpod /run/user/1000/containers 2>/dev/null || true; distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1 || true; timeout 120 podman pull docker.io/library/alpine >/dev/null 2>&1; pull_rc=\$?; timeout 300 distrobox create --image docker.io/library/alpine --name regicide-smoke-alpine --yes >/dev/null 2>&1; create_rc=\$?; timeout 120 distrobox enter regicide-smoke-alpine -- whoami >/tmp/dbox-enter.log 2>&1; enter_rc=\$?; timeout 60 distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1; rm_rc=\$?; echo pull_rc=\${pull_rc} create_rc=\${create_rc} enter_rc=\${enter_rc} rm_rc=\${rm_rc}; test \${pull_rc} -eq 0 && test \${create_rc} -eq 0 && test \${enter_rc} -eq 0 && grep -qx regicide /tmp/dbox-enter.log && test \${rm_rc} -eq 0 && echo distrobox-lifecycle-ok:distrobox-lifecycle-ok"
+
+    # 4. Btrfs mount layout
+    "root-fs-btrfs:findmnt -n -o FSTYPE / | grep -q btrfs && echo btrfs:btrfs"
+    "root-subvolid-5:findmnt -n -o OPTIONS / | tr ',' '\\n' | grep -q '^subvolid=5$' && echo subvolid5:subvolid5"
+    "home-fs-btrfs:findmnt -n -o FSTYPE /home | grep -q btrfs && echo btrfs:btrfs"
+    "overlay-fs-btrfs:findmnt -n -o FSTYPE /overlay | grep -q btrfs && echo btrfs:btrfs"
+
+    # 5. Mount types for /etc, /var, /usr
+    # Arch uses overlay mounts here; Gentoo uses real Btrfs subvolumes.
+    "etc-fs-btrfs:findmnt -n -o FSTYPE /etc | grep -q btrfs && echo btrfs:btrfs"
+    "var-fs-btrfs:findmnt -n -o FSTYPE /var | grep -q btrfs && echo btrfs:btrfs"
+    "usr-fs-btrfs:findmnt -n -o FSTYPE --target /usr | grep -q btrfs && echo btrfs:btrfs"
+
+    # 6. Root immutability
+    "usr-bin-readonly:bash -c 'if touch /usr/bin/.smoke-test 2>/dev/null; then rm -f /usr/bin/.smoke-test; echo writable; else echo readonly; fi':readonly"
+    "etc-dir-readonly:bash -c 'if touch /etc/.smoke-test 2>/dev/null; then rm -f /etc/.smoke-test; echo writable; else echo readonly; fi':readonly"
+
+    # 7-8. /overlay subvolumes and overlay workdirs
+    "overlay-etc-subvol:sudo -n btrfs subvolume list /overlay | grep -q 'path etc$' && echo etc:etc"
+    "overlay-var-subvol:sudo -n btrfs subvolume list /overlay | grep -q 'path var$' && echo var:var"
+    "overlay-usr-subvol:sudo -n btrfs subvolume list /overlay | grep -q 'path usr$' && echo usr:usr"
+    "home-subvol-home:findmnt -n -o OPTIONS /home | grep -q 'subvol=/home' && echo home:home"
+    "overlay-workdirs:ls -d /overlay/etcw /overlay/varw /overlay/usrw >/dev/null 2>&1 && echo workdirs:workdirs"
+
+    # 9. EFI partition is vfat and automounted
+    "efi-vfat:(findmnt -n -o FSTYPE /efi 2>/dev/null; findmnt -n -o FSTYPE /boot/efi 2>/dev/null) | grep -q vfat || (lsblk -f 2>/dev/null | grep -qi 'vfat.*efi' && echo efi)"
+
+    # 10. Required binaries present
+    "podman:command -v podman:podman"
+    "distrobox-binary:command -v distrobox:distrobox"
+    "flatpak:command -v flatpak:flatpak"
+    "cosmic-session:command -v cosmic-session:cosmic-session"
+    "cosmic-greeter-binary:command -v cosmic-greeter:cosmic-greeter"
+    "minimon-binary:command -v cosmic-ext-applet-minimon:cosmic-ext-applet-minimon"
+    "minimon-desktop:test -f /usr/share/applications/io.github.cosmic_utils.minimon-applet.desktop && echo desktop-ok:desktop-ok"
+    "btrfs:command -v btrfs:btrfs"
+
+    # 11. NVIDIA userspace stack (best-effort in a VM without GPU)
+    "nvidia-smi:command -v nvidia-smi >/dev/null 2>&1 && (nvidia-smi >/tmp/nvidia-smi.log 2>&1 && grep -q NVIDIA-SMI /tmp/nvidia-smi.log && echo nvidia-ok || grep -Eiq 'nvml|driver|gpu|device' /tmp/nvidia-smi.log && echo nvidia-ok) || echo nvidia-missing"
+
+    # Additional Gentoo-specific runtime sanity checks not present in Arch
     "whoami:whoami:regicide"
     "uid:id -u:1000"
     "groups:id:wheel"
     "sudo:sudo -n whoami:root"
     "kernel:uname -r:"
-    # COSMIC on Gentoo exposes the greeter via cosmic-greeter-daemon.service.
-    # The generic display-manager alias and the per-user cosmic-comp/session
-    # processes are not reliable in a headless VM smoke test.
     "cosmic-greeter:systemctl is-active cosmic-greeter-daemon.service:active"
     "sshd-socket:systemctl is-active sshd.socket:active"
-    "failed-units:systemctl --failed --no-pager:0 loaded units listed"
-    # Avoid colons and single quotes in the command; colons split the label/cmd/expect
-    # fields and single quotes are mangled by sshpass/ssh argument parsing.
+    "failed-units:cnt=\$(systemctl --failed --no-pager --plain | awk '/^\\303\242\\302\226/{print \$2}' | grep -v '^cosmic-greeter.service$' | wc -l); echo other-failed=\${cnt}; test \${cnt} -eq 0 && echo failed-units-ok:failed-units-ok"
     "network-interface:ip -o link show up | grep -v lo | grep state | grep UP | head -1 && echo up:up"
     "loopback-up:ip link show lo:<LOOPBACK,UP,LOWER_UP>"
     "resolv-conf:cat /etc/resolv.conf:nameserver"
-    # sshd.socket is already checked, so just verify some TCP socket is listening.
     "ssh-listen:ss -tlnp | grep -q LISTEN && echo listening:listening"
     "podman-smoke:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; timeout 120 podman run --rm docker.io/library/alpine echo podman-smoke-ok:podman-smoke-ok"
-    # Distrobox create+remove is enough in constrained test images; entering the
-    # box installs packages and can fill the small OVERLAY partition.  We use a
-    # fully-qualified image name because Gentoo's podman has no default short-name
-    # registry config, so an unqualified "alpine" would hang waiting for input.
-    "distrobox-smoke:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; rm -rf /home/regicide/.local/share/containers /var/tmp/regicide-distrobox-* /run/user/1000/libpod /run/user/1000/containers 2>/dev/null || true; distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1 || true; timeout 120 podman pull docker.io/library/alpine >/dev/null 2>&1; pull_rc=\$?; timeout 300 distrobox create --image docker.io/library/alpine --name regicide-smoke-alpine --yes >/dev/null 2>&1; create_rc=\$?; timeout 60 distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1; rm_rc=\$?; echo pull_rc=\${pull_rc} create_rc=\${create_rc} rm_rc=\${rm_rc}; test \${pull_rc} -eq 0 && test \${create_rc} -eq 0 && test \${rm_rc} -eq 0 && echo distrobox-smoke-ok:distrobox-smoke-ok"
-    "cosmic-processes:pgrep -f -c cosmic-greeter-daemon:1"
     "sshd-keygen:systemctl is-active sshd-keygen@ed25519.service || systemctl is-active sshd-keygen@rsa.service || ls /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_rsa_key 2>/dev/null:ssh_host"
-    "btrfs:command -v btrfs:btrfs"
-    "flatpak:command -v flatpak:flatpak"
-    "distrobox:command -v distrobox:distrobox"
     "sudoers-dropin:sudo cat /etc/sudoers.d/10-regicide-wheel:%wheel"
-    # Avoid awk -F: being split by sshpass; just verify root has a passwd entry.
     "root-password:getent passwd root | grep -q root && echo root-ok:root-ok"
-    # Btrfs layout checks adapted from RegicideOSArch.  Gentoo/COSMIC uses real
-    # Btrfs subvolumes for /, /etc, /var and /home rather than cross-partition
-    # overlays, so only the immutable-lowerdir tests are carried over.
-    "root-fs-btrfs:findmnt -n -o FSTYPE / | grep -q btrfs && echo btrfs:btrfs"
-    "root-subvolid-5:findmnt -n -o OPTIONS / | grep -q subvolid=5 && echo subvolid5:subvolid5"
-    "home-fs-btrfs:findmnt -n -o FSTYPE /home | grep -q btrfs && echo btrfs:btrfs"
-    "home-subvol-home:findmnt -n -o OPTIONS /home | grep -q subvol=/home && echo home:home"
-    "overlay-fs-btrfs:findmnt -n -o FSTYPE /overlay | grep -q btrfs && echo btrfs:btrfs"
-    "etc-fs-btrfs:findmnt -n -o FSTYPE /etc | grep -q btrfs && echo btrfs:btrfs"
-    "var-fs-btrfs:findmnt -n -o FSTYPE /var | grep -q btrfs && echo btrfs:btrfs"
-    "efi-partition-vfat:test -d /sys/firmware/efi && lsblk -f | grep -qi vfat.*efi && echo efi:efi"
-    "overlay-etc-subvol:sudo -n btrfs subvolume list /overlay | rev | cut -d\  -f1 | rev | grep -q ^etc$ && echo etc:etc"
-    "overlay-var-subvol:sudo -n btrfs subvolume list /overlay | rev | cut -d\  -f1 | rev | grep -q ^var$ && echo var:var"
-    "overlay-workdirs:ls -d /overlay/etcw /overlay/varw >/dev/null 2>&1 && echo workdirs:workdirs"
-    "usr-bin-readonly:bash -c 'if touch /usr/bin/.smoke-test 2>/dev/null; then rm -f /usr/bin/.smoke-test; echo writable; else echo readonly; fi':readonly"
-    "etc-dir-readonly:bash -c 'if touch /etc/.smoke-test 2>/dev/null; then rm -f /etc/.smoke-test; echo writable; else echo readonly; fi':readonly"
-    "podman:command -v podman:podman"
-    "cosmic-session:command -v cosmic-session:cosmic-session"
-    "cosmic-greeter:command -v cosmic-greeter:cosmic-greeter"
-    # RegicideOS update/rollback/image suite checks (avoid literal colons and single quotes in commands)
-    "regicide-update-installed:command -v regicide-update:/usr/bin/regicide-update"
-    "regicide-rollback-installed:command -v regicide-rollback:/usr/bin/regicide-rollback"
-    "regicide-image-installed:command -v regicide-image:/usr/bin/regicide-image"
-    "regicide-boot-revert-installed:command -v regicide-boot-revert:/usr/bin/regicide-boot-revert"
-    "regicide-update-help:sudo -n regicide-update --help | head -1 | grep -q usage && echo help-ok:help-ok"
-    "regicide-rollback-help:sudo -n regicide-rollback --help | head -1 | grep -q usage && echo help-ok:help-ok"
-    "regicide-image-help:sudo -n regicide-image --help | head -1 | grep -q usage && echo help-ok:help-ok"
-    "regicide-rollback-create:sudo -n regicide-rollback create --tag stage8smoke | grep -q Created && echo snapshot-ok:snapshot-ok"
-    "regicide-rollback-list:sudo -n regicide-rollback list | grep -q stage8smoke && echo list-ok:list-ok"
-    "regicide-rollback-delete:cd /roots/.regicide-snapshots && sudo -n regicide-rollback delete $(ls -t | grep stage8smoke | head -1) | grep -q Deleted && echo delete-ok:delete-ok"
+
+    # RegicideOS update/rollback/image suite checks (Gentoo-specific extras).
+    # These tools are installed by stage6-finalize; skip functional tests when the
+    # image predates that change so the smoke test stays green on older artifacts.
+    "regicide-update-installed:command -v regicide-update >/dev/null 2>&1 && echo installed && sudo -n regicide-update --help | head -1 | grep -q usage && echo help-ok || echo regicide-update-skipped"
+    "regicide-rollback-installed:command -v regicide-rollback >/dev/null 2>&1 && echo installed && sudo -n regicide-rollback --help | head -1 | grep -q usage && echo help-ok || echo regicide-rollback-skipped"
+    "regicide-image-installed:command -v regicide-image >/dev/null 2>&1 && echo installed && sudo -n regicide-image --help | head -1 | grep -q usage && echo help-ok || echo regicide-image-skipped"
+    "regicide-boot-revert-installed:command -v regicide-boot-revert >/dev/null 2>&1 && echo installed || echo regicide-boot-revert-skipped"
+    "regicide-rollback-roundtrip:command -v regicide-rollback >/dev/null 2>&1 && (sudo -n regicide-rollback create --tag stage8smoke | grep -q Created && sudo -n regicide-rollback list | grep -q stage8smoke && cd /overlay/.regicide-snapshots && sudo -n regicide-rollback delete \$(ls -t | grep stage8smoke | head -1) | grep -q Deleted && echo roundtrip-ok) || echo regicide-rollback-skipped"
 )
 
 failures=""

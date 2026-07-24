@@ -8,6 +8,7 @@ STAGE_NAME="stage5-regicide"
 log_status "start" "installing RegicideOS tools"
 REGICIDE_PACKAGES=(
     regicide-tools/regicide-installer
+    sys-fs/btrfs-assistant
 )
 
 for pkg in "${REGICIDE_PACKAGES[@]}"; do
