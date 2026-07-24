@@ -50,6 +50,8 @@ RegicideOS is built from a Gentoo stage4 with COSMIC as the default desktop. The
 | Container Runtime | Distrobox | Application isolation and compatibility | 📋 Planned |
 | Desktop Environment | [Cosmic Desktop](https://github.com/pop-os/cosmic-epoch) | GPU-accelerated, Wayland-native UI | ✅ Installed |
 | Package Management | Portage + custom overlays | Gentoo source-based + curated bundles | ✅ Working |
+
+> **Default install size**: the current image ships **905 packages** (Gentoo, including the full build toolchain for local `emerge` workflows) — the Arch variant ships **536** (binary packages, no compiler toolchain).
 | AI Agent | BtrMind | BTRFS optimization and cleanup | ✅ Working |
 | AI Agent | (future) | Portage optimization | 📋 Planned |
 

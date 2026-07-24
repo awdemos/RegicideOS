@@ -9,6 +9,7 @@ log_status "start" "installing RegicideOS tools"
 REGICIDE_PACKAGES=(
     regicide-tools/regicide-installer
     sys-fs/btrfs-assistant
+    app-misc/fastfetch
 )
 
 for pkg in "${REGICIDE_PACKAGES[@]}"; do
