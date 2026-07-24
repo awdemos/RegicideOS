@@ -44,7 +44,7 @@ RegicideOS is built from a Gentoo stage4 with COSMIC as the default desktop. The
 
 | Component | Technology | Purpose | Status |
 |-----------|------------|---------|--------|
-| Kernel | Linux (→ [Asterinas](https://asterinas.github.io/)) | System foundation | ✅ Working |
+| Kernel | Linux | System foundation | ✅ Working |
 | Init System | systemd | Service management | ✅ Working |
 | Filesystem | Btrfs (read-only) | Immutable system image with overlay writes | ✅ Working |
 | Container Runtime | Distrobox | Application isolation and compatibility | 📋 Planned |
@@ -363,7 +363,7 @@ sudo ./target/release/installer -c regicide-config.toml
 | 2026 | Predictive system maintenance | 📋 Planned |
 | 2026 | Intelligent resource allocation | 📋 Planned |
 | 2027 | Natural language system control | 📋 Planned |
-| 2027 | Asterinas kernel migration | 📋 Planned |
+| 2027 | Kernel migration | 📋 Planned |
 
 ---
 
@@ -379,7 +379,7 @@ sudo ./target/release/installer -c regicide-config.toml
 - [ ] Rust replacements of core GNU utilities
 - [ ] Memory-safe package manager
 - [ ] Advanced AI capabilities (predictive maintenance, NL control)
-- [ ] Asterinas kernel integration
+- [ ] Kernel integration
 
 ---
 
