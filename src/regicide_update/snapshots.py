@@ -13,7 +13,7 @@ def _make_name(tag: str) -> str:
 
 def ensure_snapshot_dir() -> None:
     if not os.path.isdir(rc.SNAPSHOT_DIR):
-        rc.execute(f"btrfs subvolume create {rc.SNAPSHOT_DIR}")
+        rc.execute("btrfs", ["subvolume", "create", rc.SNAPSHOT_DIR])
 
 
 def list_snapshot_sets() -> list[tuple[str, str]]:
@@ -51,7 +51,7 @@ def create_snapshot_set(tag: str = "manual") -> str:
         src = os.path.join(rc.OVERLAY_DIR, subvol)
         dst = os.path.join(target, subvol)
         if os.path.isdir(src):
-            rc.execute(f"btrfs subvolume snapshot -r {src} {dst}")
+            rc.execute("btrfs", ["subvolume", "snapshot", "-r", src, dst])
     write_current(name)
     return name
 
@@ -65,7 +65,7 @@ def delete_snapshot_set(name: str) -> None:
     for subvol in rc.OVERLAY_SUBVOLUMES:
         path = os.path.join(target, subvol)
         if os.path.isdir(path):
-            rc.execute(f"btrfs subvolume delete {path}")
+            rc.execute("btrfs", ["subvolume", "delete", path])
     os.rmdir(target)
 
 

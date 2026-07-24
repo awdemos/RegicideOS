@@ -29,7 +29,7 @@ def apply_revert() -> bool:
 
     overlay_mounted = os.path.ismount(rc.OVERLAY_DIR)
     if not overlay_mounted:
-        rc.execute(f"mount LABEL=OVERLAY {rc.OVERLAY_DIR}")
+        rc.execute("mount", ["LABEL=OVERLAY", rc.OVERLAY_DIR])
 
     for subvol in rc.OVERLAY_SUBVOLUMES:
         live_path = os.path.join(rc.OVERLAY_DIR, subvol)
@@ -38,9 +38,9 @@ def apply_revert() -> bool:
             rc.warn(f"Missing snapshot subvolume {subvol}; skipping")
             continue
         if os.path.isdir(live_path):
-            rc.execute(f"btrfs subvolume delete {live_path}")
-        rc.execute(f"btrfs subvolume create {live_path}")
-        rc.execute(f"cp -aT --reflink=auto {snap_path} {live_path}")
+            rc.execute("btrfs", ["subvolume", "delete", live_path])
+        rc.execute("btrfs", ["subvolume", "create", live_path])
+        rc.execute("cp", ["-aT", "--reflink=auto", snap_path, live_path])
 
     os.remove(rc.REVERT_FLAG)
     snapshots.write_current(target_name)
