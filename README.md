@@ -6,7 +6,7 @@
 
 > *Converge and conquer.*
 
-> ⚠️ **Development Status**: The installer works, the Dagger/Catalyst build pipeline produces a bootable stage4 + SquashFS + QCOW2, and the COSMIC desktop boots to a greeter. A bootable ISO is not yet automated. See [STATUS.md](STATUS.md) for the full breakdown.
+> ⚠️ **Development Status**: The installer works, the Dagger/Catalyst build pipeline produces a bootable stage4 + SquashFS + QCOW2 + live ISO, and the COSMIC desktop boots to a greeter. See [STATUS.md](STATUS.md) for the full breakdown.
 
 [![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://kernel.org/)
@@ -78,7 +78,7 @@ RegicideOS is built from a Gentoo stage4 with COSMIC as the default desktop. The
 
 ## 📥 Installation
 
-> **Note**: The installer exists and works for basic UEFI installs. There is currently **no bootable ISO**, but the build system now produces a local SquashFS image and a bootable QCOW2 VM image. You can install to bare metal from the live SquashFS image, or boot the QCOW2 image directly in a VM.
+> **Note**: The installer exists and works for basic UEFI installs. The build system produces a live SquashFS image, a bootable QCOW2 VM image, and a bootable live ISO (`--iso` flag, GRUB + dracut dmsquash-live). You can install to bare metal from the live SquashFS image, boot the QCOW2 image directly in a VM, or try the live ISO.
 
 ### Requirements
 
@@ -374,7 +374,7 @@ sudo ./target/release/installer -c regicide-config.toml
 - [x] Rust rewrite of installer (functional but monolithic)
 - [x] BtrMind AI agent (fully working)
 - [x] Bootable QCOW2 VM image
-- [ ] Bootable ISO / Base system image
+- [x] Bootable ISO / Base system image
 - [x] Cosmic Desktop integration
 - [ ] Rust replacements of core GNU utilities
 - [ ] Memory-safe package manager
