@@ -28,8 +28,10 @@ PACKAGES=(
     sys-fs/ntfs3g
     sys-fs/squashfs-tools
     sys-fs/xfsprogs
-    sys-fs/zfs
-    sys-fs/zfs-kmod
+    # NOTE: ZFS is intentionally omitted for now: zfs-2.3.8 supports at most
+    # kernel 6.18 while the image ships 7.1.x, and zfs-kmod-2.4.0 is RC-only
+    # (missing keywords) while zfs userspace is at 2.4.3 — no matching pair.
+    # Re-add once zfs-kmod 2.4.x goes stable.
 )
 
 for pkg in "${PACKAGES[@]}"; do
