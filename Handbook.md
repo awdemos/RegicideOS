@@ -763,6 +763,152 @@ cargo test
 cargo run --bin installer -- --dry-run
 ```
 
+### 8.6 Agentic Workloads in Distrobox
+
+Distrobox is the recommended way to run AI **agents** on RegicideOS. An agent (OpenCode, Claude Code, Codex, an OpenClaw "claw", a research bot) is materially different from a normal dev tool: it reads files, writes code, and executes shell commands *autonomously*. Treat every agent as an untrusted workload and give it a sandbox whose blast radius you control.
+
+#### 8.6.1 Use Cases
+
+| Use case | Tooling | Why distrobox |
+|---|---|---|
+| Agentic coding assistant | OpenCode, Claude Code, Codex | Agent edits files autonomously — confine which files it can touch |
+| Autonomous research agent | LangChain/CrewAI, AI-Q-style stacks | Long-running, spawns sub-agents; needs resource and network limits |
+| Local inference | Nemotron/llama.cpp/Ollama | GPU access without polluting the immutable host |
+| CI/automation bots | Scheduled agent jobs | Disposable environments, deterministic rebuilds |
+| Sandboxed agent runtimes | **NVIDIA OpenShell** | Policy-governed agent execution (see 8.6.3) |
+
+#### 8.6.2 Hardening Tiers
+
+Distrobox defaults are convenience-first (shares `$HOME`, IPC, and the host's Podman socket). For agents, step up:
+
+1. **Default (dev tools only)** — shared `$HOME`. Never for autonomous agents.
+2. **Isolated home** — `--home <dir>`: agent sees only its own home directory.
+3. **Locked-down** — isolated home + unshared namespaces + no host Podman socket + no sudo inside.
+4. **Policy-governed runtime** — an enforcement layer (OpenShell, SELinux policies) on top of the container.
+
+#### 8.6.3 Hardened Example: Agentic Coding Tool in a Locked-Down Box
+
+```bash
+# Dedicated home the agent cannot escape to your real $HOME from
+sudo install -d -o regicide -g regicide /var/lib/regicide/agent-jail
+
+distrobox create \
+  --name agent-jail \
+  --image fedora:44 \
+  --home /var/lib/regicide/agent-jail \
+  --unshare-devsys \
+  --unshare-ipc \
+  --unshare-process \
+  --absolutely-disable-root-password-i-am-really-positively-not-root
+
+# Enter WITHOUT the host Podman socket and WITHOUT host env leakage
+distrobox enter agent-jail -- \
+  env -u DISTROBOX_ENTER_PATH -u CONTAINER_ID TERM=$TERM bash --norc
+```
+
+What each flag buys you:
+
+| Flag | Effect |
+|---|---|
+| `--home /var/lib/regicide/agent-jail` | Agent's `$HOME` is a dedicated dir; your real home is invisible |
+| `--unshare-devsys` | No host `/dev` (no raw disk/GPU nodes unless you add them) |
+| `--unshare-ipc` | No shared memory/semaphores with the host or other containers |
+| `--unshare-process` | Agent cannot see host processes (no `/proc` reconnaissance) |
+| `--absolutely-disable-root-password-...` | No root escalation path inside the box |
+| No host Podman socket | Agent cannot start sibling containers on the host |
+
+Network control (defense in depth — apply even if the agent "should be online"):
+
+```bash
+# Fully offline agent (no network namespace sharing at all)
+distrobox create --name agent-offline --image fedora:44 \
+  --home /var/lib/regicide/agent-offline \
+  --unshare-netns
+```
+
+Credential hygiene — inject API keys at run time, never bake them in:
+
+```bash
+# Good: key lives in your shell env, passed for this invocation only
+distrobox enter agent-jail -- env ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" opencode
+
+# Bad: writing the key into a file inside the jail image
+```
+
+#### 8.6.4 Hardened Example: NVIDIA OpenShell
+
+[NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) (Apache 2.0) is an open-source, secure-by-design **runtime for autonomous agents**. Each agent runs in its own kernel-level sandbox (a K3s cluster inside a single container), governed by a declarative YAML policy covering filesystem paths, outbound network, process execution, and **inference routing** (a Privacy Router that decides whether a prompt goes to a local Nemotron model or a cloud endpoint). Credentials are injected at the provider level and never touch the sandbox filesystem. It is agent-agnostic — Claude Code, Codex, OpenCode, Copilot CLI, and OpenClaw all run inside it.
+
+OpenShell itself needs a container runtime — but it only needs **rootless Podman inside the jail**, not the host's socket. Run the whole thing inside a locked-down distrobox so the sandbox's sandbox never reaches the host:
+
+```bash
+sudo install -d -o regicide -g regicide /var/lib/regicide/openshell-jail
+
+distrobox create \
+  --name openshell-jail \
+  --image fedora:44 \
+  --home /var/lib/regicide/openshell-jail \
+  --unshare-devsys \
+  --unshare-ipc \
+  --unshare-process \
+  --absolutely-disable-root-password-i-am-really-positively-not-root
+
+distrobox enter openshell-jail
+```
+
+Inside the jail:
+
+```bash
+# Rootless podman stays INSIDE the jail — the host never sees OpenShell's K3s
+sudo dnf install -y podman git
+git clone https://github.com/NVIDIA/OpenShell.git && cd OpenShell
+# Follow the repo's install (single-container K3s runtime)
+
+# Create a governed sandbox for an agent
+openshell sandbox create -- opencode
+
+# Monitor / interact with the sandboxed agent
+openshell term
+```
+
+A policy file (YAML, per the OpenShell docs) is where the *real* hardening lives — example shape:
+
+```yaml
+# openshell-policy.yaml (illustrative — see the OpenShell repo for the schema)
+filesystem:
+  allow: ["/workspace"]
+  deny:  ["/etc", "/home", "/root", "/var"]
+network:
+  allow: ["api.anthropic.com", "build.nvidia.com"]
+  deny:  ["0.0.0.0/0"]
+process:
+  allow: ["git", "python3", "node", "cargo"]
+inference:
+  route_local_data_to: "nemotron-local"
+  anonymize_cloud_prompts: true
+```
+
+**Defense-in-depth summary:**
+
+1. The **immutable host** runs nothing but Podman.
+2. The **distrobox jail** isolates the runtime (home, IPC, process tree, no host socket, no root).
+3. **OpenShell's K3s sandbox** isolates the agent itself with declarative policy.
+4. The **Privacy Router** keeps sensitive prompts on local models; cloud inference is anonymized.
+5. **Btrfs snapshots** (`regicide-rollback create --tag before-agent`) let you roll the whole system back if anything escapes all four layers.
+
+#### 8.6.5 Quick Reference: Hardening Flags
+
+| Flag | Use when |
+|---|---|
+| `--home <dir>` | Always, for agents — never share `$HOME` |
+| `--unshare-netns` | Agent must be offline |
+| `--unshare-devsys` | No raw devices needed (default for agents) |
+| `--unshare-ipc` | Always, for agents |
+| `--unshare-process` | Always, for agents |
+| `--nvidia` | GPU inference needed — pair with all of the above |
+| `--absolutely-disable-root-password-...` | No root inside the box |
+| `env -u VAR` at enter | Scrub host env vars (tokens, sockets) |
+
 ---
 
 ## 9. System Administration
