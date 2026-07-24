@@ -67,6 +67,7 @@ stage4/packages:
 	cosmic-base/cosmic-workspaces-epoch
 	cosmic-base/pop-launcher
 	cosmic-base/xdg-desktop-portal-cosmic
+	cosmic-utils/minimon
 	dev-util/glib-utils
 	dev-util/wayland-scanner
 	dev-vcs/git
