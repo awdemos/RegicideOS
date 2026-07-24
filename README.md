@@ -56,24 +56,20 @@ RegicideOS is built from a Gentoo stage4 with COSMIC as the default desktop. The
 ### Directory Layout
 
 ```
-/
-├── boot/efi          # EFI System Partition
-├── root/             # Native ROOTS partition (read-only base system)
-│   ├── usr/          # System binaries
-│   ├── etc/          # Base configuration
-│   └── var/          # Variable data templates
-├── home/             # User data (separate Btrfs subvolume)
-└── overlay/          # Writable overlays
-    ├── etc/          # Configuration overlay
-    ├── var/          # Variable data overlay
-    └── usr/          # User software overlay
+/                   # ROOTS partition (read-only base system)
+├── efi/            # EFI System Partition (automounted on access)
+├── etc/            # Btrfs subvolume on OVERLAY (writable, snapshotted)
+├── var/            # Btrfs subvolume on OVERLAY (writable, snapshotted)
+├── home/           # Btrfs subvolume on HOME (user data)
+└── overlay/        # OVERLAY partition top-level (snapshot store)
 ```
 
 ### Key Design Decisions
 
 - **Read-only root** — System files protected from accidental or malicious modification
-- **Atomic updates** — Safe, transactional system updates via Btrfs snapshots
-- **Rollback capability** — Boot into any previous system state instantly
+- **Btrfs subvolumes for state** — `/etc` and `/var` are real subvolumes (overlayfs across partitions breaks with EXDEV), snapshotted by `regicide-update`
+- **Atomic updates** — Safe, transactional system updates via `regicide-update` (packages) and `regicide-image` (base image)
+- **Rollback capability** — `regicide-rollback` restores snapshotted subvolumes at next boot
 - **Distrobox integration** — Seamless containerized application environment with full distro compatibility
 
 ---
@@ -118,7 +114,17 @@ sudo ./build.sh
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
-The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse the `distfiles` and `binpkgs` cache volumes and can take 99% less time. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
+The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse cached stages and the `distfiles`/`binpkgs` cache volumes and can take 99% less time. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
+
+Two build modes are available:
+
+```bash
+# Main pipeline (default): reuse binary packages via --usepkg for fast rebuilds
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+
+# From-source pipeline: full recompile; still populates the binpkg cache volume
+REGICIDE_USE_BINPKGS=0 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+```
 
 Both methods produce:
 - `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz`

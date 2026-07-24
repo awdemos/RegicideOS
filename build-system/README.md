@@ -169,13 +169,21 @@ The pipeline runs six cacheable stages. Use `--plain` (or set `DAGGER_PROGRESS=p
 5. `stages/stage5-regicide.sh` — RegicideOS tools
 6. `stages/stage6-finalize.sh` — post-build config and stage4 tarball
 
-> **Note**: the COSMIC stage compiles many Rust packages from source. The first build can take several hours. Subsequent runs reuse the `distfiles` and `binpkgs` Dagger cache volumes, so they are much faster.
+> **Note**: the COSMIC stage compiles many Rust packages from source. The first build can take several hours. Every emerge runs with `--usepkg --binpkg-respect-use=y` (set via `EMERGE_DEFAULT_OPTS` in `stage2-sync.sh`), so subsequent runs reuse the binary packages accumulated in the `binpkgs` Dagger cache volume instead of recompiling, making them much faster. Set `REGICIDE_USE_BINPKGS=0` to force full source builds.
 
 To reuse an existing stage4 tarball or SquashFS, pass:
 
 ```bash
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --from-tarball ./output/stage4-amd64-systemd-cosmic.tar.xz --from-squashfs ./output/regicide-cosmic.img
 ```
+
+Environment knobs:
+
+- `REGICIDE_USE_BINPKGS=0` — force full source builds, bypassing the local binpkg cache.
+- `REGICIDE_BINPKGS_DIR=<path>` — override the chroot PKGDIR (defaults to the `regicide-binpkgs-v5` Dagger cache volume in Dagger, or `var/cache/binpkgs` inside the rootfs for manual builds).
+- `REGICIDE_DEFER_FLATPAKS=0` — install the heavy Flatpak apps (protonvpn, Zed, BoxBuddy, ungoogled-chromium, SoundRecorder, virt-manager) at build time instead of via the first-boot `regicide-deferred-flatpaks.service`.
+
+The SquashFS image is built locally as root; when the pipeline runs unprivileged it is built inside the Dagger engine instead (same as RegicideOSArch), so no host sudo is required.
 
 ### Build observability for agents
 

@@ -68,3 +68,4 @@ __pycache__/
 legacy_installer.py
 regicideos_poster.png
 scorecard.png
+session-*.md
