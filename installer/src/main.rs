@@ -1902,9 +1902,14 @@ fn verify_grub_environment() -> Result<()> {
         "part_gpt",
     ];
 
+    let grub_target = if cfg!(target_arch = "aarch64") {
+        "arm64-efi"
+    } else {
+        "x86_64-efi"
+    };
     let grub_lib_path = "/mnt/root/usr/lib/grub";
     for module in &crypto_modules {
-        let module_path = format!("{grub_lib_path}/x86_64-efi/{module}.mod");
+        let module_path = format!("{grub_lib_path}/{grub_target}/{module}.mod");
         if Path::new(&module_path).exists() {
             info(&format!("✓ GRUB crypto module found: {module}"));
         } else {
@@ -3255,7 +3260,15 @@ async fn main() -> Result<()> {
     info("Step 4: Prepare for bootloader installation");
 
     info("Step 5: Install bootloader");
-    let platform = if is_efi() { "x86_64-efi" } else { "i386-pc" };
+    let platform = if is_efi() {
+        if cfg!(target_arch = "aarch64") {
+            "arm64-efi"
+        } else {
+            "x86_64-efi"
+        }
+    } else {
+        "i386-pc"
+    };
     info(&format!("Platform detected: {platform}"));
     info(&format!("Target device: {}", &config_parsed.drive));
 
