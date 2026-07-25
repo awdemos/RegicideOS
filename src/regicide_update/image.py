@@ -49,8 +49,8 @@ def verify_checksum(image: Path, checksum_url: str | None) -> bool:
 
 
 def install_tarball(image: Path, roots_mount: str, reseed: bool = True) -> None:
-    if not os.path.ismount(roots_mount):
-        rc.die(f"{roots_mount} is not mounted")
+    if not rc.is_btrfs(roots_mount):
+        rc.die(f"{roots_mount} is not a btrfs filesystem")
     rc.info(f"Extracting {image} into {roots_mount}")
     flags = ["-x", "-p", "-J", "-f"] if str(image).endswith(".xz") else ["-x", "-p", "-f"]
     rc.execute("tar", ["-C", roots_mount, *flags, str(image)])

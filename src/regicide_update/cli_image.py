@@ -18,11 +18,22 @@ def cmd_install(args: argparse.Namespace) -> None:
     path = Path(args.path)
     if not path.is_file():
         rc.die(f"Image not found: {path}")
-    image.install_tarball(path, args.roots_mount, args.reseed)
+    if args.ab:
+        from regicide_update import boot_entry
+        slot = boot_entry.install_and_sync(path)
+        rc.info(f"A/B root update staged in slot {slot}; reboot to boot into it.")
+    else:
+        image.install_tarball(path, args.roots_mount, args.reseed)
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
     image.verify_checksum(Path(args.path), args.checksum_url)
+
+
+def cmd_rollback(_args: argparse.Namespace) -> None:
+    from regicide_update import boot_entry
+    slot = boot_entry.rollback_and_sync()
+    rc.info(f"Rollback staged to slot {slot}; reboot to activate.")
 
 
 def main() -> None:
@@ -38,10 +49,15 @@ def main() -> None:
     install.add_argument("path")
     install.add_argument("--roots-mount", default="/roots")
     install.add_argument("--reseed", action="store_true", default=True)
+    install.add_argument(
+        "--ab", action="store_true", help="Install into the inactive A/B root slot"
+    )
 
     verify = sub.add_parser("verify", help="Verify a downloaded image checksum")
     verify.add_argument("path")
     verify.add_argument("--checksum-url", required=True)
+
+    sub.add_parser("rollback", help="Rollback to the previous A/B root slot")
 
     args = parser.parse_args()
     match args.action:
@@ -51,6 +67,8 @@ def main() -> None:
             cmd_install(args)
         case "verify":
             cmd_verify(args)
+        case "rollback":
+            cmd_rollback(args)
 
 
 if __name__ == "__main__":
