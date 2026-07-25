@@ -71,6 +71,15 @@ cat > "${ROOTFS}/etc/portage/package.env" << 'EOF'
 app-emulation/qemu-guest-agent allow-container-storage.conf
 EOF
 
+if [[ "${REGICIDE_ARCH:-amd64}" == "arm64" ]]; then
+    mkdir -p "${ROOTFS}/etc/portage/package.accept_keywords"
+    cat > "${ROOTFS}/etc/portage/package.accept_keywords/regicide-cosmic-arm64" << 'EOF'
+cosmic-base/* ~arm64
+cosmic-extra/* ~arm64
+cosmic-utils/* ~arm64
+EOF
+fi
+
 echo "Syncing Portage tree..."
 log_status "sync" "emerge-webrsync"
 run_in_chroot emerge-webrsync

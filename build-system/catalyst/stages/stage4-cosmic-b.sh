@@ -7,6 +7,15 @@ STAGE_NAME="stage4-cosmic-b"
 
 log_status "start" "installing COSMIC applications"
 
+if [[ "${REGICIDE_SKIP_COSMIC:-0}" == "1" ]]; then
+    echo "REGICIDE_SKIP_COSMIC=1: skipping COSMIC applications and greeter."
+    log_status "skip" "COSMIC applications skipped"
+    clean_rootfs_transient
+    log_status "complete" "COSMIC applications skipped"
+    echo "Stage 4b complete (skipped)."
+    exit 0
+fi
+
 COSMIC_PACKAGES=(
     cosmic-base/cosmic-applets
     cosmic-base/cosmic-edit

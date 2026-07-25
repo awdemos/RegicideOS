@@ -6,6 +6,15 @@ source "$(dirname "$0")/common.sh"
 STAGE_NAME="stage4-cosmic-a"
 
 log_status "start" "installing COSMIC core packages"
+
+if [[ "${REGICIDE_SKIP_COSMIC:-0}" == "1" ]]; then
+    echo "REGICIDE_SKIP_COSMIC=1: skipping COSMIC core packages."
+    log_status "skip" "COSMIC core packages skipped"
+    clean_rootfs_transient
+    log_status "complete" "COSMIC core packages skipped"
+    echo "Stage 4a complete (skipped)."
+    exit 0
+fi
 COSMIC_OVERLAY_DIR="${REGICIDE_COSMIC_OVERLAY_DIR:-${ROOTFS}/var/db/repos/cosmic-overlay}"
 mkdir -p "${ROOTFS}/var/db/repos"
 

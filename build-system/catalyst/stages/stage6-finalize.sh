@@ -87,8 +87,11 @@ PROFILE
 
     # Install the Minimon GPU/system monitor applet late in the image build
     # while network access is still available, so it is present before first boot.
-    echo "Installing cosmic-utils/minimon..."
-    emerge -qv cosmic-utils/minimon
+    # This is a COSMIC applet, so it is skipped along with the rest of COSMIC.
+    if [[ "${REGICIDE_SKIP_COSMIC:-0}" != "1" ]]; then
+        echo "Installing cosmic-utils/minimon..."
+        emerge -qv cosmic-utils/minimon
+    fi
 
     # Allow wheel group to sudo without a password so the live image and
     # automated VM tests can run privileged diagnostics non-interactively.
@@ -242,14 +245,15 @@ EOF
     # left it as root or another uid.
     chown 1000:1000 -R /home/regicide || true
 
-    # COSMIC defaults: active window hint off, screen reader disabled,
-    # and UI event sounds off for a quieter first-boot experience.
-    mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicComp/v1
-    printf false > /home/regicide/.config/cosmic/com.system76.CosmicComp/v1/active_hint
+    if [[ "${REGICIDE_SKIP_COSMIC:-0}" != "1" ]]; then
+        # COSMIC defaults: active window hint off, screen reader disabled,
+        # and UI event sounds off for a quieter first-boot experience.
+        mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicComp/v1
+        printf false > /home/regicide/.config/cosmic/com.system76.CosmicComp/v1/active_hint
 
-    # Pin Rio terminal to the dock alongside the default COSMIC apps.
-    mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicAppList/v1
-    cat > /home/regicide/.config/cosmic/com.system76.CosmicAppList/v1/favorites <<'FAVEOF'
+        # Pin Rio terminal to the dock alongside the default COSMIC apps.
+        mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicAppList/v1
+        cat > /home/regicide/.config/cosmic/com.system76.CosmicAppList/v1/favorites <<'FAVEOF'
 [
   "com.system76.CosmicAppList",
   "com.system76.CosmicFiles",
@@ -260,10 +264,10 @@ EOF
 ]
 FAVEOF
 
-    # Add the Minimon GPU/system monitor applet to the top-panel right wing
-    # by default. The applet is identified by its desktop file id.
-    mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicPanel.Panel/v1
-    cat > /home/regicide/.config/cosmic/com.system76.CosmicPanel.Panel/v1/plugins_wings <<'PANELEOF'
+        # Add the Minimon GPU/system monitor applet to the top-panel right wing
+        # by default. The applet is identified by its desktop file id.
+        mkdir -p /home/regicide/.config/cosmic/com.system76.CosmicPanel.Panel/v1
+        cat > /home/regicide/.config/cosmic/com.system76.CosmicPanel.Panel/v1/plugins_wings <<'PANELEOF'
 Some(([
     "com.system76.CosmicPanelWorkspacesButton",
     "com.system76.CosmicPanelAppButton"
@@ -282,7 +286,8 @@ Some(([
 ]))
 PANELEOF
 
-    chown -R regicide:regicide /home/regicide/.config
+        chown -R regicide:regicide /home/regicide/.config
+    fi
 
     # Disable the Orca screen reader and GNOME/COSMIC event sounds by default.
     mkdir -p /etc/dconf/db/local.d
@@ -311,7 +316,9 @@ EOF
     done
     systemctl enable cups || true
     systemctl enable systemd-timesyncd || true
-    systemctl enable cosmic-greeter || true
+    if [[ "${REGICIDE_SKIP_COSMIC:-0}" != "1" ]]; then
+        systemctl enable cosmic-greeter || true
+    fi
     systemctl enable lvm2-monitor || true
     systemctl enable qemu-guest-agent || true
     systemctl enable spice-vdagentd || true
@@ -480,9 +487,10 @@ run_in_chroot bash <<'STAGE6CLEANEOF'
 STAGE6CLEANEOF
 
 echo "Creating stage4 tarball..."
-log_status "tarball" "creating stage4-amd64-systemd-cosmic.tar.xz"
+TARBALL_NAME="stage4-${REGICIDE_ARCH:-amd64}-systemd-cosmic.tar.xz"
+log_status "tarball" "creating ${TARBALL_NAME}"
 mkdir -p "${OUTPUT_DIR}"
-OUTPUT_FILE="${OUTPUT_DIR}/stage4-amd64-systemd-cosmic.tar.xz"
+OUTPUT_FILE="${OUTPUT_DIR}/${TARBALL_NAME}"
 
 tar -C "${ROOTFS}" -cpJf "${OUTPUT_FILE}" \
     --xattrs-include='*.*' \
