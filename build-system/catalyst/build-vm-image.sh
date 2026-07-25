@@ -199,15 +199,18 @@ chmod 0755 "${DATA_STAGING}/build-qemu-image.sh"
 printf '%s\n' "${DISK_SIZE}" > "${DATA_STAGING}/disk-size"
 
 if [[ "${ENCRYPT}" == true ]]; then
-    # Strip a single trailing newline from the passphrase file.  cryptsetup
-    # treats the key-file bytes literally, so a trailing newline becomes part
-    # of the LUKS key and interactive unlockers (GRUB cryptodisk, passphrase
-    # prompts) that do not include the newline will fail to open the device.
-    if [[ "$(tail -c 1 "${PASSPHRASE_FILE}" | wc -l)" -eq 1 ]]; then
-        head -c -1 "${PASSPHRASE_FILE}" > "${DATA_STAGING}/luks-passphrase"
-    else
-        cp "${PASSPHRASE_FILE}" "${DATA_STAGING}/luks-passphrase"
-    fi
+    python3 - "${DATA_STAGING}/luks-passphrase" "${PASSPHRASE_FILE}" <<'PYEOF'
+import sys
+dest, src = sys.argv[1], sys.argv[2]
+with open(src, "rb") as f:
+    data = f.read()
+if data.endswith(b"\r\n"):
+    data = data[:-2]
+elif data.endswith(b"\n"):
+    data = data[:-1]
+with open(dest, "wb") as f:
+    f.write(data)
+PYEOF
     chmod 0600 "${DATA_STAGING}/luks-passphrase"
 fi
 
@@ -500,6 +503,16 @@ if [[ "${ENCRYPT}" == true ]]; then
         echo "Error: ROOTS partition does not contain a LUKS header."
         exit 1
     fi
+
+    LUKS_LOOP=$(losetup -f --show -o "${ROOTS_OFFSET}" "${TARGET_RAW}")
+    if cryptsetup luksDump "${LUKS_LOOP}" >/dev/null 2>&1; then
+        echo "LUKS header verification passed."
+    else
+        echo "Error: ROOTS partition LUKS header is unreadable."
+        losetup -d "${LUKS_LOOP}" 2>/dev/null || true
+        exit 1
+    fi
+    losetup -d "${LUKS_LOOP}" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------

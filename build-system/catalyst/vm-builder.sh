@@ -42,9 +42,8 @@ fi
 # Locate an optional passphrase file (used when encrypting).
 PASSPHRASE_FILE=""
 ENCRYPT_FLAG=""
-CANDIDATE="$(find "${DATA_DIR}" -maxdepth 1 -name 'luks-passphrase*' -type f | head -n1 || true)"
-if [[ -n "${CANDIDATE}" ]]; then
-    PASSPHRASE_FILE="${CANDIDATE}"
+if [[ -f "${DATA_DIR}/luks-passphrase" ]]; then
+    PASSPHRASE_FILE="${DATA_DIR}/luks-passphrase"
     ENCRYPT_FLAG="--encrypt"
 fi
 

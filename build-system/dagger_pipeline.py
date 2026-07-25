@@ -532,11 +532,11 @@ async def build_qcow2_locally(
     passphrase_file: Path | None = None
     if encrypt:
         passphrase = _get_luks_passphrase()
-        fd, passphrase_tmp = tempfile.mkstemp(prefix="regicide-luks-", text=True)
+        fd, passphrase_tmp = tempfile.mkstemp(prefix="regicide-luks-")
         passphrase_file = Path(passphrase_tmp)
-        with os.fdopen(fd, "w") as f:
-            f.write(passphrase + "\n")
-        passphrase_file.chmod(0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(passphrase.encode("utf-8"))
         cmd[1:1] = ["--encrypt", "--passphrase-file", str(passphrase_file)]
         print(f"Building encrypted QCOW2 image: {output_path}")
 
@@ -544,6 +544,16 @@ async def build_qcow2_locally(
         subprocess.run(cmd, check=True, env=env)
     finally:
         if passphrase_file is not None:
+            try:
+                # Best-effort overwrite before unlink to reduce residual risk.
+                with open(passphrase_file, "rb+") as f:
+                    size = f.seek(0, os.SEEK_END)
+                    f.seek(0)
+                    f.write(b"\x00" * size)
+                    f.flush()
+                    os.fsync(f.fileno())
+            except OSError:
+                pass
             try:
                 passphrase_file.unlink()
             except FileNotFoundError:

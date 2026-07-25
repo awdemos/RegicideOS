@@ -183,6 +183,22 @@ cleanup() {
         cryptsetup close regicideos 2>/dev/null || true
     fi
 
+    if [[ -n "${PASS_KEY_FILE:-}" && -f "${PASS_KEY_FILE}" ]]; then
+        python3 - "${PASS_KEY_FILE}" <<'PYEOF'
+import os, sys
+try:
+    with open(sys.argv[1], "rb+") as f:
+        size = f.seek(0, os.SEEK_END)
+        f.seek(0)
+        f.write(b"\x00" * size)
+        f.flush()
+        os.fsync(f.fileno())
+except OSError:
+    pass
+PYEOF
+        rm -f "${PASS_KEY_FILE}" 2>/dev/null || true
+    fi
+
     if [[ -n "${LOOP_DEV}" ]]; then
         losetup -d "${LOOP_DEV}" 2>/dev/null || true
     fi
@@ -295,16 +311,24 @@ ROOTS_TARGET="${ROOTS_PART}"
 LUKS_UUID=""
 if [[ "${ENCRYPT}" == true ]]; then
     echo "Setting up LUKS encryption on ROOTS partition..."
-    # Canonicalize the passphrase: cryptsetup --key-file consumes the file
-    # verbatim, including any trailing newline, which interactive boot
-    # prompts (GRUB cryptomount, initramfs ask-password) can never produce.
-    PASS_KEY_FILE="$(mktemp)"
+    PASS_KEY_FILE="$(mktemp -p /dev/shm regicide-luks-XXXXXX)"
+    chmod 0600 "${PASS_KEY_FILE}"
     if [[ "${PASSPHRASE_FILE}" == "-" ]]; then
-        pass="$(cat)"
+        cat > "${PASS_KEY_FILE}"
     else
-        pass="$(cat "${PASSPHRASE_FILE}")"
+        cat "${PASSPHRASE_FILE}" > "${PASS_KEY_FILE}"
     fi
-    printf '%s' "${pass}" > "${PASS_KEY_FILE}"
+    python3 - "${PASS_KEY_FILE}" <<'PYEOF'
+import sys
+with open(sys.argv[1], "rb") as f:
+    data = f.read()
+if data.endswith(b"\r\n"):
+    data = data[:-2]
+elif data.endswith(b"\n"):
+    data = data[:-1]
+with open(sys.argv[1], "wb") as f:
+    f.write(data)
+PYEOF
     cryptsetup luksFormat --batch-mode --type luks2 --label regicideos --key-file "${PASS_KEY_FILE}" "${ROOTS_PART}"
     cryptsetup open --type luks2 --key-file "${PASS_KEY_FILE}" "${ROOTS_PART}" regicideos
     # Keep the canonical passphrase file for the embedded initramfs key.
@@ -489,8 +513,7 @@ EOF
     cat > "${MOUNT_DIR}/etc/crypttab" << EOF
 regicideos UUID=${LUKS_UUID} /etc/luks-keyfile luks
 EOF
-    cp "${PASSPHRASE_FILE}" "${MOUNT_DIR}/etc/luks-keyfile"
-    chmod 0400 "${MOUNT_DIR}/etc/luks-keyfile"
+    install -m 0400 -o root -g root "${PASSPHRASE_FILE}" "${MOUNT_DIR}/etc/luks-keyfile"
 
     # Install a custom dracut module that unlocks root LUKS from the initqueue.
     # We cannot rely on systemd-cryptsetup because the stage4 image does not
