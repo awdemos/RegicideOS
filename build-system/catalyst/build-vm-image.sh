@@ -86,6 +86,17 @@ if [[ ! -f "${TARBALL}" ]]; then
     echo "Error: stage4 archive not found: ${TARBALL}"
     exit 1
 fi
+# Determine guest architecture from tarball name or explicit env.
+REGICIDE_ARCH="${REGICIDE_ARCH:-}"
+if [[ -z "${REGICIDE_ARCH}" ]]; then
+    if [[ "$(basename "${TARBALL}")" == *arm64* ]]; then
+        REGICIDE_ARCH="arm64"
+    else
+        REGICIDE_ARCH="amd64"
+    fi
+fi
+export REGICIDE_ARCH
+echo "Guest architecture: ${REGICIDE_ARCH}"
 if [[ "${ENCRYPT}" == true && -z "${PASSPHRASE_FILE}" ]]; then
     echo "Error: --passphrase-file is required when --encrypt is used."
     usage
@@ -122,7 +133,12 @@ SQUASHFS="$(realpath -e "${SQUASHFS}")"
 # ---------------------------------------------------------------------------
 # Dependency checks
 # ---------------------------------------------------------------------------
-REQUIRED_CMDS=(qemu-img qemu-system-x86_64 unsquashfs mksquashfs tar cpio zstd cryptsetup)
+if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
+    QEMU_BIN="qemu-system-aarch64"
+else
+    QEMU_BIN="qemu-system-x86_64"
+fi
+REQUIRED_CMDS=(qemu-img "${QEMU_BIN}" unsquashfs mksquashfs tar cpio zstd cryptsetup)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if ! command -v "${cmd}" &> /dev/null; then
         echo "Error: required command '${cmd}' not found."
@@ -420,20 +436,35 @@ zstd -19 -f "${WORK_DIR}/merged.cpio" -o "${CUSTOM_INITRD}"
 # ---------------------------------------------------------------------------
 echo "Booting KVM builder VM..."
 VM_SERIAL_LOG="${WORK_DIR}/builder-vm-serial.log"
-qemu-system-x86_64 \
-    -enable-kvm \
-    -m 8G \
-    -smp 4 \
-    -cpu host \
-    -nographic \
-    -no-reboot \
-    -kernel "${KERNEL}" \
-    -initrd "${CUSTOM_INITRD}" \
-    -append "root=/dev/vdb ro console=ttyS0,115200n8 init=/init" \
-    -drive "file=${TARGET_RAW},format=raw,if=virtio" \
-    -drive "file=${SQUASHFS},format=raw,if=virtio,readonly=on" \
-    -drive "file=${DATA_SQUASHFS},format=raw,if=virtio,readonly=on" \
-    2>&1 | tee "${VM_SERIAL_LOG}"
+QEMU_ARGS=(
+    -m 8G
+    -smp 4
+    -nographic
+    -no-reboot
+    -kernel "${KERNEL}"
+    -initrd "${CUSTOM_INITRD}"
+    -drive "file=${TARGET_RAW},format=raw,if=virtio"
+    -drive "file=${SQUASHFS},format=raw,if=virtio,readonly=on"
+    -drive "file=${DATA_SQUASHFS},format=raw,if=virtio,readonly=on"
+)
+
+if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
+    "${QEMU_BIN}" \
+        -machine virt,gic-version=3,accel=kvm \
+        -enable-kvm \
+        -cpu host \
+        -append "root=/dev/vdb ro console=ttyAMA0,115200n8 init=/init" \
+        "${QEMU_ARGS[@]}" \
+        2>&1 | tee "${VM_SERIAL_LOG}"
+else
+    "${QEMU_BIN}" \
+        -machine type=q35,accel=kvm \
+        -enable-kvm \
+        -cpu host \
+        -append "root=/dev/vdb ro console=ttyS0,115200n8 init=/init" \
+        "${QEMU_ARGS[@]}" \
+        2>&1 | tee "${VM_SERIAL_LOG}"
+fi
 
 echo "Verifying built raw disk..."
 

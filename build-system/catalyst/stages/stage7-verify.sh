@@ -6,7 +6,8 @@ set -euo pipefail
 source "$(dirname "$0")/common.sh"
 STAGE_NAME="stage7-verify"
 
-TARBALL="${OUTPUT_DIR}/stage4-amd64-systemd-cosmic.tar.xz"
+REGICIDE_ARCH="${REGICIDE_ARCH:-amd64}"
+TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd-cosmic.tar.xz"
 SQUASHFS="${OUTPUT_DIR}/regicide-cosmic.img"
 VERIFY_SCRATCH_DIR="${REGICIDE_VERIFY_DIR:-/var/tmp}"
 mkdir -p "${VERIFY_SCRATCH_DIR}"

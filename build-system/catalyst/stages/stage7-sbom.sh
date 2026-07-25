@@ -6,7 +6,8 @@ set -euo pipefail
 source "$(dirname "$0")/common.sh"
 STAGE_NAME="stage7-sbom"
 
-TARBALL="${OUTPUT_DIR}/stage4-amd64-systemd-cosmic.tar.xz"
+REGICIDE_ARCH="${REGICIDE_ARCH:-amd64}"
+TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd-cosmic.tar.xz"
 ROOTS_DIR="$(mktemp -d -t regicide-sbom-XXXXXX)"
 LEGACY_SBOM_FILE="${OUTPUT_DIR}/sbom.json"
 SPDX_FILE="${OUTPUT_DIR}/sbom.spdx.json"
@@ -70,7 +71,7 @@ echo "Legacy SBOM written to ${LEGACY_SBOM_FILE}"
 
 # SPDX-2.3 JSON SBOM generated from the same Portage package data.
 SPDX_ID_NS="SPDXRef-Package"
-DOCUMENT_NAMESPACE="https://regicideos.dev/spbom/stage4-amd64-systemd-cosmic-$(date -u +%Y%m%d%H%M%S)"
+DOCUMENT_NAMESPACE="https://regicideos.dev/spbom/stage4-${REGICIDE_ARCH}-systemd-cosmic-$(date -u +%Y%m%d%H%M%S)"
 {
     echo "{"
     echo "  \"spdxVersion\": \"SPDX-2.3\","

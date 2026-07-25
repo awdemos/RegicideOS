@@ -15,6 +15,19 @@ DEFAULT_QCOW2="${OUTPUT_DIR}/regicide-cosmic.qcow2"
 QCOW2="${1:-${DEFAULT_QCOW2}}"
 QCOW2="$(realpath -e "${QCOW2}" 2>/dev/null || true)"
 
+# Determine guest architecture from the image filename or explicit env.
+REGICIDE_ARCH="${REGICIDE_ARCH:-}"
+if [[ -z "${REGICIDE_ARCH}" ]]; then
+    if [[ "$(basename "${QCOW2}")" == *arm64* ]]; then
+        REGICIDE_ARCH="arm64"
+    else
+        REGICIDE_ARCH="amd64"
+    fi
+fi
+export REGICIDE_ARCH
+echo "Guest architecture: ${REGICIDE_ARCH}"
+
+
 # Pick a free local SSH forwarding port.  A fixed port (2222) collides when
 # another RegicideOS VM is already running on the host.
 find_free_port() {
@@ -70,28 +83,51 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 
 OVMF_CODE=""
 OVMF_VARS_SRC=""
-for path in \
-    /usr/share/OVMF/OVMF_CODE.fd \
-    /usr/share/edk2/ovmf/OVMF_CODE.fd \
-    /usr/share/qemu/OVMF_CODE.fd \
-    /usr/share/ovmf/x64/OVMF_CODE.fd
-do
-    if [[ -f "${path}" ]]; then
-        OVMF_CODE="${path}"
-        break
-    fi
-done
-for path in \
-    /usr/share/OVMF/OVMF_VARS.fd \
-    /usr/share/edk2/ovmf/OVMF_VARS.fd \
-    /usr/share/qemu/OVMF_VARS.fd \
-    /usr/share/ovmf/x64/OVMF_VARS.fd
-do
-    if [[ -f "${path}" ]]; then
-        OVMF_VARS_SRC="${path}"
-        break
-    fi
-done
+if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
+    for path in \
+        /usr/share/AAVMF/AAVMF_CODE.fd \
+        /usr/share/AAVMF/AAVMF_CODE_4M.fd \
+        /usr/share/edk2/aarch64/QEMU_EFI.fd
+    do
+        if [[ -f "${path}" ]]; then
+            OVMF_CODE="${path}"
+            break
+        fi
+    done
+    for path in \
+        /usr/share/AAVMF/AAVMF_VARS.fd \
+        /usr/share/AAVMF/AAVMF_VARS_4M.fd \
+        /usr/share/edk2/aarch64/vars-template-pflash.raw
+    do
+        if [[ -f "${path}" ]]; then
+            OVMF_VARS_SRC="${path}"
+            break
+        fi
+    done
+else
+    for path in \
+        /usr/share/OVMF/OVMF_CODE.fd \
+        /usr/share/edk2/ovmf/OVMF_CODE.fd \
+        /usr/share/qemu/OVMF_CODE.fd \
+        /usr/share/ovmf/x64/OVMF_CODE.fd
+    do
+        if [[ -f "${path}" ]]; then
+            OVMF_CODE="${path}"
+            break
+        fi
+    done
+    for path in \
+        /usr/share/OVMF/OVMF_VARS.fd \
+        /usr/share/edk2/ovmf/OVMF_VARS.fd \
+        /usr/share/qemu/OVMF_VARS.fd \
+        /usr/share/ovmf/x64/OVMF_VARS.fd
+    do
+        if [[ -f "${path}" ]]; then
+            OVMF_VARS_SRC="${path}"
+            break
+        fi
+    done
+fi
 
 if [[ -z "${OVMF_CODE}" ]]; then
     echo "ERROR: OVMF firmware not found."
@@ -126,8 +162,16 @@ case "${VM_DISPLAY}" in
     sdl) DISPLAY_ARGS=(-display "sdl,gl=on" -vga virtio) ;;
 esac
 
+if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
+    QEMU_BIN="qemu-system-aarch64"
+    MACHINE_ARGS=(-machine virt,gic-version=3)
+else
+    QEMU_BIN="qemu-system-x86_64"
+    MACHINE_ARGS=(-machine type=q35)
+fi
+
 echo "Starting QEMU..."
-qemu-system-x86_64 \
+"${QEMU_BIN}" \
     "${KVM_FLAGS[@]}" \
     -m "${VM_MEMORY}" \
     -smp "${VM_SMP}" \
@@ -135,7 +179,7 @@ qemu-system-x86_64 \
     -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
     -device virtio-net-pci,netdev=net0 \
     "${DISPLAY_ARGS[@]}" \
-    -machine type=q35 \
+    "${MACHINE_ARGS[@]}" \
     -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
     -drive "if=pflash,format=raw,file=${OVMF_VARS}" \
     -serial "unix:${SERIAL_SOCK},server,nowait" \

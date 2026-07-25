@@ -9,6 +9,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Determine guest architecture. The stage4 tarball filename encodes the arch
+# (stage4-amd64-* or stage4-arm64-*), or REGICIDE_ARCH can be set explicitly.
+REGICIDE_ARCH="${REGICIDE_ARCH:-}"
+if [[ -z "${REGICIDE_ARCH}" ]]; then
+    if [[ "$(basename "${TARBALL}")" == *arm64* ]]; then
+        REGICIDE_ARCH="arm64"
+    else
+        REGICIDE_ARCH="amd64"
+    fi
+fi
+
 # /data is mounted by the host initramfs overlay as a SquashFS and contains
 # the stage4 archive, optional passphrase file, and the in-VM builder script.
 DATA_DIR="/data"
@@ -49,7 +60,11 @@ mkdir -p /run/regicide-output
 
 # Invoke the block-device builder.  It expects to run as root (which we are
 # inside the VM) and operates directly on the target disk.
-BUILDER="${SCRIPT_DIR}/build-qemu-image.sh"
+if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
+    BUILDER="${SCRIPT_DIR}/build-qemu-image-arm64.sh"
+else
+    BUILDER="${SCRIPT_DIR}/build-qemu-image.sh"
+fi
 if [[ -n "${ENCRYPT_FLAG}" ]]; then
     exec "${BUILDER}" \
         --direct-device "${TARGET}" \

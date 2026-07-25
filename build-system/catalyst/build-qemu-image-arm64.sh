@@ -444,9 +444,6 @@ ${ROOTS_FSTAB_SPEC}   /       btrfs   defaults,noatime           0 0
 # Writable overlay partition
 LABEL=OVERLAY /overlay btrfs   defaults,noatime           0 0
 
-# User data
-LABEL=HOME    /home   btrfs   subvol=home,defaults,noatime           0 0
-
 # Mutable system directories.
 # /usr is intentionally omitted: dracut treats a separate /usr mount
 # specially and breaks merged-/usr switch-root.
@@ -841,12 +838,12 @@ cp "${MOUNT_DIR}/boot/efi/grub/grub.cfg" "${MOUNT_DIR}/boot/efi/EFI/fedora/grub.
 
 echo "Verifying EFI System Partition contents..."
 EFI_BOOT_FILE="${MOUNT_DIR}/boot/efi/EFI/BOOT/BOOTAA64.EFI"
-GRUBX64_FILE="${MOUNT_DIR}/boot/efi/EFI/grub/grubx64.efi"
+GRUBAA64_FILE="${MOUNT_DIR}/boot/efi/EFI/grub/grubaa64.efi"
 GRUB_CFG="${MOUNT_DIR}/boot/efi/grub/grub.cfg"
-if [[ ! -f "${EFI_BOOT_FILE}" && ! -f "${GRUBX64_FILE}" ]]; then
+if [[ ! -f "${EFI_BOOT_FILE}" && ! -f "${GRUBAA64_FILE}" ]]; then
     echo "Error: no GRUB EFI binary found in ESP."
     echo "  Looked for: ${EFI_BOOT_FILE}"
-    echo "              ${GRUBX64_FILE}"
+    echo "              ${GRUBAA64_FILE}"
     find "${MOUNT_DIR}/boot/efi" -type f 2>/dev/null | head -20 || true
     exit 1
 fi
