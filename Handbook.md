@@ -240,6 +240,69 @@ EOF
 sudo ./target/release/installer -c regicide-config.toml
 ```
 
+#### 3.2.4 Skipping, Replacing, or Running Without COSMIC Desktop
+
+COSMIC Desktop is the default graphical environment, installed by `stage4-cosmic-a.sh` and `stage4-cosmic-b.sh` and enabled as the login greeter in `stage6-finalize.sh`. You can opt out of COSMIC entirely and build a headless base image, or substitute another desktop environment.
+
+**Skip COSMIC (headless / server image):**
+
+Set `REGICIDE_SKIP_COSMIC=1` when invoking the Dagger pipeline:
+
+```bash
+REGICIDE_SKIP_COSMIC=1 DAGGER_PROGRESS=plain \
+    dagger run python build-system/dagger_pipeline.py --plain
+```
+
+When this variable is set, the build still runs all six stages but stages 4a, 4b, and the COSMIC-specific parts of stage6 are skipped:
+
+- No `cosmic-base/*` packages are emerged.
+- `cosmic-greeter` is not enabled.
+- The COSMIC panel/dock defaults and `cosmic-utils/minimon` are not installed.
+- The default `regicide` user does not receive COSMIC app-list/favorites configuration.
+
+The output filenames still contain `systemd-cosmic` for historical consistency, but the resulting stage4 tarball and SquashFS are a plain systemd base image. `systemd-logind`, `NetworkManager`, `sshd.socket`, and `getty` remain enabled, so the system boots to a serial/login console and is reachable over SSH.
+
+**Replace COSMIC with another desktop:**
+
+1. Build with COSMIC skipped:
+
+   ```bash
+   REGICIDE_SKIP_COSMIC=1 DAGGER_PROGRESS=plain \
+       dagger run python build-system/dagger_pipeline.py --plain
+   ```
+
+2. Install the alternate desktop in a custom stage between stage3 and stage5, or inside the built rootfs after extraction. For example, to add KDE Plasma:
+
+   ```bash
+   # Inside a chroot of the built stage4 rootfs, or in a custom stage script
+   emerge -qv kde-plasma/plasma-meta x11-misc/sddm
+   systemctl enable sddm
+   ```
+
+   For GNOME:
+
+   ```bash
+   emerge -qv gnome-base/gnome
+   systemctl enable gdm
+   ```
+
+   For XFCE:
+
+   ```bash
+   emerge -qv xfce-base/xfce4-meta x11-misc/lightdm
+   systemctl enable lightdm
+   ```
+
+3. If the alternate desktop needs its own `package.accept_keywords`, `package.use`, or `make.conf` USE changes, add them to the stage3/stage5 scripts or drop them into `/etc/portage` before the `emerge`.
+
+4. Re-run `dracut --force --no-hostonly --kver $(ls /lib/modules | head -n1)` if the new desktop changes initramfs requirements, then rebuild the SquashFS.
+
+**Run headless without a display manager:**
+
+Skip COSMIC and do not enable any display manager. `systemd` automatically starts a virtual console getty, and `sshd.socket` is already enabled in stage6, so the system is manageable over serial or SSH. If you boot a VM with `-nographic`, the serial console will present a `login:` prompt.
+
+> **Note:** Some first-boot Flatpaks and Rio terminal overrides are still installed even when COSMIC is skipped. To avoid them, set `REGICIDE_DEFER_FLATPAKS=0` and adjust stage6 or remove the relevant Flatpak install lines before building.
+
 ### 3.3 Installation Process
 
 The RegicideOS installer performs these steps:
