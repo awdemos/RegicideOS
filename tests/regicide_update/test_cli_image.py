@@ -61,7 +61,7 @@ class CliImageTests(unittest.TestCase):
         image_path = image.CACHE_DIR / "release.tar.xz"
         image_path.write_text("image data")
         expected = __import__("hashlib").sha256(image_path.read_bytes()).hexdigest()
-        checksum_file = image.CACHE_DIR / "checksums.sha256"
+        checksum_file = image.CACHE_DIR / "checksums-release.tar.xz.sha256"
         checksum_file.write_text(f"{expected}  {image_path.name}\n")
         mock_retrieve.return_value = (str(checksum_file), None)
         with mock.patch.object(sys, "argv", ["regicide-image", "verify", str(image_path), "--checksum-url", "https://example.com/checksums.sha256"]):

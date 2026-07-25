@@ -27,7 +27,7 @@ class ImageTests(unittest.TestCase):
         dest = image.fetch("https://example.com/regicide/release.tar.xz")
         self.assertEqual(dest, image.CACHE_DIR / "release.tar.xz")
         mock_retrieve.assert_called_once_with(
-            "https://example.com/regicide/release.tar.xz", dest
+            "https://example.com/regicide/release.tar.xz", dest, timeout=300
         )
 
     def test_fetch_rejects_url_without_filename(self):
@@ -39,19 +39,19 @@ class ImageTests(unittest.TestCase):
         image_file = image.CACHE_DIR / "release.tar.xz"
         image_file.write_text("image data")
         expected = hashlib.sha256(image_file.read_bytes()).hexdigest()
-        checksum_file = image.CACHE_DIR / "checksums.sha256"
+        checksum_file = image.CACHE_DIR / "checksums-release.tar.xz.sha256"
         checksum_file.write_text(f"{expected}  {image_file.name}\n")
         result = image.verify_checksum(image_file, "https://example.com/checksums.sha256")
         self.assertTrue(result)
         mock_retrieve.assert_called_once_with(
-            "https://example.com/checksums.sha256", checksum_file
+            "https://example.com/checksums.sha256", checksum_file, timeout=60
         )
 
     @mock.patch("urllib.request.urlretrieve")
     def test_verify_checksum_mismatch_dies(self, mock_retrieve):
         image_file = image.CACHE_DIR / "release.tar.xz"
         image_file.write_text("image data")
-        checksum_file = image.CACHE_DIR / "checksums.sha256"
+        checksum_file = image.CACHE_DIR / "checksums-release.tar.xz.sha256"
         checksum_file.write_text(f"{'0' * 64}  {image_file.name}\n")
         with self.assertRaises(SystemExit):
             image.verify_checksum(image_file, "https://example.com/checksums.sha256")

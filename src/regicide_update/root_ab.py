@@ -39,7 +39,8 @@ def read_active_slot() -> str:
     """Return the currently active root slot, defaulting to 'a'."""
     if not CURRENT_FILE.is_file():
         return SLOT_A
-    text = CURRENT_FILE.read_text().strip().splitlines()[0].strip().lower()
+    lines = CURRENT_FILE.read_text().strip().splitlines()
+    text = lines[0].strip().lower() if lines else ""
     return text if text in (SLOT_A, SLOT_B) else SLOT_A
 
 

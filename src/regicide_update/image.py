@@ -22,7 +22,7 @@ def fetch(url: str) -> Path:
         rc.die(f"Cannot determine filename from URL: {url}")
     dest = CACHE_DIR / name
     rc.info(f"Downloading {url} ...")
-    urllib.request.urlretrieve(url, dest)
+    urllib.request.urlretrieve(url, dest, timeout=300)
     return dest
 
 
@@ -30,9 +30,9 @@ def verify_checksum(image: Path, checksum_url: str | None) -> bool:
     if checksum_url is None:
         rc.warn("No checksum URL provided; skipping verification.")
         return True
-    sum_file = CACHE_DIR / "checksums.sha256"
+    sum_file = CACHE_DIR / f"checksums-{image.name}.sha256"
     rc.info(f"Downloading checksums from {checksum_url} ...")
-    urllib.request.urlretrieve(checksum_url, sum_file)
+    urllib.request.urlretrieve(checksum_url, sum_file, timeout=60)
     expected: str | None = None
     with open(sum_file) as f:
         for line in f:
@@ -41,8 +41,11 @@ def verify_checksum(image: Path, checksum_url: str | None) -> bool:
                 expected = parts[0]
     if not expected:
         rc.die(f"No checksum found for {image.name}")
-    actual = hashlib.sha256(image.read_bytes()).hexdigest()
-    if actual != expected:
+    hasher = hashlib.sha256()
+    with open(image, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    if hasher.hexdigest() != expected:
         rc.die(f"Checksum mismatch for {image.name}")
     rc.info("Checksum verified.")
     return True

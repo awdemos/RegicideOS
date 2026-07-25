@@ -107,6 +107,7 @@ def write_entry(slot: str, kernel: str, initrd: str) -> None:
     ensure_dirs()
     entry = _entry_path(slot)
     backup = _backup(entry)
+    tmp = Path(tempfile.mktemp(dir=_entries_dir(), prefix=f"regicide-{slot}-"))
     try:
         title = _entry_title(slot)
         rootflags = _ROOT_SLOT_OPTION.format(slot=slot)
@@ -116,7 +117,6 @@ def write_entry(slot: str, kernel: str, initrd: str) -> None:
             f"initrd {initrd}\n"
             f"options root=LABEL=ROOTS ro {rootflags}\n"
         )
-        tmp = Path(tempfile.mktemp(dir=_entries_dir(), prefix=f"regicide-{slot}-"))
         tmp.write_text(contents)
         _atomic_rename(tmp, entry)
         rc.info(f"Wrote boot entry: {entry}")
@@ -126,6 +126,8 @@ def write_entry(slot: str, kernel: str, initrd: str) -> None:
     finally:
         if backup.is_file():
             backup.unlink()
+        if tmp.is_file():
+            tmp.unlink()
 
 
 def set_default(slot: str) -> None:
@@ -137,8 +139,8 @@ def set_default(slot: str) -> None:
         rc.die(f"Boot entry for slot {slot} does not exist")
     loader_conf = _loader_conf()
     backup = _backup(loader_conf)
+    tmp = Path(tempfile.mktemp(dir=_loader_dir(), prefix="loader.conf-"))
     try:
-        tmp = Path(tempfile.mktemp(dir=_loader_dir(), prefix="loader.conf-"))
         tmp.write_text(f"default regicide-{slot}\ntimeout 5\n")
         _atomic_rename(tmp, loader_conf)
         rc.info(f"Set default boot entry to regicide-{slot}")
@@ -148,6 +150,8 @@ def set_default(slot: str) -> None:
     finally:
         if backup.is_file():
             backup.unlink()
+        if tmp.is_file():
+            tmp.unlink()
 
 
 def discover_kernel_initrd(slot: str | None = None) -> tuple[str, str]:
