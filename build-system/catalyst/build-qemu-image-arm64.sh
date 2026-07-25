@@ -92,6 +92,27 @@ if [[ ! -f "${TARBALL}" ]]; then
     exit 1
 fi
 
+validate_block_device() {
+    local dev="${1:-}"
+    if [[ -z "${dev}" ]]; then
+        return 0
+    fi
+    if [[ "${dev}" != /dev/* ]]; then
+        echo "Error: direct device must be an absolute /dev path: ${dev}" >&2
+        exit 1
+    fi
+    if [[ "${dev}" =~ \.\.|//|\.\$ ]]; then
+        echo "Error: invalid direct device path: ${dev}" >&2
+        exit 1
+    fi
+    if [[ ! -b "${dev}" ]]; then
+        echo "Error: direct device is not a block device: ${dev}" >&2
+        exit 1
+    fi
+}
+
+validate_block_device "${DIRECT_DEVICE}"
+
 if [[ "${ENCRYPT}" == true ]]; then
     if [[ -z "${PASSPHRASE_FILE}" ]]; then
         echo "Error: --passphrase-file is required when --encrypt is used."
@@ -1082,3 +1103,21 @@ if [[ -n "${RUNNER_PATH:-}" ]]; then
     echo "  ${RUNNER_PATH} -display vnc=:1"
     echo ""
 fi
+validate_block_device() {
+    local dev="${1:-}"
+    if [[ -z "${dev}" ]]; then
+        return 0
+    fi
+    if [[ "${dev}" != /dev/* ]]; then
+        echo "Error: direct device must be an absolute /dev path: ${dev}" >&2
+        exit 1
+    fi
+    if [[ "${dev}" =~ \.\.|//|\.\$ ]]; then
+        echo "Error: invalid direct device path: ${dev}" >&2
+        exit 1
+    fi
+    if [[ ! -b "${dev}" ]]; then
+        echo "Error: direct device is not a block device: ${dev}" >&2
+        exit 1
+    fi
+}
