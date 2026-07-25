@@ -30,6 +30,7 @@ import argparse
 import asyncio
 import getpass
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -503,6 +504,23 @@ def _get_luks_passphrase() -> str:
         return first
 
 
+def _secure_wipe(path: Path) -> None:
+    """Best-effort overwrite of a file before unlinking it."""
+    try:
+        with open(path, "rb+") as f:
+            size = f.seek(0, os.SEEK_END)
+            f.seek(0)
+            f.write(b"\x00" * size)
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 async def build_qcow2_locally(
     tarball_path: Path,
     output_path: Path,
@@ -532,32 +550,24 @@ async def build_qcow2_locally(
     passphrase_file: Path | None = None
     if encrypt:
         passphrase = _get_luks_passphrase()
-        fd, passphrase_tmp = tempfile.mkstemp(prefix="regicide-luks-")
+        # Keep the passphrase in ram-backed storage and never leak it to child
+        # processes via environment variables. Write it without a trailing newline
+        # because cryptsetup --key-file consumes the file verbatim.
+        fd, passphrase_tmp = tempfile.mkstemp(prefix="regicide-luks-", dir="/dev/shm")
         passphrase_file = Path(passphrase_tmp)
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(passphrase.encode("utf-8"))
         cmd[1:1] = ["--encrypt", "--passphrase-file", str(passphrase_file)]
         print(f"Building encrypted QCOW2 image: {output_path}")
+        # Do not let the passphrase escape into the builder's environment.
+        env.pop("REGICIDE_LUKS_PASSPHRASE", None)
 
     try:
         subprocess.run(cmd, check=True, env=env)
     finally:
         if passphrase_file is not None:
-            try:
-                # Best-effort overwrite before unlink to reduce residual risk.
-                with open(passphrase_file, "rb+") as f:
-                    size = f.seek(0, os.SEEK_END)
-                    f.seek(0)
-                    f.write(b"\x00" * size)
-                    f.flush()
-                    os.fsync(f.fileno())
-            except OSError:
-                pass
-            try:
-                passphrase_file.unlink()
-            except FileNotFoundError:
-                pass
+            _secure_wipe(passphrase_file)
 
     print(f"QCOW2 image complete: {output_path}")
 
@@ -698,27 +708,24 @@ async def main() -> None:
                 await squashfs_file.export(str(squashfs_path))
             else:
                 print("Creating SquashFS image locally...")
-                # Creating a faithful SquashFS that preserves setuid binaries and
-                # mixed ownership requires root privileges. Use sudo when not root.
+                # Use /var/tmp for the extracted rootfs so large artifacts do not
+                # exhaust the tmpfs-backed /tmp filesystem. Quote all paths to
+                # avoid shell injection from artifact names.
+                squash_root = "/var/tmp/regicide-squashfs-root"
                 subprocess.run(
                     [
                         "sh", "-c",
-                        # Use /var/tmp for the extracted rootfs so large artifacts do
-                        # not exhaust the tmpfs-backed /tmp filesystem. Run tar and
-                        # mksquashfs as root when available so setuid/ownership are
-                        # preserved, and make cleanup tolerant of root-owned files.
                         "set -euo pipefail; "
-                        "SQUASH_ROOT=/var/tmp/regicide-squashfs-root; "
-                        f"rm -f '{squashfs_path}'; "
-                        "rm -rf \"$SQUASH_ROOT\"; "
-                        "mkdir -p \"$SQUASH_ROOT\"; "
-                        "df -h \"$SQUASH_ROOT\"; "
-                        f"tar -C \"$SQUASH_ROOT\" -xpJf '{tarball_path}'; "
-                        f"mksquashfs \"$SQUASH_ROOT\" '{squashfs_path}' "
+                        f"rm -f {shlex.quote(str(squashfs_path))}; "
+                        f"rm -rf {shlex.quote(squash_root)}; "
+                        f"mkdir -p {shlex.quote(squash_root)}; "
+                        f"df -h {shlex.quote(squash_root)}; "
+                        f"tar -C {shlex.quote(squash_root)} -xpJf {shlex.quote(str(tarball_path))}; "
+                        f"mksquashfs {shlex.quote(squash_root)} {shlex.quote(str(squashfs_path))} "
                         "-comp zstd -Xcompression-level 19 -noappend; "
-                        f"chown {os.getuid()}:{os.getgid()} '{squashfs_path}'; "
-                        f"unsquashfs -s '{squashfs_path}' >/dev/null; "
-                        "rm -rf \"$SQUASH_ROOT\" || true",
+                        f"chown {shlex.quote(f'{os.getuid()}:{os.getgid()}')} {shlex.quote(str(squashfs_path))}; "
+                        f"unsquashfs -s {shlex.quote(str(squashfs_path))} >/dev/null; "
+                        f"rm -rf {shlex.quote(squash_root)} || true",
                     ],
                     check=True,
                 )
