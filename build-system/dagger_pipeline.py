@@ -97,6 +97,9 @@ async def build_cosmic(
         # Point the chroot PKGDIR at a container-level dir shared by all stage
         # execs; the binpkgs seed/save execs sync it with the cache volume.
         .with_env_variable("REGICIDE_BINPKGS_DIR", os.environ.get("REGICIDE_BINPKGS_DIR", "/var/cache/binpkgs"))
+        # Skip COSMIC desktop packages and greeter when building a headless or
+        # alternative-desktop image. Stage scripts read this in stage4/6.
+        .with_env_variable("REGICIDE_SKIP_COSMIC", os.environ.get("REGICIDE_SKIP_COSMIC", "0"))
     )
 
     # Prepare the build tooling.
@@ -505,6 +508,7 @@ async def build_qcow2_locally(
     output_path: Path,
     disk_size: str,
     encrypt: bool,
+    arch: str = "amd64",
 ) -> None:
     """Build a bootable QCOW2 image from a stage4 tarball on the host.
 
@@ -513,6 +517,8 @@ async def build_qcow2_locally(
     because the build environment does not expose usable loop devices.
     """
     script = Path(__file__).parent / "catalyst" / "build-vm-image.sh"
+    env = os.environ.copy()
+    env["REGICIDE_ARCH"] = arch
     if not script.exists():
         raise FileNotFoundError(f"VM image builder script not found: {script}")
 
@@ -535,7 +541,7 @@ async def build_qcow2_locally(
         print(f"Building encrypted QCOW2 image: {output_path}")
 
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=env)
     finally:
         if passphrase_file is not None:
             try:
@@ -652,9 +658,12 @@ async def main() -> None:
             tarball_path = out_dir / f"stage4-{args.arch}-systemd-cosmic.tar.xz"
 
         print("Loading SBOM for signing...")
+        sbom_env = os.environ.copy()
+        sbom_env["REGICIDE_ARCH"] = args.arch
         subprocess.run(
             ["./build-system/catalyst/stages/stage7-sbom.sh"],
             check=True,
+            env=sbom_env,
         )
         sbom_path = out_dir / "sbom.spdx.json"
 
@@ -713,9 +722,12 @@ async def main() -> None:
             print(f"Output: build-system/catalyst/output/regicide-cosmic-{args.arch}.iso")
 
         print("Running stage7 verification on host artifacts...")
+        verify_env = os.environ.copy()
+        verify_env["REGICIDE_ARCH"] = args.arch
         subprocess.run(
             ["./build-system/catalyst/stages/stage7-verify.sh"],
             check=True,
+            env=verify_env,
         )
 
         if not args.skip_sign:
@@ -763,6 +775,7 @@ async def main() -> None:
                 output_path=Path(args.qcow2_output).resolve(),
                 disk_size=args.qcow2_size,
                 encrypt=True,
+                arch=args.arch,
             )
 
         if args.run_vm_test:
@@ -773,6 +786,7 @@ async def main() -> None:
                 output_path=qcow2_path,
                 disk_size=args.qcow2_size,
                 encrypt=False,
+                arch=args.arch,
             )
             print("Running stage8 post-install VM test...")
             subprocess.run(
