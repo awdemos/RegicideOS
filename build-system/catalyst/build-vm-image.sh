@@ -157,7 +157,25 @@ fi
 # Use /var/tmp for the work directory so large intermediate files (tarball
 # staging, initramfs unpacking, raw disks) do not exhaust a tmpfs-backed /tmp.
 WORK_DIR="$(TMPDIR=/var/tmp mktemp -d)"
-trap 'rm -rf "${WORK_DIR}"' EXIT
+cleanup() {
+    rm -rf "${WORK_DIR}" 2>/dev/null || true
+    if [[ -n "${FW_CFG_PASSPHRASE_FILE:-}" && -f "${FW_CFG_PASSPHRASE_FILE}" ]]; then
+        python3 - "${FW_CFG_PASSPHRASE_FILE}" <<'PYEOF'
+import os, sys
+try:
+    with open(sys.argv[1], "rb+") as f:
+        size = f.seek(0, os.SEEK_END)
+        f.seek(0)
+        f.write(b"\x00" * size)
+        f.flush()
+        os.fsync(f.fileno())
+except OSError:
+    pass
+PYEOF
+        rm -f "${FW_CFG_PASSPHRASE_FILE}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 TARGET_RAW="${WORK_DIR}/target.raw"
 KERNEL="${WORK_DIR}/kernel"
@@ -198,8 +216,14 @@ cp "${SCRIPT_DIR}/build-qemu-image.sh" "${DATA_STAGING}/build-qemu-image.sh"
 chmod 0755 "${DATA_STAGING}/build-qemu-image.sh"
 printf '%s\n' "${DISK_SIZE}" > "${DATA_STAGING}/disk-size"
 
+# When encrypting, canonicalize the passphrase into a ram-backed temp file.
+# It is passed to the builder VM via QEMU -fw_cfg so it never has to be packed
+# into the data SquashFS or written to disk unencrypted.
+FW_CFG_PASSPHRASE_FILE=""
 if [[ "${ENCRYPT}" == true ]]; then
-    python3 - "${DATA_STAGING}/luks-passphrase" "${PASSPHRASE_FILE}" <<'PYEOF'
+    FW_CFG_PASSPHRASE_FILE="$(mktemp -p /dev/shm regicide-luks-XXXXXX)"
+    chmod 0600 "${FW_CFG_PASSPHRASE_FILE}"
+    python3 - "${FW_CFG_PASSPHRASE_FILE}" "${PASSPHRASE_FILE}" <<'PYEOF'
 import sys
 dest, src = sys.argv[1], sys.argv[2]
 with open(src, "rb") as f:
@@ -211,7 +235,6 @@ elif data.endswith(b"\n"):
 with open(dest, "wb") as f:
     f.write(data)
 PYEOF
-    chmod 0600 "${DATA_STAGING}/luks-passphrase"
 fi
 
 echo "Packing data disk squashfs..."
@@ -291,6 +314,7 @@ modprobe fat || insmod /lib/modules/*/kernel/fs/fat/fat.ko
 modprobe vfat || insmod /lib/modules/*/kernel/fs/fat/vfat.ko
 modprobe nls_cp437 || insmod /lib/modules/*/kernel/fs/nls/nls_cp437.ko
 modprobe nls_ascii || insmod /lib/modules/*/kernel/fs/nls/nls_ascii.ko
+modprobe qemu_fw_cfg || insmod /lib/modules/*/kernel/drivers/firmware/qemu-fw-cfg/qemu_fw_cfg.ko 2>/dev/null || true
 
 mkdir -p /sysroot /data
 
@@ -314,6 +338,15 @@ fi
 
 mount -t squashfs /dev/vdc /data || { echo "Failed to mount /dev/vdc"; poweroff -f; }
 
+# If the host provided a LUKS passphrase through QEMU fw_cfg, copy it to a
+# tmpfs path and make it visible inside the chroot.  This avoids putting the
+# passphrase on the data SquashFS disk.
+mkdir -p /run
+if [ -r /sys/firmware/qemu_fw_cfg/by_name/opt/org.regicide/luks/raw ]; then
+    cp /sys/firmware/qemu_fw_cfg/by_name/opt/org.regicide/luks/raw /run/regicide-luks-passphrase
+    chmod 0600 /run/regicide-luks-passphrase
+fi
+
 # The stage4 rootfs on /dev/vdb is a read-only SquashFS, but the builder
 # needs a writable rootfs (e.g. for /var/tmp, /run, and bind mount points).
 # Stack it under a tmpfs-backed overlay so /sysroot becomes writable without
@@ -329,13 +362,20 @@ mount -t overlay overlay -o lowerdir=/lower,upperdir=/overlay-upper/upper,workdi
 # from the data disk squashfs) lives outside the rootfs.  Bind mount the
 # essential virtual filesystems and /data into the rootfs so chroot can
 # see the tarball, passphrase, and builder script.
-mkdir -p /sysroot/dev /sysroot/proc /sysroot/sys /sysroot/data
+mkdir -p /sysroot/dev /sysroot/proc /sysroot/sys /sysroot/data /sysroot/run
 mount --bind /dev /sysroot/dev
 mount --bind /proc /sysroot/proc
 mount --bind /sys /sysroot/sys
 mount --bind /data /sysroot/data
+mount --bind /run /sysroot/run
 
 /usr/bin/chroot /sysroot /bin/bash /data/vm-builder.sh || true
+
+# Best-effort wipe of the ram-backed passphrase before shutdown.
+if [ -f /run/regicide-luks-passphrase ]; then
+    dd if=/dev/urandom of=/run/regicide-luks-passphrase bs=1 count=$(stat -c '%s' /run/regicide-luks-passphrase) status=none 2>/dev/null || true
+    rm -f /run/regicide-luks-passphrase
+fi
 poweroff -f
 INITEOF
 chmod +x "${OVERLAY_DIR}/init"
@@ -399,6 +439,7 @@ INJECTED_MODULES=(
     "kernel/fs/fat/vfat.ko"
     "kernel/fs/nls/nls_cp437.ko"
     "kernel/fs/nls/nls_ascii.ko"
+    "kernel/drivers/firmware/qemu-fw-cfg/qemu_fw_cfg.ko"
 )
 for rel_path in "${INJECTED_MODULES[@]}"; do
     module_name="$(basename "${rel_path}" .ko)"
@@ -450,6 +491,9 @@ QEMU_ARGS=(
     -drive "file=${SQUASHFS},format=raw,if=virtio,readonly=on"
     -drive "file=${DATA_SQUASHFS},format=raw,if=virtio,readonly=on"
 )
+if [[ "${ENCRYPT}" == true && -n "${FW_CFG_PASSPHRASE_FILE}" ]]; then
+    QEMU_ARGS+=(-fw_cfg "name=opt/org.regicide/luks,file=${FW_CFG_PASSPHRASE_FILE}")
+fi
 
 if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
     "${QEMU_BIN}" \
