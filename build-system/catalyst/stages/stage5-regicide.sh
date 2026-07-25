@@ -15,7 +15,7 @@ REGICIDE_PACKAGES=(
 for pkg in "${REGICIDE_PACKAGES[@]}"; do
     echo "Installing ${pkg}..."
     log_status "package" "${pkg}"
-    run_in_chroot emerge -q "$pkg" || echo "WARNING: ${pkg} may have failed"
+    run_in_chroot emerge -q "$pkg"
 done
 
 clean_rootfs_transient
