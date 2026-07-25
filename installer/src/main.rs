@@ -24,6 +24,17 @@ use logging::{die, info, print_banner, warn, Colours};
 
 
 // Execute commands with full error output
+fn validate_block_device_path(path: &str) -> Result<()> {
+    if path.is_empty()
+        || !path.starts_with("/dev/")
+        || path.contains("..")
+        || path.chars().any(|c| [';', '&', '|', '<', '>', '(', ')', '`', '$', '\'', '"', ' ', '\t', '\n'].contains(&c))
+    {
+        bail!("Invalid or unsafe block device path: {}", logging::sanitize_error_message(path));
+    }
+    Ok(())
+}
+
 fn execute_with_output(command: &str) -> Result<String> {
     let output = ProcessCommand::new("sh")
         .args(["-c", command])
@@ -1167,7 +1178,8 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("DEBUG: Entering LUKS case for partition {current_name}");
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
 
-                // Check if partition is in use before LUKS format
+                validate_block_device_path(current_name)?;
+
                 if is_partition_in_use(current_name) {
                     warn(&format!(
                         "Partition {current_name} is in use, skipping LUKS format"
@@ -1175,55 +1187,41 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     continue;
                 }
 
-                // Unmount aggressively before LUKS format
                 let _ = execute(&format!("umount -f {current_name}"));
                 let _ = execute(&format!("umount -l {current_name}"));
-
-                // Close any existing LUKS containers
                 let _ = execute(&format!("cryptsetup close {current_name}"));
                 let _ = execute("cryptsetup close regicideos");
-
-                // Remove only the installer's own device mapper reference
                 let _ = execute("dmsetup remove regicideos");
 
-                // Use enhanced clearing for LUKS partition preparation
                 info(&format!(
                     "Clearing partition metadata and data on {current_name}"
                 ));
 
-                // Step 1: Clear filesystem signatures
                 let _ = execute(&format!("wipefs -af {current_name}"));
-
-                // Step 2: Zero out the first 1MB to clear partition table and filesystem metadata
                 let _ = execute(&format!(
                     "dd if=/dev/zero of={current_name} bs=1M count=1"
                 ));
 
-                // Step 3: For NVMe drives, also try nvme sanitize if available (safer than format)
                 if current_name.contains("nvme") && execute("which nvme").is_ok() {
-                    // Extract the base NVMe device for sanitize operation
                     let base_device = if let Some(pos) = current_name.rfind('p') {
                         &current_name[..pos]
                     } else {
                         current_name
                     };
-
-                    // Try nvme sanitize - this is safer than format and works on individual namespaces
+                    validate_block_device_path(base_device)?;
                     info(&format!("Attempting NVMe sanitize on {base_device}"));
                     let _ = execute(&format!(
                         "nvme sanitize --no-flush --force {base_device}"
                     ));
                 }
 
-                // Wait longer for all operations to complete
                 std::thread::sleep(std::time::Duration::from_millis(5000));
 
-                // Special handling for LUKS format (interactive password required)
                 let result = ProcessCommand::new("cryptsetup")
-                    .args(["luksFormat", current_name])
+                    .args(["luksFormat", "--type", "luks2", current_name])
                     .stdin(std::process::Stdio::inherit())
-                    .stdout(std::process::Stdio::inherit())
-                    .stderr(std::process::Stdio::inherit())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
                     .status();
 
                 match result {
@@ -1242,14 +1240,12 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     }
                 }
 
-                // Set LUKS label after formatting if specified
                 if let Some(ref label) = partition.label {
                     execute(&format!(
                         "cryptsetup -q config {current_name} --label {label}"
                     ))?;
                 }
 
-                // Always use "regicideos" as the mapper name for RegicideOS
                 let open_result = ProcessCommand::new("cryptsetup")
                     .args(["luksOpen", current_name, "regicideos"])
                     .status();
@@ -1258,7 +1254,6 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     bail!("Failed to open LUKS partition");
                 }
 
-                // Verify the device was created with timeout
                 let mut attempts = 0;
                 while !Path::new("/dev/mapper/regicideos").exists() && attempts < 10 {
                     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1272,14 +1267,11 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 let mapper_device = "/dev/mapper/regicideos".to_string();
                 println!("DEBUG: LUKS mapper created: {mapper_device}");
 
-                // Recursively format the inside partition (should be BTRFS)
                 if let Some(ref inside_partition) = partition.inside {
                     println!("DEBUG: Recursively formatting inside partition as BTRFS...");
                     format_partition(&mapper_device, inside_partition)?;
                 }
 
-                // CRITICAL: Return early to prevent re-formatting the same partition
-                // The LUKS container and its BTRFS filesystem are now set up
                 return Ok(());
             }
             _ => {
@@ -1319,7 +1311,6 @@ fn chroot(command: &str) -> Result<()> {
 }
 
 fn chroot_with_output(command: &str) -> Result<String> {
-    // Execute chroot with proper PATH and return output
     let full_command = format!("chroot /mnt/root /bin/bash -c \"export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && {command}\"");
 
     let output = ProcessCommand::new("bash")
@@ -1330,12 +1321,11 @@ fn chroot_with_output(command: &str) -> Result<String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // Use anyhow::anyhow directly to avoid sanitization for debugging
         return Err(anyhow::anyhow!(
             "Chroot command failed: {}\nSTDOUT: {}\nSTDERR: {}",
-            command,
-            stdout,
-            stderr
+            logging::sanitize_error_message(command),
+            logging::sanitize_error_message(&stdout),
+            logging::sanitize_error_message(&stderr)
         ));
     }
 
