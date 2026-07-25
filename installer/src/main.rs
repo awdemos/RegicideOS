@@ -35,6 +35,90 @@ fn validate_block_device_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_label(label: &str) -> Result<()> {
+    if label.is_empty()
+        || label.len() > 32
+        || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        bail!("Invalid filesystem label: {}", logging::sanitize_error_message(label));
+    }
+    Ok(())
+}
+
+fn read_luks_passphrase() -> Result<String> {
+    let first = rpassword::prompt_password("Enter LUKS passphrase: ")
+        .with_context(|| "Failed to read LUKS passphrase")?;
+    if first.is_empty() {
+        bail!("LUKS passphrase cannot be empty");
+    }
+    let second = rpassword::prompt_password("Confirm LUKS passphrase: ")
+        .with_context(|| "Failed to confirm LUKS passphrase")?;
+    if first != second {
+        bail!("LUKS passphrases do not match");
+    }
+    Ok(first)
+}
+
+fn write_passphrase_key_file(passphrase: &str) -> Result<std::path::PathBuf> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let temp_dir = std::env::temp_dir();
+    let use_dir = if temp_dir.starts_with("/dev/shm") {
+        temp_dir
+    } else {
+        std::path::PathBuf::from("/dev/shm")
+    };
+    let key_file = use_dir.join(format!("regicide-luks-key-{}-XXXXXX", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&key_file)
+        .with_context(|| "Failed to create LUKS passphrase key file")?;
+    file.write_all(passphrase.as_bytes())
+        .with_context(|| "Failed to write LUKS passphrase key file")?;
+    file.flush().with_context(|| "Failed to flush LUKS passphrase key file")?;
+    Ok(key_file)
+}
+
+fn secure_wipe_file(path: &std::path::Path) -> Result<()> {
+    use std::io::Seek;
+    let metadata = std::fs::metadata(path).ok();
+    let size = metadata.as_ref().map(|m| m.len() as usize).unwrap_or(0);
+    if size > 0 {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .ok();
+        if let Some(mut f) = file {
+            let _ = f.rewind();
+            let _ = f.write_all(&vec![0u8; size]);
+            let _ = f.flush();
+        }
+    }
+    let _ = std::fs::remove_file(path);
+    Ok(())
+}
+
+fn get_luks_uuid(device: &str) -> Result<String> {
+    validate_block_device_path(device)?;
+    let output = execute_safe_command("blkid", &["-s", "UUID", "-o", "value", device])?;
+    let uuid = output.trim().to_string();
+    if uuid.is_empty() {
+        bail!("Could not determine LUKS UUID for {}", logging::sanitize_error_message(device));
+    }
+    Ok(uuid)
+}
+
+fn find_crypto_luks_device() -> Result<String> {
+    let output = execute_safe_command("blkid", &["-t", "TYPE=crypto_LUKS", "-o", "device"])?;
+    let device = output.lines().next().unwrap_or("").trim().to_string();
+    if device.is_empty() {
+        bail!("No crypto_LUKS device found");
+    }
+    validate_block_device_path(&device)?;
+    Ok(device)
+}
+
 fn execute_with_output(command: &str) -> Result<String> {
     let output = ProcessCommand::new("sh")
         .args(["-c", command])
@@ -957,6 +1041,12 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     for (i, partition) in layout.iter().enumerate() {
         let current_name = &partition_names[i];
 
+        validate_block_device_path(current_name)?;
+
+        if let Some(ref label) = partition.label {
+            validate_label(label)?;
+        }
+
         // Double-check partition exists before formatting
         if !Path::new(current_name).exists() {
             bail!("Partition {} does not exist", current_name);
@@ -1178,8 +1268,6 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("DEBUG: Entering LUKS case for partition {current_name}");
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
 
-                validate_block_device_path(current_name)?;
-
                 if is_partition_in_use(current_name) {
                     warn(&format!(
                         "Partition {current_name} is in use, skipping LUKS format"
@@ -1217,40 +1305,66 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 
                 std::thread::sleep(std::time::Duration::from_millis(5000));
 
-                let result = ProcessCommand::new("cryptsetup")
-                    .args(["luksFormat", "--type", "luks2", current_name])
-                    .stdin(std::process::Stdio::inherit())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .status();
+                let passphrase = read_luks_passphrase()?;
+                let key_file = write_passphrase_key_file(&passphrase)?;
+                let key_file_str = key_file.to_string_lossy().to_string();
 
-                match result {
-                    Ok(status) => {
-                        if status.success() {
-                            println!("DEBUG: LUKS format successful for {current_name}");
-                        } else {
-                            bail!(
-                                "Failed to format LUKS partition: exit code {:?}",
-                                status.code()
-                            );
-                        }
+                let format_result = execute_safe_command(
+                    "cryptsetup",
+                    &[
+                        "luksFormat",
+                        "--batch-mode",
+                        "--type",
+                        "luks2",
+                        "--pbkdf",
+                        "argon2id",
+                        "--pbkdf-force-iterations",
+                        "4",
+                        "--pbkdf-memory",
+                        "262144",
+                        "--pbkdf-parallel",
+                        "4",
+                        "--key-file",
+                        &key_file_str,
+                        current_name,
+                    ],
+                );
+
+                secure_wipe_file(&key_file)?;
+
+                match format_result {
+                    Ok(_) => {
+                        println!("DEBUG: LUKS format successful for {current_name}");
                     }
                     Err(e) => {
-                        bail!("Failed to execute cryptsetup: {}", e);
+                        bail!("Failed to format LUKS partition: {}", e);
                     }
                 }
 
                 if let Some(ref label) = partition.label {
+                    validate_label(label)?;
                     execute(&format!(
                         "cryptsetup -q config {current_name} --label {label}"
                     ))?;
                 }
 
-                let open_result = ProcessCommand::new("cryptsetup")
-                    .args(["luksOpen", current_name, "regicideos"])
-                    .status();
+                let open_key_file = write_passphrase_key_file(&passphrase)?;
+                let open_key_file_str = open_key_file.to_string_lossy().to_string();
+                let open_result = execute_safe_command(
+                    "cryptsetup",
+                    &[
+                        "luksOpen",
+                        "--type",
+                        "luks2",
+                        "--key-file",
+                        &open_key_file_str,
+                        current_name,
+                        "regicideos",
+                    ],
+                );
+                secure_wipe_file(&open_key_file)?;
 
-                if !open_result.map(|s| s.success()).unwrap_or(false) {
+                if open_result.is_err() {
                     bail!("Failed to open LUKS partition");
                 }
 
@@ -1295,17 +1409,17 @@ fn chroot(command: &str) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // Use anyhow::anyhow directly to avoid sanitization for debugging
         return Err(anyhow::anyhow!(
             "Chroot command failed: {}\nSTDOUT: {}\nSTDERR: {}",
-            command,
-            stdout,
-            stderr
+            logging::sanitize_error_message(command),
+            logging::sanitize_error_message(&stdout),
+            logging::sanitize_error_message(&stderr)
         ));
     }
 
     info(&format!(
-        "Successfully executed chroot command: {command}"
+        "Successfully executed chroot command: {}",
+        logging::sanitize_error_message(command)
     ));
     Ok(())
 }
@@ -2431,12 +2545,15 @@ fn create_grub_configuration() -> Result<()> {
     let (root_param, boot_options) = if is_encrypted {
         info("Detected LUKS encryption - using encrypted boot parameters");
 
-        // Get actual LUKS partition UUID
-        let luks_uuid =
-            match execute("blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | head -1 | xargs -I{} blkid -s UUID -o value {} 2>/dev/null || echo 'regicideos'") {
-                Ok(uuid) => uuid.trim().to_string(),
+        // Get actual LUKS partition UUID from the crypto_LUKS device directly,
+        // avoiding shell pipelines that are rejected by the command allowlist.
+        let luks_uuid = match find_crypto_luks_device() {
+            Ok(device) => match get_luks_uuid(&device) {
+                Ok(uuid) => uuid,
                 Err(_) => "regicideos".to_string(),
-            };
+            },
+            Err(_) => "regicideos".to_string(),
+        };
 
         info(&format!("Using LUKS UUID: {luks_uuid}"));
 
@@ -3260,7 +3377,7 @@ async fn main() -> Result<()> {
         "i386-pc"
     };
     info(&format!("Platform detected: {platform}"));
-    info(&format!("Target device: {}", &config_parsed.drive));
+    info(&format!("Target device: {}", config_parsed.drive));
 
     // Debug: Show current mounts before GRUB installation using /proc/mounts fallback
     // findmnt fails in partial chroot, use /proc/mounts instead
