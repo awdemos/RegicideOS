@@ -486,22 +486,92 @@ async def sign_artifacts(
     )
 
 
-def _get_luks_passphrase() -> str:
-    """Return the LUKS passphrase from the environment or prompt twice."""
+# Small built-in wordlists for memorable adjective-noun passphrases.
+_ADJECTIVES = (
+    "able", "apt", "avid", "bare", "bold", "brisk", "calm", "cool", "curt",
+    "deft", "dire", "dual", "even", "fair", "fast", "firm", "fond", "free",
+    "full", "gale", "glib", "good", "grim", "hardy", "huge", "hush", "iron",
+    "jade", "jolly", "keen", "kind", "lax", "lean", "lush", "mere", "mild",
+    "mute", "neat", "nice", "nimble", "open", "pale", "plucky", "prime",
+    "quiet", "quick", "rapid", "rare", "raw", "real", "rich", "rough", "rugged",
+    "safe", "sage", "sharp", "sleek", "slow", "smooth", "soft", "solid",
+    "sound", "spry", "stark", "stout", "swift", "tame", "tart", "taut", "tidy",
+    "trim", "true", "vast", "warm", "wild", "wiry", "wise", "witty", "zany",
+)
+_NOUNS = (
+    "almond", "anchor", "arrow", "bison", "bronco", "canoe", "canyon",
+    "cedar", "chisel", "cobalt", "comet", "copper", "crane", "crystal",
+    "delta", "eagle", "elm", "falcon", "fjord", "flint", "fox", "gale",
+    "gecko", "glacier", "grape", "harbor", "hawk", "heron", "ibis",
+    "iron", "jackal", "jade", "koala", "lark", "lemon", "lotus", "lynx",
+    "maple", "mesa", "mint", "moose", "newt", "oasis", "onion", "opal",
+    "orca", "panda", "pearl", "pilot", "plum", "quartz", "rabbit", "raven",
+    "reef", "ridge", "river", "robin", "rock", "sage", "salmon", "scorpion",
+    "shark", "shore", "sparrow", "stone", "summit", "swan", "talon", "thorn",
+    "tiger", "topaz", "valley", "violet", "wolf", "wren", "zest", "zinc",
+)
+
+
+def _generate_memorable_passphrase() -> str:
+    """Return a memorable adjective-adjective-noun passphrase."""
+    import secrets
+    return "-".join([
+        secrets.choice(_ADJECTIVES),
+        secrets.choice(_ADJECTIVES),
+        secrets.choice(_NOUNS),
+    ])
+
+
+def _generate_otp_style_passphrase(length: int = 32) -> str:
+    """Return a long numeric string reminiscent of an OTP token."""
+    import secrets
+    return "".join(secrets.choice("0123456789") for _ in range(length))
+
+
+def _generate_random_passphrase() -> str:
+    """Return a high-entropy random passphrase."""
+    import secrets
+    return secrets.token_urlsafe(24)
+
+
+def _get_luks_passphrase(
+    *,
+    passphrase_file: Path | None = None,
+    memorable: bool = False,
+    otp_style: bool = False,
+) -> str:
+    """Return the LUKS passphrase from the most secure available source.
+
+    Priority:
+      1. Explicit --luks-passphrase-file contents (CI secret mode).
+      2. REGICIDE_LUKS_PASSPHRASE environment variable (CI secret mode).
+      3. Auto-generated passphrase printed once to stderr.
+
+    The passphrase is printed exactly once on stderr so CI logs can capture it
+    for the operator, but it is not emitted inside any Dagger container exec.
+    """
+    if passphrase_file is not None:
+        raw = passphrase_file.read_text(encoding="utf-8")
+        return raw.rstrip("\n")
+
     env_pass = os.environ.get("REGICIDE_LUKS_PASSPHRASE")
     if env_pass:
         return env_pass
 
-    while True:
-        first = getpass.getpass("Enter LUKS passphrase for encrypted image: ")
-        if not first:
-            print("Passphrase cannot be empty.")
-            continue
-        second = getpass.getpass("Confirm LUKS passphrase: ")
-        if first != second:
-            print("Passphrases do not match. Try again.")
-            continue
-        return first
+    if memorable:
+        passphrase = _generate_memorable_passphrase()
+    elif otp_style:
+        passphrase = _generate_otp_style_passphrase()
+    else:
+        passphrase = _generate_random_passphrase()
+
+    print(
+        "\n!!! ENCRYPTED IMAGE PASSPHRASE (copy before continuing) !!!\n"
+        f"{passphrase}\n"
+        "!!! This is the only time this passphrase is displayed. !!!\n",
+        file=sys.stderr,
+    )
+    return passphrase
 
 
 def _secure_wipe(path: Path) -> None:
@@ -527,6 +597,9 @@ async def build_qcow2_locally(
     disk_size: str,
     encrypt: bool,
     arch: str = "amd64",
+    passphrase_file: Path | None = None,
+    memorable: bool = False,
+    otp_style: bool = False,
 ) -> None:
     """Build a bootable QCOW2 image from a stage4 tarball on the host.
 
@@ -549,7 +622,11 @@ async def build_qcow2_locally(
 
     passphrase_file: Path | None = None
     if encrypt:
-        passphrase = _get_luks_passphrase()
+        passphrase = _get_luks_passphrase(
+            passphrase_file=passphrase_file,
+            memorable=args.memorable_passphrase,
+            otp_style=args.otp_style_passphrase,
+        )
         # Keep the passphrase in ram-backed storage and never leak it to child
         # processes via environment variables. Write it without a trailing newline
         # because cryptsetup --key-file consumes the file verbatim.
@@ -590,7 +667,23 @@ async def main() -> None:
     parser.add_argument(
         "--encrypt",
         action="store_true",
-        help="Also build an encrypted QCOW2 disk image and prompt for a LUKS passphrase",
+        help="Also build an encrypted QCOW2 disk image; auto-generate a passphrase if no secret source is provided",
+    )
+    parser.add_argument(
+        "--luks-passphrase-file",
+        type=Path,
+        default=None,
+        help="Path to a file containing the LUKS passphrase (CI secret mode; no terminal prompt)",
+    )
+    parser.add_argument(
+        "--memorable-passphrase",
+        action="store_true",
+        help="Generate a human-readable adjective-adjective-noun passphrase instead of a random token",
+    )
+    parser.add_argument(
+        "--otp-style-passphrase",
+        action="store_true",
+        help="Generate a long numeric passphrase reminiscent of an OTP token",
     )
     parser.add_argument(
         "--qcow2-size",
@@ -793,6 +886,9 @@ async def main() -> None:
                 disk_size=args.qcow2_size,
                 encrypt=True,
                 arch=args.arch,
+                passphrase_file=args.luks_passphrase_file,
+                memorable=args.memorable_passphrase,
+                otp_style=args.otp_style_passphrase,
             )
 
         if args.run_vm_test:
