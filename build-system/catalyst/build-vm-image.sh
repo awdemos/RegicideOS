@@ -448,13 +448,18 @@ for rel_path in "${INJECTED_MODULES[@]}"; do
         src="${WORK_DIR}/sq/lib/modules/${KERNEL_VERSION}/${rel_path}"
     fi
     dst="${INITRD_STAGING}/lib/modules/${KERNEL_VERSION}/${rel_path}"
-    if [[ -f "${src}" ]]; then
-        echo "Injecting ${module_name}.ko (${KERNEL_VERSION}) into initramfs..."
-        mkdir -p "$(dirname "${dst}")"
-        cp "${src}" "${dst}"
-    else
-        echo "Warning: ${module_name}.ko not found for ${KERNEL_VERSION}; relying on host module loading"
+    if [[ ! -f "${src}" ]]; then
+        echo "Error: required module ${module_name}.ko not found for ${KERNEL_VERSION}"
+        exit 1
     fi
+    if [[ ! "${src}" =~ ^${WORK_DIR}/sq/(usr/)?lib/modules/${KERNEL_VERSION}/kernel/.+\.ko$ ]]; then
+        echo "Error: module source path is outside expected kernel tree: ${src}"
+        exit 1
+    fi
+    echo "Injecting ${module_name}.ko (${KERNEL_VERSION}) into initramfs..."
+    mkdir -p "$(dirname "${dst}")"
+    cp "${src}" "${dst}"
+    chmod 0644 "${dst}"
 done
 
 # Regenerate modules.dep so modprobe can locate the injected modules.

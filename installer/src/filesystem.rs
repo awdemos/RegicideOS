@@ -3,38 +3,49 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn sanitize_input(input: &str) -> String {
-    // Remove null bytes and control characters
-    input
-        .chars()
-        .filter(|c| *c != '\0' && !c.is_control() || *c == '\t' || *c == '\n' || *c == '\r')
-        .collect()
+    input.chars().filter(|c| !c.is_control()).collect()
 }
 
-// Path traversal protection
+fn has_traversal_components(path: &Path) -> bool {
+    path.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    })
+}
+
+// Validate that a path is rooted under allowed_base and contains no traversal
+// components. Non-existent paths are accepted only when their parent directory
+// already exists and is within the base.
 pub fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
-    // Remove any dangerous characters
+    if path.contains('\0') {
+        bail!("Path access denied: null byte in path");
+    }
+
     let sanitized = sanitize_input(path);
 
-    // Convert to absolute path
     let absolute_path = if sanitized.starts_with('/') {
         PathBuf::from(&sanitized)
     } else {
         std::env::current_dir()?.join(&sanitized)
     };
 
-    // Get canonical path for allowed base (must exist)
+    // Reject traversal components before any canonicalization so a non-existent
+    // path such as base/foo/../etc cannot escape the allowed base.
+    if has_traversal_components(&absolute_path) {
+        bail!("Path access denied: traversal component in path");
+    }
+
     let base_path = Path::new(allowed_base)
         .canonicalize()
         .with_context(|| format!("Base directory does not exist: {allowed_base}"))?;
 
-    // For validation, check if the path would be within base after creation
-    // We need to handle the case where the path doesn't exist yet (for directory creation)
     let path_to_check = if absolute_path.exists() {
-        absolute_path
-            .canonicalize()
-            .unwrap_or_else(|_| absolute_path.clone())
+        absolute_path.canonicalize().with_context(|| {
+            format!("Failed to canonicalize path: {}", absolute_path.display())
+        })?
     } else {
-        // For non-existent paths, validate the parent directory exists and is within bounds
         let parent = absolute_path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Invalid path: no parent directory"))?;
@@ -43,10 +54,21 @@ pub fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
             bail!("Parent directory does not exist: {}", parent.display());
         }
 
-        parent
-            .canonicalize()
-            .map(|p| p.join(absolute_path.file_name().unwrap_or_default()))
-            .unwrap_or(absolute_path.clone())
+        let canonical_parent = parent.canonicalize().with_context(|| {
+            format!("Failed to canonicalize parent directory: {}", parent.display())
+        })?;
+        if !canonical_parent.starts_with(&base_path) {
+            bail!(
+                "Path access denied: parent {} is outside allowed base {}",
+                canonical_parent.display(),
+                base_path.display()
+            );
+        }
+
+        let file_name = absolute_path
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path: no file name"))?;
+        canonical_parent.join(file_name)
     };
 
     // Ensure the path is within the allowed base directory
@@ -58,20 +80,7 @@ pub fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
         );
     }
 
-    // Additional checks for dangerous patterns
-    let path_str = absolute_path.to_string_lossy();
-    let dangerous_patterns = [
-        "..", "~", "$HOME", "/etc/", "/root/", "/var/", "/usr/", "/bin/", "/sbin/", "/lib/",
-        "/proc/", "/sys/", "/dev/",
-    ];
-
-    for pattern in &dangerous_patterns {
-        if path_str.contains(pattern) && !path_str.starts_with(allowed_base) {
-            bail!("Path access denied: dangerous pattern detected");
-        }
-    }
-
-    Ok(absolute_path)
+    Ok(path_to_check)
 }
 
 // Safe file operations with path validation
