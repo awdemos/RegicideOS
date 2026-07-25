@@ -299,16 +299,22 @@ else
     echo "Attaching loop device..."
     LOOP_DEV=$(losetup -f --show -P "${RAW_IMG}")
 
-    # Wait for kernel to create partition devices
-    for _ in {1..10}; do
+    # Force a partition rescan and wait for udev to create the partition nodes.
+    partprobe "${LOOP_DEV}" 2>/dev/null || true
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle --timeout=10 2>/dev/null || true
+    fi
+
+    # Wait for kernel/udev to create partition devices
+    for _ in {1..20}; do
         if [[ -e "${LOOP_DEV}p1" && -e "${LOOP_DEV}p2" && -e "${LOOP_DEV}p3" && -e "${LOOP_DEV}p4" ]]; then
             break
         fi
-        sleep 0.5
+        sleep 0.25
     done
 
     if [[ ! -e "${LOOP_DEV}p1" ]]; then
-        echo "Error: loop partitions did not appear."
+        echo "Error: loop partitions did not appear on ${LOOP_DEV}"
         exit 1
     fi
 
