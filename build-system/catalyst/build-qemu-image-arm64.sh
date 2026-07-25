@@ -183,6 +183,24 @@ cleanup() {
         cryptsetup close regicideos 2>/dev/null || true
     fi
 
+    for _key_file in "${PASS_KEY_FILE:-}" "${INITRAMFS_KEY_FILE:-}"; do
+        if [[ -n "${_key_file}" && -f "${_key_file}" ]]; then
+            python3 - "${_key_file}" <<'PYEOF'
+import os, sys
+try:
+    with open(sys.argv[1], "rb+") as f:
+        size = f.seek(0, os.SEEK_END)
+        f.seek(0)
+        f.write(b"\x00" * size)
+        f.flush()
+        os.fsync(f.fileno())
+except OSError:
+    pass
+PYEOF
+            rm -f "${_key_file}" 2>/dev/null || true
+        fi
+    done
+
     if [[ -n "${LOOP_DEV}" ]]; then
         losetup -d "${LOOP_DEV}" 2>/dev/null || true
     fi
@@ -298,17 +316,27 @@ if [[ "${ENCRYPT}" == true ]]; then
     # Canonicalize the passphrase: cryptsetup --key-file consumes the file
     # verbatim, including any trailing newline, which interactive boot
     # prompts (GRUB cryptomount, initramfs ask-password) can never produce.
-    PASS_KEY_FILE="$(mktemp)"
+    PASS_KEY_FILE="$(mktemp -p /dev/shm regicide-luks-XXXXXX)"
+    chmod 0600 "${PASS_KEY_FILE}"
     if [[ "${PASSPHRASE_FILE}" == "-" ]]; then
         pass="$(cat)"
     else
         pass="$(cat "${PASSPHRASE_FILE}")"
     fi
     printf '%s' "${pass}" > "${PASS_KEY_FILE}"
-    cryptsetup luksFormat --batch-mode --type luks2 --label regicideos --key-file "${PASS_KEY_FILE}" "${ROOTS_PART}"
-    cryptsetup open --type luks2 --key-file "${PASS_KEY_FILE}" "${ROOTS_PART}" regicideos
-    # Keep the canonical passphrase file for the embedded initramfs key.
-    PASSPHRASE_FILE="${PASS_KEY_FILE}"
+
+    # Generate a random binary key for initramfs-only unlock. The human
+    # passphrase unlocks ROOTS at the GRUB/bootloader prompt; the binary key
+    # is added as a secondary keyslot and embedded in the initramfs so the
+    # system can unlock itself without storing the human passphrase in the
+    # initramfs image.
+    INITRAMFS_KEY_FILE="$(mktemp -p /dev/shm regicide-initramfs-key-XXXXXX)"
+    chmod 0600 "${INITRAMFS_KEY_FILE}"
+    dd if=/dev/urandom of="${INITRAMFS_KEY_FILE}" bs=512 count=1 status=none
+
+    cryptsetup luksFormat --batch-mode --type luks2 --label regicideos --pbkdf argon2id --pbkdf-force-iterations 4 --pbkdf-memory 262144 --pbkdf-parallel 4 --key-file "${PASS_KEY_FILE}" "${ROOTS_PART}"
+    cryptsetup luksAddKey --type luks2 --key-file "${PASS_KEY_FILE}" --key-slot 1 "${ROOTS_PART}" "${INITRAMFS_KEY_FILE}"
+    cryptsetup open --type luks2 --key-file "${INITRAMFS_KEY_FILE}" --key-slot 1 "${ROOTS_PART}" regicideos
     ROOTS_TARGET="/dev/mapper/regicideos"
     LUKS_UUID=$(cryptsetup luksUUID "${ROOTS_PART}")
     echo "LUKS container opened: ${ROOTS_TARGET} (UUID: ${LUKS_UUID})"
@@ -489,8 +517,7 @@ EOF
     cat > "${MOUNT_DIR}/etc/crypttab" << EOF
 regicideos UUID=${LUKS_UUID} /etc/luks-keyfile luks
 EOF
-    cp "${PASSPHRASE_FILE}" "${MOUNT_DIR}/etc/luks-keyfile"
-    chmod 0400 "${MOUNT_DIR}/etc/luks-keyfile"
+    install -m 0400 -o root -g root "${INITRAMFS_KEY_FILE}" "${MOUNT_DIR}/etc/luks-keyfile"
 
     # Install a custom dracut module that unlocks root LUKS from the initqueue.
     # We cannot rely on systemd-cryptsetup because the stage4 image does not
@@ -714,11 +741,10 @@ fi
 
 dracut -v --force --no-hostonly --kver "${KVER}" 2>&1 | tee /boot/dracut-v83.log
 
-# Copy the generated initramfs to the ESP so it can be inspected offline
-# without decrypting the ROOTS partition.
-cp "/boot/initramfs-${KVER}.img" /boot/efi/initramfs-debug.img
+    # Do NOT copy the initramfs to the unencrypted ESP: it embeds the
+    # /etc/luks-keyfile binary key and would allow offline ROOTS unlock.
 
-# GRUB's config references the canonical /boot/vmlinuz and /boot/initramfs.img
+    # GRUB's config references the canonical /boot/vmlinuz and /boot/initramfs.img
 # names, so make sure those point at the kernel/initramfs dracut just built.
 if [[ -f "/boot/vmlinuz-${KVER}" ]]; then
     cp -f "/boot/vmlinuz-${KVER}" /boot/vmlinuz

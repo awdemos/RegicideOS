@@ -39,10 +39,15 @@ if [[ -z "${TARBALL}" || ! -f "${TARBALL}" ]]; then
     exit 1
 fi
 
-# Locate an optional passphrase file (used when encrypting).
+# Locate an optional passphrase file (used when encrypting). Prefer the
+# ram-backed fw_cfg copy provided by the host initramfs, falling back to the
+# legacy data-disk copy for compatibility.
 PASSPHRASE_FILE=""
 ENCRYPT_FLAG=""
-if [[ -f "${DATA_DIR}/luks-passphrase" ]]; then
+if [[ -f "/run/regicide-luks-passphrase" ]]; then
+    PASSPHRASE_FILE="/run/regicide-luks-passphrase"
+    ENCRYPT_FLAG="--encrypt"
+elif [[ -f "${DATA_DIR}/luks-passphrase" ]]; then
     PASSPHRASE_FILE="${DATA_DIR}/luks-passphrase"
     ENCRYPT_FLAG="--encrypt"
 fi
