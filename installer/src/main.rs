@@ -3438,40 +3438,40 @@ mod tests_main {
 
     #[test]
     fn test_validate_safe_path_nonexistent() -> Result<()> {
-        // Test that validate_safe_path works for non-existent paths (for directory creation)
-        std::fs::create_dir_all("/tmp/test_base")?;
+        // Use a unique temp directory so parallel tests do not race.
+        let base = format!("/tmp/test_base_{}", std::process::id());
+        std::fs::create_dir_all(&base)?;
 
-        let result = filesystem::validate_safe_path("/tmp/test_base/new_dir", "/tmp/test_base");
+        let result = filesystem::validate_safe_path(&format!("{}/new_dir", base), &base);
         assert!(result.is_ok());
 
         // Cleanup
-        std::fs::remove_dir_all("/tmp/test_base")?;
+        let _ = std::fs::remove_dir_all(&base);
         Ok(())
     }
 
     #[test]
     fn test_validate_safe_path_exists() -> Result<()> {
-        // Test that validate_safe_path works for existing paths
-        std::fs::create_dir_all("/tmp/test_base/existing_dir")?;
+        let base = format!("/tmp/test_base_{}", std::process::id());
+        let existing = format!("{}/existing_dir", base);
+        std::fs::create_dir_all(&existing)?;
 
-        let result = filesystem::validate_safe_path("/tmp/test_base/existing_dir", "/tmp/test_base");
+        let result = filesystem::validate_safe_path(&existing, &base);
         assert!(result.is_ok());
 
-        // Cleanup
-        std::fs::remove_dir_all("/tmp/test_base")?;
+        let _ = std::fs::remove_dir_all(&base);
         Ok(())
     }
 
     #[test]
     fn test_validate_safe_path_outside_base() -> Result<()> {
-        // Test that validate_safe_path rejects paths outside base
-        std::fs::create_dir_all("/tmp/test_base")?;
+        let base = format!("/tmp/test_base_{}", std::process::id());
+        std::fs::create_dir_all(&base)?;
 
-        let result = filesystem::validate_safe_path("/tmp/other_dir", "/tmp/test_base");
+        let result = filesystem::validate_safe_path("/tmp/other_dir", &base);
         assert!(result.is_err());
 
-        // Cleanup
-        std::fs::remove_dir_all("/tmp/test_base")?;
+        let _ = std::fs::remove_dir_all(&base);
         Ok(())
     }
 }
