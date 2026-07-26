@@ -19,7 +19,9 @@ RegicideOS is built from a Gentoo stage4 with COSMIC as the default desktop. The
 
 > **Variants**: [RegicideOSArch](https://github.com/awdemos/RegicideOSArch) is the Arch Linux-based experimental variant (binary `pacman` packages, 536-package default install). It also ships a **WSL variant** — a dedicated pipeline (`dagger_pipeline_wsl.py`) that produces a WSL2-ready rootfs tarball for `wsl --import`.
 
-[📥 Install](#installation) · [🏗️ Architecture](#architecture) · [🗺️ Roadmap](#roadmap) · [🤝 Contributing](#contributing)
+**Latest release**: [RegicideOS v0.0.1](https://github.com/awdemos/RegicideOS/releases/tag/v0.0.1) — bootable live ISOs for RegicideOS (Gentoo) and RegicideOSArch (Arch), released in split chunks with SHA256 checksums because GitHub caps individual assets at 2 GiB.
+
+[📥 Install](#installation) · [🏗️ Architecture](#architecture) · [🗺️ Roadmap](#roadmap) · [🤝 Contributing](#contributing) · [🚀 Download v0.0.1](https://github.com/awdemos/RegicideOS/releases/tag/v0.0.1)
 
 </div>
 
@@ -152,9 +154,25 @@ sudo ./build-vm-image.sh \
     output/regicide-cosmic-enc.qcow2 20G
 ```
 
-> **Current status**: both unencrypted and encrypted images build successfully, boot to a serial-console login prompt, and reach the COSMIC greeter. The default user is `regicide` with password `regicide`; the root password is intentionally unset, so manage root via `sudo passwd root` after login. The LUKS passphrase for the encrypted example is `regicide-secure-test`.
+> **Current status**: both unencrypted and encrypted images build successfully, boot to a serial-console login prompt, and reach the COSMIC greeter. Prebuilt live ISOs are available in [v0.0.1](https://github.com/awdemos/RegicideOS/releases/tag/v0.0.1). The default user is `regicide` with password `regicide`; the root password is intentionally unset, so manage root via `sudo passwd root` after login. The LUKS passphrase for the encrypted example is `regicide-secure-test`.
 
-#### 3. Install to bare metal
+#### 3. Try the prebuilt live ISO
+
+Download the split ISO chunks from the [v0.0.1 release](https://github.com/awdemos/RegicideOS/releases/tag/v0.0.1), reassemble, and verify:
+
+```bash
+# RegicideOS (Gentoo + COSMIC)
+cat regicide-cosmic-amd64.iso.part* > regicide-cosmic-amd64.iso
+sha256sum -c regicide-cosmic-amd64.iso.sha256
+
+# RegicideOSArch (Arch + COSMIC)
+cat regicide-arch.iso.part* > regicide-arch.iso
+sha256sum -c regicide-arch.iso.sha256
+```
+
+Both ISOs boot under UEFI in QEMU/virt-manager or can be written to a USB drive with `dd` or `cp` to boot on bare metal.
+
+#### 4. Install to bare metal
 
 Boot an existing Linux live environment, clone the repo, build the installer, and point it at the local SquashFS image:
 
@@ -339,6 +357,27 @@ For encrypted images, enter the LUKS passphrase `regicide-secure-test` in the VM
   If GTK cannot open a display, boot the generated image manually with `-nographic` using the command in step D above and inspect the serial console output.
 
 - **LUKS passphrase reminder**: the example encrypted build uses passphrase `regicide-secure-test`. Keep this value available for unlocking or decrypting the image later.
+
+### Live ISO / VNC boot verification
+
+You can boot the live ISO headlessly and attach a VNC viewer to watch the COSMIC greeter come up:
+
+```bash
+cp /usr/share/OVMF/OVMF_VARS.fd /tmp/regicide-iso-vars.fd
+chmod u+w /tmp/regicide-iso-vars.fd
+qemu-img create -f qcow2 /tmp/regicide-iso-test.qcow2 30G
+qemu-system-x86_64 -enable-kvm -m 8G -smp 4 -cpu host \
+    -machine type=q35,accel=kvm \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+    -drive if=pflash,format=raw,file=/tmp/regicide-iso-vars.fd \
+    -cdrom regicide-cosmic-amd64.iso \
+    -drive file=/tmp/regicide-iso-test.qcow2,format=qcow2,if=virtio \
+    -netdev user,id=net0,hostfwd=tcp::2225-:22 \
+    -device virtio-net-pci,netdev=net0 \
+    -vga std -vnc :0
+```
+
+Then connect any VNC client to `localhost:5900` and log in as `regicide` / `regicide` over forwarded SSH on port `2225`.
 
 ### Automated Configuration
 
