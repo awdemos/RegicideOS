@@ -392,6 +392,8 @@ checks=(
     # These tools are installed by stage6-finalize; skip functional tests when the
     # image predates that change so the smoke test stays green on older artifacts.
     "regicide-update-installed:command -v regicide-update >/dev/null 2>&1 && echo installed && sudo -n regicide-update --help | head -1 | grep -q usage && echo help-ok || echo regicide-update-skipped"
+    "regicide-update-requires-root:(regicide-update --help 2>&1 || true) | grep -qi 'requires root' && echo requires-root || echo regicide-update-skipped"
+    "regicide-update-search-works:sudo -n regicide-update search bash 2>/dev/null | grep -q 'app-shells/bash' && echo search-ok || echo regicide-update-skipped"
     "regicide-rollback-installed:command -v regicide-rollback >/dev/null 2>&1 && echo installed && sudo -n regicide-rollback --help | head -1 | grep -q usage && echo help-ok || echo regicide-rollback-skipped"
     "regicide-image-installed:command -v regicide-image >/dev/null 2>&1 && echo installed && sudo -n regicide-image --help | head -1 | grep -q usage && echo help-ok || echo regicide-image-skipped"
     "regicide-boot-revert-installed:command -v regicide-boot-revert >/dev/null 2>&1 && echo installed || echo regicide-boot-revert-skipped"
