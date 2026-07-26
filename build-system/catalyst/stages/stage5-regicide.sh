@@ -6,6 +6,14 @@ source "$(dirname "$0")/common.sh"
 STAGE_NAME="stage5-regicide"
 
 log_status "start" "installing RegicideOS tools"
+
+# The regicide-rust overlay ships live 9999 ebuilds with empty KEYWORDS.
+# Allow them to be emerged without a full overlay-wide keyword bump.
+mkdir -p "${ROOTFS}/etc/portage/package.accept_keywords"
+cat > "${ROOTFS}/etc/portage/package.accept_keywords/regicide" << 'EOF'
+regicide-tools/* **
+EOF
+
 REGICIDE_PACKAGES=(
     regicide-tools/regicide-installer
     sys-fs/btrfs-assistant

@@ -340,7 +340,7 @@ ROOTS_TARGET="${ROOTS_PART}"
 LUKS_UUID=""
 if [[ "${ENCRYPT}" == true ]]; then
     echo "Setting up LUKS encryption on ROOTS partition..."
-    PASS_KEY_FILE="$(mktemp -p /dev/shm regicide-luks-XXXXXX)"
+    PASS_KEY_FILE="$(mktemp -p /run regicide-luks-XXXXXX)"
     chmod 0600 "${PASS_KEY_FILE}"
     if [[ "${PASSPHRASE_FILE}" == "-" ]]; then
         cat > "${PASS_KEY_FILE}"
@@ -364,7 +364,7 @@ PYEOF
     # is added as a secondary keyslot and embedded in the initramfs so the
     # system can unlock itself without storing the human passphrase in the
     # initramfs image.
-    INITRAMFS_KEY_FILE="$(mktemp -p /dev/shm regicide-initramfs-key-XXXXXX)"
+    INITRAMFS_KEY_FILE="$(mktemp -p /run regicide-initramfs-key-XXXXXX)"
     chmod 0600 "${INITRAMFS_KEY_FILE}"
     dd if=/dev/urandom of="${INITRAMFS_KEY_FILE}" bs=512 count=1 status=none
 

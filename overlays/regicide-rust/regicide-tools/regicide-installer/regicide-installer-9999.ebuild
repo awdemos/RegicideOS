@@ -9,7 +9,7 @@ DESCRIPTION="RegicideOS system installer with AI integration"
 HOMEPAGE="https://github.com/awdemos/RegicideOS"
 
 EGIT_REPO_URI="https://github.com/awdemos/RegicideOS.git"
-S="${WORKDIR}/${P}/installer"
+S="${WORKDIR}/${P}"
 
 LICENSE="GPL-3"
 SLOT="0"
@@ -18,7 +18,7 @@ IUSE=""
 
 # Runtime dependencies for installation
 RDEPEND="
-	>=virtual/rust-1.70.0
+	dev-lang/rust-bin
 	sys-fs/btrfs-progs
 	sys-boot/grub:2
 	sys-fs/dosfstools
@@ -26,39 +26,44 @@ RDEPEND="
 	sys-block/parted
 	sys-apps/util-linux
 	net-misc/curl
-	app-arch/squashfs-tools
+	sys-fs/squashfs-tools
 "
 
 BDEPEND="
-	>=virtual/rust-1.70.0
+	dev-lang/rust-bin
 "
 
 DEPEND="${RDEPEND}"
 
 src_unpack() {
 	git-r3_src_unpack
+	cargo_live_src_unpack
 }
 
 src_compile() {
-	cd "${S}" || die "Failed to enter installer directory"
+	cd "${S}/installer" || die "Failed to enter installer directory"
+	cargo_gen_config
 	cargo_src_compile
 }
 
 src_test() {
-	cd "${S}" || die "Failed to enter installer directory"
+	cd "${S}/installer" || die "Failed to enter installer directory"
+	cargo_gen_config
 	cargo_src_test
 }
 
 src_install() {
-	cd "${S}" || die "Failed to enter installer directory"
-	
-	# Install installer binary
-	newbin target/release/installer regicide-installer
-	
+	# The installer crate is a workspace member; Cargo places the release
+	# binary in the workspace root's target directory, not in
+	# installer/target/release/.
+	local installer_bin="${S}/target/release/installer"
+	[[ -f "${installer_bin}" ]] || die "installer binary not found at ${installer_bin}"
+	newbin "${installer_bin}" regicide-installer
+
 	# Install documentation
-	dodoc "${WORKDIR}/${P}/README.md"
-	dodoc "${WORKDIR}/${P}/Handbook.md"
-	
+	dodoc "${S}/README.md"
+	dodoc "${S}/Handbook.md"
+
 	# Install example configurations
 	insinto /usr/share/regicide/installer
 	doins "${FILESDIR}/regicide-config-examples/"* 2>/dev/null || true

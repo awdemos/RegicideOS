@@ -9,17 +9,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Determine guest architecture. The stage4 tarball filename encodes the arch
-# (stage4-amd64-* or stage4-arm64-*), or REGICIDE_ARCH can be set explicitly.
-REGICIDE_ARCH="${REGICIDE_ARCH:-}"
-if [[ -z "${REGICIDE_ARCH}" ]]; then
-    if [[ "$(basename "${TARBALL}")" == *arm64* ]]; then
-        REGICIDE_ARCH="arm64"
-    else
-        REGICIDE_ARCH="amd64"
-    fi
-fi
-
 # /data is mounted by the host initramfs overlay as a SquashFS and contains
 # the stage4 archive, optional passphrase file, and the in-VM builder script.
 DATA_DIR="/data"
@@ -37,6 +26,17 @@ done
 if [[ -z "${TARBALL}" || ! -f "${TARBALL}" ]]; then
     echo "Error: stage4 archive not found on data disk (looked for *.tar.xz, *.img, *.squashfs)."
     exit 1
+fi
+
+# Determine guest architecture. The stage4 tarball filename encodes the arch
+# (stage4-amd64-* or stage4-arm64-*), or REGICIDE_ARCH can be set explicitly.
+REGICIDE_ARCH="${REGICIDE_ARCH:-}"
+if [[ -z "${REGICIDE_ARCH}" ]]; then
+    if [[ "$(basename "${TARBALL}")" == *arm64* ]]; then
+        REGICIDE_ARCH="arm64"
+    else
+        REGICIDE_ARCH="amd64"
+    fi
 fi
 
 # Locate an optional passphrase file (used when encrypting). Only the

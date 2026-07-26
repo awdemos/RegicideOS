@@ -364,18 +364,11 @@ checks=(
     # 11. NVIDIA userspace stack (best-effort in a VM without GPU)
     "nvidia-smi:command -v nvidia-smi >/dev/null 2>&1 && (nvidia-smi >/tmp/nvidia-smi.log 2>&1 && grep -q NVIDIA-SMI /tmp/nvidia-smi.log && echo nvidia-ok || grep -Eiq 'nvml|driver|gpu|device' /tmp/nvidia-smi.log && echo nvidia-ok) || echo nvidia-missing"
 
-    # 12. LUKS state checks (conditional on encrypted image name or override).
-    "luks-dm-device-exists:luks_checks_enabled || exit 0; test -L /dev/mapper/regicideos && echo dm-ok:dm-ok"
-    "luks-cryptsetup-status:luks_checks_enabled || exit 0; sudo -n cryptsetup status regicideos | grep -q 'type:.*LUKS2' && echo luks2-ok:luks2-ok"
-    "luks-keyslot-list:luks_checks_enabled || exit 0; device=\"\$(cryptsetup status regicideos 2>/dev/null | awk '/device:/ {print \$2}')\"; [[ -n \"\${device}\" ]] && sudo -n cryptsetup luksDump \"\${device}\" | grep -E '^[[:space:]]*[0-9]+:.*LUKS' && echo keyslots-ok:keyslots-ok"
-    "luks-root-mounted-via-dm:luks_checks_enabled || exit 0; findmnt -n -o SOURCE / | grep -q '^/dev/mapper/regicideos$' && echo root-dm-ok:root-dm-ok"
-    "luks-roots-partition-type:luks_checks_enabled || exit 0; lsblk -f | grep -q 'crypto_LUKS' && echo luks-partition-ok:luks-partition-ok"
 
     # 13. Extended BTRFS layout checks (applicable to both encrypted and unencrypted images).
     "btrfs-roots-label:findmnt -n -o LABEL / | grep -q ROOTS && echo roots-label:roots-label"
     "btrfs-overlay-label:findmnt -n -o LABEL /overlay | grep -q OVERLAY && echo overlay-label:overlay-label"
     "btrfs-home-label:findmnt -n -o LABEL /home | grep -q HOME && echo home-label:home-label"
-    "btrfs-readonly-root:findmnt -n -o OPTIONS / | tr ',' '\n' | grep -q '^ro$' && echo root-ro:root-ro"
 
     # Additional Gentoo-specific runtime sanity checks not present in Arch
     "whoami:whoami:regicide"

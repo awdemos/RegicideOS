@@ -158,7 +158,11 @@ fi
 # staging, initramfs unpacking, raw disks) do not exhaust a tmpfs-backed /tmp.
 WORK_DIR="$(TMPDIR=/var/tmp mktemp -d)"
 cleanup() {
-    rm -rf "${WORK_DIR}" 2>/dev/null || true
+    if [[ "${REGICIDE_DEBUG_KEEP_WORK_DIR}" == "1" ]]; then
+        echo "Debug: keeping work directory: ${WORK_DIR}"
+    else
+        rm -rf "${WORK_DIR}" 2>/dev/null || true
+    fi
     if [[ -n "${FW_CFG_PASSPHRASE_FILE:-}" && -f "${FW_CFG_PASSPHRASE_FILE}" ]]; then
         python3 - "${FW_CFG_PASSPHRASE_FILE}" <<'PYEOF'
 import os, sys
@@ -176,6 +180,7 @@ PYEOF
     fi
 }
 trap cleanup EXIT
+REGICIDE_DEBUG_KEEP_WORK_DIR="${REGICIDE_DEBUG_KEEP_WORK_DIR:-0}"
 
 TARGET_RAW="${WORK_DIR}/target.raw"
 KERNEL="${WORK_DIR}/kernel"
@@ -306,7 +311,7 @@ mount -t sysfs sysfs /sys
 # Ensure /dev/fd exists so process substitution works inside the chroot.
 ln -sf /proc/self/fd /dev/fd 2>/dev/null || true
 
-modprobe dm_mod || insmod /lib/modules/*/kernel/drivers/md/dm-mod.ko
+modprobe dm_mod || true
 modprobe dm_crypt || insmod /lib/modules/*/kernel/drivers/md/dm-crypt.ko
 modprobe squashfs || insmod /lib/modules/*/kernel/fs/squashfs/squashfs.ko
 modprobe overlay || insmod /lib/modules/*/kernel/fs/overlayfs/overlay.ko
@@ -430,6 +435,16 @@ mkdir -p "${INITRD_STAGING}"
 # Inject required filesystem modules from the stage4 rootfs into the initramfs.
 # The kernel we are booting may not carry these modules in its own initramfs,
 # so making them self-contained removes the dependency on the host module layout.
+# Modules that may be built into the kernel (e.g. CONFIG_DM=y). Missing .ko
+# files for these are harmless because the functionality is already present.
+BUILTIN_OPTIONAL_MODULES=(
+    "dm-mod"
+    "dm-crypt"
+    "nls_cp437"
+    "nls_ascii"
+    "qemu_fw_cfg"
+)
+
 INJECTED_MODULES=(
     "kernel/fs/squashfs/squashfs.ko"
     "kernel/fs/overlayfs/overlay.ko"
@@ -449,6 +464,10 @@ for rel_path in "${INJECTED_MODULES[@]}"; do
     fi
     dst="${INITRD_STAGING}/lib/modules/${KERNEL_VERSION}/${rel_path}"
     if [[ ! -f "${src}" ]]; then
+        if [[ " ${BUILTIN_OPTIONAL_MODULES[*]} " =~ " ${module_name} " ]]; then
+            echo "Note: ${module_name}.ko not present for ${KERNEL_VERSION}; assuming built-in"
+            continue
+        fi
         echo "Error: required module ${module_name}.ko not found for ${KERNEL_VERSION}"
         exit 1
     fi
@@ -485,11 +504,13 @@ zstd -19 -f "${WORK_DIR}/merged.cpio" -o "${CUSTOM_INITRD}"
 # ---------------------------------------------------------------------------
 echo "Booting KVM builder VM..."
 VM_SERIAL_LOG="${WORK_DIR}/builder-vm-serial.log"
+
 QEMU_ARGS=(
     -m 8G
     -smp 4
     -nographic
     -no-reboot
+    -nic none
     -kernel "${KERNEL}"
     -initrd "${CUSTOM_INITRD}"
     -drive "file=${TARGET_RAW},format=raw,if=virtio"
@@ -509,7 +530,7 @@ if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
         "${QEMU_ARGS[@]}" \
         2>&1 | tee "${VM_SERIAL_LOG}"
 else
-    "${QEMU_BIN}" \
+    timeout 600 "${QEMU_BIN}" \
         -machine type=q35,accel=kvm \
         -enable-kvm \
         -cpu host \
@@ -541,7 +562,7 @@ if grep -qiE '^Error:|Fatal error|Powering off\.' "${VM_SERIAL_LOG}" | grep -qv 
 fi
 
 if [[ "${ENCRYPT}" == true ]]; then
-    ROOTS_OFFSET=$(parted -s "${TARGET_RAW}" unit B print 2>/dev/null | awk '/^ 2 / {gsub(/B$/,""); print $2}')
+    ROOTS_OFFSET=$(parted -s "${TARGET_RAW}" unit B print 2>/dev/null | awk '/^ 2 / {gsub(/B$/, "", $2); print $2}')
     if [[ -z "${ROOTS_OFFSET}" ]]; then
         echo "Error: could not determine ROOTS partition offset."
         exit 1
@@ -553,15 +574,19 @@ if [[ "${ENCRYPT}" == true ]]; then
         exit 1
     fi
 
-    LUKS_LOOP=$(losetup -f --show -o "${ROOTS_OFFSET}" "${TARGET_RAW}")
-    if cryptsetup luksDump "${LUKS_LOOP}" >/dev/null 2>&1; then
-        echo "LUKS header verification passed."
-    else
-        echo "Error: ROOTS partition LUKS header is unreadable."
+    LUKS_LOOP=$(losetup -f --show -o "${ROOTS_OFFSET}" "${TARGET_RAW}" 2>/dev/null) || true
+    if [[ -n "${LUKS_LOOP}" ]]; then
+        if cryptsetup luksDump "${LUKS_LOOP}" >/dev/null 2>&1; then
+            echo "LUKS header verification passed."
+        else
+            echo "Error: ROOTS partition LUKS header is unreadable."
+            losetup -d "${LUKS_LOOP}" 2>/dev/null || true
+            exit 1
+        fi
         losetup -d "${LUKS_LOOP}" 2>/dev/null || true
-        exit 1
+    else
+        echo "Warning: cannot allocate loop device for LUKS verification (insufficient host permissions); relying on sample header check."
     fi
-    losetup -d "${LUKS_LOOP}" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------

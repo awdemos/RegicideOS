@@ -31,9 +31,11 @@ else
     echo "Using existing stage3: ${STAGE3_FILE}"
 fi
 
-if [[ -z "$(ls -A "${ROOTFS}" 2>/dev/null)" ]]; then
+if [[ ! -f "${ROOTFS}/etc/passwd" ]]; then
     echo "Extracting stage3 to rootfs..."
     mkdir -p "${ROOTFS}/dev"
+    # Remove any partial/unusable state from a previous interrupted run.
+    rm -rf "${ROOTFS}"/* "${ROOTFS}"/.* 2>/dev/null || true
     tar -C "${ROOTFS}" -xJf "${STAGE3_FILE}" \
         --xattrs-include='*.*' --numeric-owner --no-same-permissions \
         --exclude='./dev/*' 2>/dev/null || \

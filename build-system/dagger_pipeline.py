@@ -159,8 +159,9 @@ async def build_cosmic(
     catalyst_path = "/src/build-system/catalyst"
     repo_path = "/src"
 
-    # Mount the shared helper once.
-    build = with_build_dir.with_mounted_file(
+    # Mount the shared helper once.  Keep the seeded distfiles/binpkgs state
+    # from the `build` chain above; do not reset back to `with_build_dir`.
+    build = build.with_mounted_file(
         f"{stages_path}/common.sh",
         src.file("build-system/catalyst/stages/common.sh"),
     )
@@ -215,7 +216,12 @@ async def build_cosmic(
                 .with_directory(f"{repo_path}/data", src.directory("data"))
             )
         build = build.with_exec([f"./{script}"], insecure_root_capabilities=True)
-        if script_basename in ("stage3-base-f.sh", "stage4-cosmic-b.sh", "stage5-regicide.sh"):
+        if script_basename in (
+            "stage2-sync.sh",
+            "stage3-base-f.sh",
+            "stage4-cosmic-b.sh",
+            "stage5-regicide.sh",
+        ):
             # Persist newly downloaded distfiles and newly built binpkgs to
             # the cache volumes, then detach again so later stages stay
             # content-cacheable.
@@ -600,6 +606,7 @@ async def build_qcow2_locally(
     passphrase_file: Path | None = None,
     memorable: bool = False,
     otp_style: bool = False,
+    squashfs_path: Path | None = None,
 ) -> None:
     """Build a bootable QCOW2 image from a stage4 tarball on the host.
 
@@ -619,23 +626,25 @@ async def build_qcow2_locally(
         str(output_path),
         disk_size,
     ]
+    if squashfs_path is not None:
+        cmd[1:1] = ["--squashfs", str(squashfs_path)]
 
-    passphrase_file: Path | None = None
+    generated_passphrase_file: Path | None = None
     if encrypt:
         passphrase = _get_luks_passphrase(
             passphrase_file=passphrase_file,
-            memorable=args.memorable_passphrase,
-            otp_style=args.otp_style_passphrase,
+            memorable=memorable,
+            otp_style=otp_style,
         )
         # Keep the passphrase in ram-backed storage and never leak it to child
         # processes via environment variables. Write it without a trailing newline
         # because cryptsetup --key-file consumes the file verbatim.
         fd, passphrase_tmp = tempfile.mkstemp(prefix="regicide-luks-", dir="/dev/shm")
-        passphrase_file = Path(passphrase_tmp)
+        generated_passphrase_file = Path(passphrase_tmp)
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(passphrase.encode("utf-8"))
-        cmd[1:1] = ["--encrypt", "--passphrase-file", str(passphrase_file)]
+        cmd[1:1] = ["--encrypt", "--passphrase-file", str(generated_passphrase_file)]
         print(f"Building encrypted QCOW2 image: {output_path}")
         # Do not let the passphrase escape into the builder's environment.
         env.pop("REGICIDE_LUKS_PASSPHRASE", None)
@@ -643,8 +652,8 @@ async def build_qcow2_locally(
     try:
         subprocess.run(cmd, check=True, env=env)
     finally:
-        if passphrase_file is not None:
-            _secure_wipe(passphrase_file)
+        if generated_passphrase_file is not None:
+            _secure_wipe(generated_passphrase_file)
 
     print(f"QCOW2 image complete: {output_path}")
 
@@ -889,6 +898,7 @@ async def main() -> None:
                 passphrase_file=args.luks_passphrase_file,
                 memorable=args.memorable_passphrase,
                 otp_style=args.otp_style_passphrase,
+                squashfs_path=squashfs_path,
             )
 
         if args.run_vm_test:
@@ -900,6 +910,7 @@ async def main() -> None:
                 disk_size=args.qcow2_size,
                 encrypt=False,
                 arch=args.arch,
+                squashfs_path=squashfs_path,
             )
             print("Running stage8 post-install VM test...")
             subprocess.run(
