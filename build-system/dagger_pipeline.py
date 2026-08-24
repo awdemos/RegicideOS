@@ -39,6 +39,7 @@ import getpass
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -322,6 +323,8 @@ async def build_cosmic(
 async def build_iso(
     client: dagger.Client,
     tarball: dagger.File,
+    compression_level: int = 15,
+    processors: int = 4,
 ) -> dagger.File:
     """Create a SquashFS image from a stage4 tarball for live ISO use."""
 
@@ -336,7 +339,8 @@ async def build_iso(
         ])
         .with_exec([
             "mksquashfs", "/tmp/rootfs", "/tmp/regicide-cosmic.img",
-            "-comp", "zstd", "-Xcompression-level", "19",
+            "-comp", "zstd", "-Xcompression-level", str(compression_level),
+            "-processors", str(processors),
         ])
     )
 
@@ -887,6 +891,18 @@ async def main() -> None:
         action="store_true",
         help="Skip Sigstore signing (useful for local test builds without cosign credentials)",
     )
+    parser.add_argument(
+        "--squashfs-compression-level",
+        type=int,
+        default=15,
+        help="zstd compression level for the SquashFS image (default: 15)",
+    )
+    parser.add_argument(
+        "--squashfs-processors",
+        type=int,
+        default=4,
+        help="Number of processors mksquashfs may use (default: 4)",
+    )
     args = parser.parse_args()
 
     if args.plain:
@@ -967,10 +983,22 @@ async def main() -> None:
                 # is privileged) instead of requiring passwordless host sudo.
                 # This matches the RegicideOSArch pipeline flow.
                 print("Creating SquashFS image in Dagger (not running as root)...")
-                squashfs_file = await build_iso(client, tarball)
+                squashfs_file = await build_iso(
+                    client,
+                    tarball,
+                    compression_level=args.squashfs_compression_level,
+                    processors=args.squashfs_processors,
+                )
                 await squashfs_file.export(str(squashfs_path))
             else:
                 print("Creating SquashFS image locally...")
+                if shutil.which("mksquashfs") is None:
+                    print(
+                        "Error: mksquashfs is not installed on the host. "
+                        "Install sys-fs/squashfs-tools (or run the pipeline as a non-root user to use the Dagger engine).",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
                 # Use /var/tmp for the extracted rootfs so large artifacts do not
                 # exhaust the tmpfs-backed /tmp filesystem. Quote all paths to
                 # avoid shell injection from artifact names.
@@ -985,7 +1013,8 @@ async def main() -> None:
                         f"df -h {shlex.quote(squash_root)}; "
                         f"tar -C {shlex.quote(squash_root)} -xpJf {shlex.quote(str(tarball_path))}; "
                         f"mksquashfs {shlex.quote(squash_root)} {shlex.quote(str(squashfs_path))} "
-                        "-comp zstd -Xcompression-level 19 -noappend; "
+                        f"-comp zstd -Xcompression-level {shlex.quote(str(args.squashfs_compression_level))} "
+                        f"-processors {shlex.quote(str(args.squashfs_processors))} -noappend; "
                         f"chown {shlex.quote(f'{os.getuid()}:{os.getgid()}')} {shlex.quote(str(squashfs_path))}; "
                         f"unsquashfs -s {shlex.quote(str(squashfs_path))} >/dev/null; "
                         f"rm -rf {shlex.quote(squash_root)} || true",

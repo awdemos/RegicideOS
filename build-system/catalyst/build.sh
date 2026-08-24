@@ -17,6 +17,15 @@ if ! command -v catalyst &> /dev/null; then
     exit 1
 fi
 
+if ! command -v mksquashfs &> /dev/null; then
+    echo "mksquashfs not found. Install it first:"
+    echo "  emerge -av sys-fs/squashfs-tools"
+    exit 1
+fi
+
+SQUASHFS_COMP_LEVEL="${REGICIDE_SQUASHFS_COMP_LEVEL:-15}"
+SQUASHFS_PROCESSORS="${REGICIDE_SQUASHFS_PROCESSORS:-4}"
+
 CATALYST_TMP="/var/tmp/catalyst"
 mkdir -p "${CATALYST_TMP}/config/stages"
 mkdir -p "${CATALYST_TMP}/builds/default"
@@ -52,12 +61,23 @@ if [[ -f "${TARBALL}" ]]; then
 
     IMG_DIR="${REGICIDE_DIR}/build-system/catalyst/output"
     mkdir -p "${IMG_DIR}"
-    
-    ROOT_DIR=$(mktemp -d)
+
+    # Use /var/tmp so the extracted rootfs does not exhaust a tmpfs-backed /tmp.
+    ROOT_DIR=$(mktemp -d -p /var/tmp regicide-squashfs-root-XXXXXX)
+    trap 'rm -rf "${ROOT_DIR}"' EXIT
+
+    echo "Extracting tarball to ${ROOT_DIR}..."
     tar -C "${ROOT_DIR}" -xpJf "${TARBALL}"
-    
+
     IMG_PATH="${IMG_DIR}/regicide-cosmic.img"
-    mksquashfs "${ROOT_DIR}" "${IMG_PATH}" -comp zstd -Xcompression-level 19 -noappend
+    echo "Creating SquashFS at ${IMG_PATH} (available space):"
+    echo "  zstd compression level: ${SQUASHFS_COMP_LEVEL}"
+    echo "  mksquashfs processors: ${SQUASHFS_PROCESSORS}"
+    df -h "${IMG_DIR}"
+
+    mksquashfs "${ROOT_DIR}" "${IMG_PATH}" \
+        -comp zstd -Xcompression-level "${SQUASHFS_COMP_LEVEL}" \
+        -processors "${SQUASHFS_PROCESSORS}" -noappend
     rm -rf "${ROOT_DIR}"
     
     echo ""
