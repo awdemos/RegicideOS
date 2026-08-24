@@ -13,10 +13,11 @@ LICENSE="GPL-3"
 SLOT="0"
 KEYWORDS="~amd64"
 
-# Qt6 Widgets + LinguistTools (translations); qtsvg for icons.
+# Qt6 Widgets + LinguistTools (translations); qtsvg for icons; btrfsutil for headers/library.
 DEPEND="
 	dev-qt/qtbase:6[gui,widgets]
 	dev-qt/qtsvg:6
+	sys-fs/btrfsutil
 "
 RDEPEND="
 	${DEPEND}
