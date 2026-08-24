@@ -194,6 +194,8 @@ Environment knobs:
 
 The SquashFS image is built locally as root; when the pipeline runs unprivileged it is built inside the Dagger engine instead (same as RegicideOSArch), so no host sudo is required.
 
+> **Note:** when the pipeline runs as root (including under `sudo` with a rootful Podman socket), the host must have `mksquashfs` available. On Gentoo install `sys-fs/squashfs-tools`; on Fedora/Arch install `squashfs-tools`.
+
 ### Build observability for agents
 
 The pipeline writes per-stage progress to `output/build-status.jsonl`. Each line is a JSON object with `time`, `stage`, `event`, and `detail` fields. Agents can tail this file instead of parsing the Dagger TUI.

@@ -128,6 +128,8 @@ DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 > sudo systemctl enable --now podman.socket
 > DOCKER_HOST=unix:///run/podman/podman.sock sudo -E dagger run python build-system/dagger_pipeline.py --plain
 > ```
+>
+> **Note:** when the pipeline runs as root (including under `sudo` with a rootful Podman socket), the host must have `mksquashfs` installed to create the SquashFS image. On Gentoo install `sys-fs/squashfs-tools`; on Fedora/Arch install `squashfs-tools`.
 
 The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse cached stages and the `distfiles`/`binpkgs` cache volumes and can take 99% less time. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
 
