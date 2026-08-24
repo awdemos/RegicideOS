@@ -321,6 +321,27 @@ luks_checks_enabled() {
     [[ "${REGICIDE_FORCE_LUKS_CHECKS:-0}" == "1" ]]
 }
 
+check_luks_keyfile_leak() {
+    # Security: track the known plaintext keyfile leak in encrypted initramfses.
+    local outpath="${DIAG_DIR}/luks-keyfile-in-initramfs.txt"
+    echo "Checking for plaintext keyfile leak in initramfs..."
+    local initrd
+    initrd="$(run_ssh 'ls /boot/initramfs*.img /boot/initrd*.img 2>/dev/null | head -n1' 2>/dev/null || true)"
+    if [[ -z "${initrd}" ]]; then
+        echo "no-initramfs" > "${outpath}"
+        echo "SKIP luks-keyfile-in-initramfs (no initramfs found)"
+        return 0
+    fi
+    if run_ssh "lsinitrd '${initrd}' 2>/dev/null | grep -q '/etc/luks-keyfile'" >"${outpath}" 2>&1; then
+        echo "FAIL luks-keyfile-in-initramfs (plaintext keyfile present in ${initrd})"
+        echo "leaked" >> "${outpath}"
+        return 1
+    fi
+    echo "ok" > "${outpath}"
+    echo "PASS luks-keyfile-in-initramfs"
+    return 0
+}
+
 checks=(
     # 1-3. Distrobox container lifecycle (create, enter, remove)
     "distrobox-create-enter-rm:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; rm -rf /home/regicide/.local/share/containers /var/tmp/regicide-distrobox-* /run/user/1000/libpod /run/user/1000/containers 2>/dev/null || true; distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1 || true; timeout 120 podman pull docker.io/library/alpine >/dev/null 2>&1; pull_rc=\$?; timeout 300 distrobox create --image docker.io/library/alpine --name regicide-smoke-alpine --yes >/dev/null 2>&1; create_rc=\$?; timeout 120 distrobox enter regicide-smoke-alpine -- whoami >/tmp/dbox-enter.log 2>&1; enter_rc=\$?; timeout 60 distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1; rm_rc=\$?; echo pull_rc=\${pull_rc} create_rc=\${create_rc} enter_rc=\${enter_rc} rm_rc=\${rm_rc}; test \${pull_rc} -eq 0 && test \${create_rc} -eq 0 && test \${enter_rc} -eq 0 && grep -qx regicide /tmp/dbox-enter.log && test \${rm_rc} -eq 0 && echo distrobox-lifecycle-ok:distrobox-lifecycle-ok"
@@ -422,6 +443,12 @@ done
 run_ssh "dmesg 2>/dev/null | head -n 200" > "${DIAG_DIR}/dmesg.txt" 2>&1 || true
 run_ssh "journalctl -b --no-pager | head -n 500" > "${DIAG_DIR}/journal.txt" 2>&1 || true
 run_ssh "systemctl status --no-pager -l" > "${DIAG_DIR}/services.txt" 2>&1 || true
+
+if luks_checks_enabled; then
+    if ! check_luks_keyfile_leak; then
+        failures="${failures},luks-keyfile-in-initramfs"
+    fi
+fi
 
 if [[ -n "${failures}" ]]; then
     echo "FAILED_CHECKS=${failures#,}"

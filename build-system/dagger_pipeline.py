@@ -15,6 +15,7 @@ Dagger provides:
 Usage:
   # Main pipeline (binary packages): stage2+ reuse seeded binpkgs from the
   # cache volume via --usepkg, so rebuilds after small changes are fast.
+  # Requires a rootful Docker or Podman runtime (rootless Podman is unsupported).
   DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 
   # From-source pipeline: no --usepkg, everything compiles from source.
@@ -23,13 +24,20 @@ Usage:
   REGICIDE_USE_BINPKGS=0 DAGGER_PROGRESS=plain \
       dagger run python build-system/dagger_pipeline.py --plain
 
+  # Encrypted output (rootful runtime required).
   DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --encrypt
+
+  # If your default docker endpoint is rootless Podman, use the rootful socket:
+  #   sudo systemctl enable --now podman.socket
+  #   DOCKER_HOST=unix:///run/podman/podman.sock sudo -E \
+  #       dagger run python build-system/dagger_pipeline.py --plain
 """
 
 import argparse
 import asyncio
 import getpass
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -47,6 +55,45 @@ def _dagger_cloud_org() -> str:
 def _cpu_count() -> int:
     """Return the number of host CPUs to expose to the build container."""
     return os.cpu_count() or 4
+
+
+def _check_container_runtime() -> None:
+    """Fail fast if the local container runtime is rootless Podman.
+
+    Dagger's engine image must create the 'dagger0' bridge, which rootless
+    Podman cannot do. The Dagger SDK/CLI retry the connection for ~10 minutes
+    before surfacing the real error, so an explicit up-front check saves time.
+    If docker is unavailable or its info cannot be read, we skip the check:
+    the user may be targeting a remote engine via _EXPERIMENTAL_DAGGER_RUNNER_HOST.
+    """
+    if os.environ.get("_EXPERIMENTAL_DAGGER_RUNNER_HOST"):
+        return
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+    if result.returncode != 0:
+        return
+    output = result.stdout.lower()
+    # Podman rootless reports a standalone "rootless" line under Security Options.
+    # Docker rootless reports "rootless: true".
+    if re.search(r"^\s*rootless\s*$", output, re.MULTILINE) or "rootless: true" in output:
+        print(
+            "ERROR: Rootless Podman is not supported by the Dagger engine.\n"
+            "The engine needs to create the 'dagger0' bridge, which requires root.\n"
+            "Start the rootful Podman socket and re-run with:\n\n"
+            "  sudo systemctl enable --now podman.socket\n"
+            "  DOCKER_HOST=unix:///run/podman/podman.sock sudo -E \\\n"
+            "      dagger run python build-system/dagger_pipeline.py --plain\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 async def build_cosmic(
@@ -159,25 +206,21 @@ async def build_cosmic(
     catalyst_path = "/src/build-system/catalyst"
     repo_path = "/src"
 
-    # Mount the shared helper once.  Keep the seeded distfiles/binpkgs state
-    # from the `build` chain above; do not reset back to `with_build_dir`.
-    build = build.with_mounted_file(
-        f"{stages_path}/common.sh",
-        src.file("build-system/catalyst/stages/common.sh"),
-    )
-
-    # Stage 4a copies the local overlays into the rootfs; mount them too.
-    build = (
-        build
-        .with_directory(f"{catalyst_path}/overlay", src.directory("build-system/catalyst/overlay"))
-        .with_directory(f"{catalyst_path}/cosmic-overlay", src.directory("build-system/catalyst/cosmic-overlay"))
-        .with_directory(f"{overlays_path}/regicide-rust", src.directory("overlays/regicide-rust"))
-        # stage6-finalize.sh copies src/regicide_update into the rootfs.
-        .with_directory(f"{repo_path}/src", src.directory("src"))
-    )
-
     # Split long Portage emerges into cacheable withExec layers to limit
     # per-operation rootfs snapshots and avoid Dagger engine strain.
+    #
+    # Mount inputs just before the stage that consumes them so that edits to
+    # one file only invalidate the relevant stages:
+    #   - common.sh is mounted per-stage because every stage sources it.
+    #     A change to common.sh still invalidates stage1 onwards (it defines
+    #     the Gentoo profile and make.conf variables), but not the tooling
+    #     setup before stage1.
+    #   - catalyst/overlay, catalyst/cosmic-overlay, and overlays/regicide-rust
+    #     are mounted just before stage4-cosmic-a.sh, which copies them into
+    #     the rootfs.  Changing an overlay ebuild no longer restarts stage1-3.
+    #   - src/, pyproject.toml, seed-overlays.sh, and data/ are mounted just
+    #     before stage6-finalize.sh, which copies regicide-update into the
+    #     rootfs.  Changing the update tooling no longer restarts stage1-5.
     stage_scripts = [
         "stages/stage1-setup.sh",
         "stages/stage2-sync.sh",
@@ -198,16 +241,37 @@ async def build_cosmic(
         # mount path.
         script_basename = script.removeprefix("stages/")
         build = build.with_mounted_file(
+            f"{stages_path}/common.sh",
+            src.file("build-system/catalyst/stages/common.sh"),
+        )
+        build = build.with_mounted_file(
             f"{stages_path}/{script_basename}",
             src.file(f"build-system/catalyst/{script}"),
         )
-        if script_basename == "stage6-finalize.sh":
-            # stage6-finalize.sh stages the regicide-update source tree from
-            # the repo root (REPO_ROOT=/src in the container).  Mount the
-            # extra inputs it copies only now, just before stage6 runs, so
-            # the cache keys for stages 1-5 stay stable.
+        if script_basename == "stage4-cosmic-a.sh":
             build = (
                 build
+                .with_directory(
+                    f"{catalyst_path}/overlay",
+                    src.directory("build-system/catalyst/overlay"),
+                )
+                .with_directory(
+                    f"{catalyst_path}/cosmic-overlay",
+                    src.directory("build-system/catalyst/cosmic-overlay"),
+                )
+                .with_directory(
+                    f"{overlays_path}/regicide-rust",
+                    src.directory("overlays/regicide-rust"),
+                )
+            )
+        if script_basename == "stage6-finalize.sh":
+            # stage6-finalize.sh stages the regicide-update source tree from
+            # the repo root (REPO_ROOT=/src in the container).  Mount the extra
+            # inputs it copies only now, just before stage6 runs, so the cache
+            # keys for stages 1-5 stay stable.
+            build = (
+                build
+                .with_directory(f"{repo_path}/src", src.directory("src"))
                 .with_mounted_file(f"{repo_path}/pyproject.toml", src.file("pyproject.toml"))
                 .with_mounted_file(
                     f"{catalyst_path}/seed-overlays.sh",
@@ -658,6 +722,98 @@ async def build_qcow2_locally(
     print(f"QCOW2 image complete: {output_path}")
 
 
+CHUNK_SIZE = "2G"
+_CHUNK_RETRIES = 3
+
+
+async def _export_file_with_retry(file: dagger.File, dest: Path) -> None:
+    """Export a single file, retrying transient Dagger transport errors."""
+    for attempt in range(_CHUNK_RETRIES):
+        try:
+            await file.export(str(dest))
+            return
+        except dagger.TransportError as exc:
+            if attempt == _CHUNK_RETRIES - 1:
+                raise
+            print(
+                f"  Export failed for {dest.name} ({exc}); retrying "
+                f"({attempt + 1}/{_CHUNK_RETRIES})...",
+                file=sys.stderr,
+            )
+            await asyncio.sleep(2 ** attempt)
+
+
+async def export_tarball_in_chunks(
+    container: dagger.Container,
+    container_tar_path: str,
+    local_path: Path,
+) -> Path:
+    """Export a large tarball in chunks to avoid Dagger fsync deadlocks/timeouts.
+
+    The tarball is split inside the container into fixed-size pieces, each piece
+    is exported separately, and the pieces are reassembled on the host.  This
+    avoids the single multi-GB `File.export()` call that triggers
+    `Server error '502 Bad Gateway'` under Podman and BuildKit's fsutil
+    export path.
+    """
+    local_path = local_path.resolve()
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    chunk_dir = "/tmp/regicide-tarball-chunks"
+    stem = local_path.name
+
+    split_container = container.with_exec(
+        [
+            "sh",
+            "-c",
+            f"set -e; rm -rf {chunk_dir}; mkdir -p {chunk_dir}; "
+            f"split -b {CHUNK_SIZE} -a 4 -d "
+            f"{shlex.quote(container_tar_path)} "
+            f"{shlex.quote(f'{chunk_dir}/{stem}.chunk_')}",
+        ]
+    )
+
+    chunk_names = sorted(await split_container.directory(chunk_dir).entries())
+    if not chunk_names:
+        raise RuntimeError(f"no tarball chunks produced in {chunk_dir}")
+
+    chunk_files: list[Path] = []
+    for name in chunk_names:
+        local_chunk = local_path.parent / name
+        await _export_file_with_retry(split_container.file(f"{chunk_dir}/{name}"), local_chunk)
+        chunk_files.append(local_chunk)
+
+    # Reassemble on the host in a streaming fashion.
+    with local_path.open("wb") as out:
+        for chunk in chunk_files:
+            with chunk.open("rb") as src:
+                while True:
+                    data = src.read(8 * 1024 * 1024)
+                    if not data:
+                        break
+                    out.write(data)
+
+    # Clean up chunk files once the tarball is complete and verified.
+    total_size = local_path.stat().st_size
+    for chunk in chunk_files:
+        chunk.unlink()
+
+    print(f"Exported {len(chunk_files)} chunks ({total_size} bytes total) -> {local_path}")
+    return local_path
+
+
+def assemble_tarball_chunks(chunk_paths: list[Path], output: Path) -> None:
+    """Reassemble tarball chunks into a single tarball on the host."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("wb") as out:
+        for chunk in chunk_paths:
+            with chunk.open("rb") as src:
+                while True:
+                    data = src.read(8 * 1024 * 1024)
+                    if not data:
+                        break
+                    out.write(data)
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build RegicideOS COSMIC stage4, SquashFS, and optional encrypted QCOW2."
@@ -749,6 +905,8 @@ async def main() -> None:
             print(f"Error: --from-squashfs file not found: {squashfs_input}", file=sys.stderr)
             sys.exit(1)
 
+    _check_container_runtime()
+
     config = dagger.Config(log_output=sys.stdout)
     os.environ.setdefault("DAGGER_CLOUD_ORG", _dagger_cloud_org())
     # DAGGER_CLOUD_TOKEN selects the Dagger Cloud organization; ensure it points
@@ -774,10 +932,13 @@ async def main() -> None:
         out_dir = Path("build-system/catalyst/output")
 
         if tarball_path is None:
-            print("Exporting stage4 tarball...")
-            await tarball.export(str(out_dir / f"stage4-{args.arch}-systemd-cosmic.tar.xz"))
+            print("Exporting stage4 tarball (chunked)...")
+            tarball_path = await export_tarball_in_chunks(
+                build_container,
+                f"/src/build-system/catalyst/output/stage4-{args.arch}-systemd-cosmic.tar.xz",
+                out_dir / f"stage4-{args.arch}-systemd-cosmic.tar.xz",
+            )
             print(f"Output: build-system/catalyst/output/stage4-{args.arch}-systemd-cosmic.tar.xz")
-            tarball_path = out_dir / f"stage4-{args.arch}-systemd-cosmic.tar.xz"
 
         print("Loading SBOM for signing...")
         sbom_env = os.environ.copy()

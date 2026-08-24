@@ -26,7 +26,7 @@ stage4/use:
 	screencast
 	video_cards_amdgpu
 	video_cards_intel
-	video_cards_nouveau
+	video_cards_nvidia
 	video_cards_radeon
 	video_cards_radeonsi
 	video_cards_virgl
@@ -75,6 +75,7 @@ stage4/packages:
 	media-libs/gstreamer
 	media-libs/mesa
 	media-video/wireplumber
+	x11-drivers/nvidia-drivers
 	net-fs/samba
 	net-print/cups
 	sys-apps/flatpak

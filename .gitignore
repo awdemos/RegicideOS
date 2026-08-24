@@ -63,6 +63,12 @@ __pycache__/
 .desloppify/
 .omo/
 .specify/
+.opencode/
+
+# Generated artifacts / local runtime output
+nohup.out
+release-assets/
+screenshots/
 
 # Legacy artifacts not part of current source
 legacy_installer.py

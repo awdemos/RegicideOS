@@ -45,10 +45,30 @@ build-btrmind:
 build-iso:
     cd build-system/catalyst && sudo ./build.sh
 
-# Run Dagger CI/CD pipeline (requires Dagger)
-dagger-build:
+# Verify the container runtime is rootful (rootless Podman breaks Dagger engine)
+check-runtime:
+	@./scripts/check-container-runtime.sh
+
+# Run Dagger CI/CD pipeline (requires Dagger and a rootful runtime)
+dagger-build: check-runtime
 	DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+
+# Build a fresh bootable ISO from source (requires Dagger and a rootful runtime)
+rebuild-iso:
+	./scripts/rebuild-iso.sh
+
+# Flash the built ISO to a USB device (pass DEVICE=/dev/sdX)
+flash-usb DEVICE:
+	./scripts/flash-usb.sh {{DEVICE}}
+
+# Fix Dagger engine runtime issues on Fedora Atomic / Podman hosts
+fix-dagger:
+	./scripts/troubleshoot/fix-dagger.sh
+
+# Fix DNS resolution inside Dagger/Podman containers
+fix-dagger-dns:
+	./scripts/troubleshoot/fix-dagger-dns.sh
 
 # Full CI check (build, test, lint)
 ci: lint test build
-    @echo "✓ All CI checks passed"
+	@echo "✓ All CI checks passed"

@@ -160,6 +160,15 @@ Dagger is used as an **orchestration layer**, not a replacement for Catalyst. Th
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
+> **Note:** the Dagger engine image needs to create the `dagger0` bridge, so it
+> cannot run under **rootless Podman**. Use a rootful Docker or Podman runtime.
+> If your default `docker` endpoint is rootless Podman, start the rootful socket:
+>
+> ```bash
+> sudo systemctl enable --now podman.socket
+> DOCKER_HOST=unix:///run/podman/podman.sock sudo -E dagger run python build-system/dagger_pipeline.py --plain
+> ```
+
 The pipeline runs six cacheable stages. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI, which is easier to read in agent/CI environments:
 
 1. `stages/stage1-setup.sh` — stage3 seed and Portage snapshot

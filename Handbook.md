@@ -110,6 +110,11 @@ DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --arch arm64
 ```
 
+> **Note:** Dagger's engine image must create the `dagger0` bridge, so it
+> requires a **rootful** Docker or Podman runtime. Rootless Podman is not
+> supported. If your default `docker` endpoint is rootless Podman, start the
+> rootful socket and re-run with `DOCKER_HOST=unix:///run/podman/podman.sock`.
+
 This runs six cacheable stages in `build-system/catalyst/stages/`. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI, which is easier to read in agent/CI environments:
 
 1. `stage1-setup.sh` — download and extract the Gentoo stage3 seed

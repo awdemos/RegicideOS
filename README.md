@@ -114,11 +114,20 @@ cd build-system/catalyst
 sudo ./build.sh
 ```
 
-**Option B: Dagger (works in any container with Docker/Podman)**
+**Option B: Dagger (requires a rootful Docker or Podman runtime)**
 
 ```bash
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
+
+> **Note:** the Dagger engine image needs to create the `dagger0` bridge, so it
+> cannot run under **rootless Podman**. If your default `docker` endpoint is a
+> rootless Podman socket, start the rootful Podman socket and point Dagger at it:
+>
+> ```bash
+> sudo systemctl enable --now podman.socket
+> DOCKER_HOST=unix:///run/podman/podman.sock sudo -E dagger run python build-system/dagger_pipeline.py --plain
+> ```
 
 The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse cached stages and the `distfiles`/`binpkgs` cache volumes and can take 99% less time. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
 

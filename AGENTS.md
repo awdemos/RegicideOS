@@ -46,11 +46,14 @@ just ci              # lint test build
 # OS image (root, Gentoo host)
 just build-iso       # cd build-system/catalyst && sudo ./build.sh
 
-# Dagger CI/CD (recommended; works in any Docker/Podman host)
+# Dagger CI/CD (recommended; requires a rootful Docker or Podman runtime)
 # Main pipeline reuses binary packages from the cache volume (fast rebuilds)
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 # From-source pipeline (full recompile; still populates the binpkg cache)
 REGICIDE_USE_BINPKGS=0 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
+# If your default container runtime is rootless Podman, use the rootful socket:
+#   sudo systemctl enable --now podman.socket
+#   DOCKER_HOST=unix:///run/podman/podman.sock sudo -E dagger run python build-system/dagger_pipeline.py --plain
 
 # Installer (run from a Linux live environment for bare metal)
 cd installer && cargo build --release

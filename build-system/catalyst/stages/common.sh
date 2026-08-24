@@ -21,7 +21,7 @@ case "${REGICIDE_ARCH}" in
         GENTOO_STAGE3_BASENAME="stage3-amd64-systemd"
         GENTOO_PROFILE="default/linux/amd64/23.0/desktop/systemd"
         GENTOO_KEYWORDS="~amd64"
-        GENTOO_VIDEO_CARDS="video_cards_amdgpu video_cards_intel video_cards_nouveau video_cards_radeon video_cards_radeonsi video_cards_virgl video_cards_vmware"
+        GENTOO_VIDEO_CARDS="video_cards_amdgpu video_cards_intel video_cards_nvidia video_cards_radeon video_cards_radeonsi video_cards_virgl video_cards_vmware"
         ;;
     arm64)
         GENTOO_ARCH="arm64"

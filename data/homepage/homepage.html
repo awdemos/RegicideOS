@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RegicideOS · GPU Cloud Rentals</title>
+  <meta name="description" content="Rent NVIDIA H100, A100, L40S, RTX 4090 and more GPUs by the hour from Vibe Coding Agency.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0a0a0a',
+            surface: '#111111',
+            'surface-raised': '#171717',
+            'surface-border': '#232323',
+            text: '#f4f4f5',
+            'text-muted': '#a1a1aa',
+            'text-dim': '#52525b',
+            accent: '#76b900',
+            'accent-hover': '#5f9500',
+            cta: '#76b900',
+            'cta-text': '#0a0a0a',
+            danger: '#ef4444'
+          },
+          fontFamily: {
+            display: ['Space Grotesk', 'sans-serif'],
+            sans: ['Inter', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    h1,h2,h3,h4,h5,h6 { font-family: 'Space Grotesk', sans-serif; }
+  </style>
+</head>
+<body class="bg-bg text-text antialiased">
+  <header class="fixed inset-x-0 top-0 z-50 border-b border-surface-border/60 bg-bg/70 backdrop-blur-xl">
+    <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+      <a href="https://vibecodingagency.com/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="flex items-center gap-2.5 font-display text-lg font-medium">
+        <svg class="h-8 w-8" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Vibe Coding Agency mark">
+          <rect width="40" height="40" rx="10" fill="#171717"/>
+          <path d="M12 28L20 12L28 28" stroke="#76b900" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="20" cy="12" r="3" fill="#60a5fa"/>
+          <circle cx="12" cy="28" r="2" fill="#fbbf24"/>
+          <circle cx="28" cy="28" r="2" fill="#76b900"/>
+          <path d="M20 9V5" stroke="#76b900" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+          <path d="M8 30L5 32" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+          <path d="M32 30L35 32" stroke="#76b900" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+        </svg>
+        <span>Vibe Coding Agency</span>
+      </a>
+      <nav class="hidden items-center gap-8 md:flex">
+        <a href="https://vibecodingagency.com/gpus/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="text-sm font-medium text-text-muted hover:text-text transition-colors">GPU rentals</a>
+        <a href="https://vibecodingagency.com/gpu-cloud/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="text-sm font-medium text-text-muted hover:text-text transition-colors">UltraWork</a>
+      </nav>
+      <a href="https://vibecodingagency.com/gpus/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="hidden sm:inline-flex items-center rounded-full bg-cta px-4 py-2 text-sm font-semibold text-cta-text hover:bg-accent-hover transition-colors">Rent a GPU</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="relative overflow-hidden pt-32 pb-16">
+      <div class="absolute inset-0 bg-[radial-gradient(circle_at_20%_30%,rgba(118,185,0,0.18),transparent_35%),radial-gradient(circle_at_80%_70%,rgba(96,165,250,0.12),transparent_35%)]"></div>
+      <div class="absolute -top-40 -right-40 h-96 w-96 rounded-full bg-accent/10 blur-3xl"></div>
+      <div class="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl"></div>
+      <div class="relative mx-auto max-w-5xl px-4 sm:px-6">
+        <p class="mb-3 text-sm font-semibold uppercase tracking-wider text-accent">Welcome to RegicideOS</p>
+        <h1 class="font-display text-4xl font-medium leading-tight sm:text-6xl lg:text-7xl">Need a GPU? Rent one now.</h1>
+        <p class="mx-auto mt-6 max-w-3xl text-lg text-text-muted sm:text-xl">Spin up NVIDIA H100, A100, L40S, RTX 4090 and more. Bare-metal instances with root SSH, public IP, and no long-term contract.</p>
+        <div class="mt-8 flex flex-wrap justify-center gap-4">
+          <a href="https://vibecodingagency.com/gpus/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="inline-flex items-center gap-2 rounded-full bg-cta px-7 py-3.5 text-base font-semibold text-cta-text hover:bg-accent-hover transition-colors">Browse GPUs</a>
+          <a href="https://vibecodingagency.com/gpu-cloud/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="inline-flex items-center rounded-full border border-surface-border bg-surface/60 px-7 py-3.5 text-base font-medium backdrop-blur-sm hover:bg-surface-raised transition-colors">Try UltraWork</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="border-t border-surface-border bg-surface/40 py-20">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6">
+        <div class="mb-12 text-center">
+          <p class="mb-3 text-sm font-semibold uppercase tracking-wider text-accent">Catalog preview</p>
+          <h2 class="font-display text-4xl font-medium sm:text-5xl">Popular GPU instances</h2>
+          <p class="mx-auto mt-4 max-w-2xl text-text-muted">Monthly pricing for bare-metal GPU instances. Click through for live inventory.</p>
+        </div>
+        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div class="relative overflow-hidden rounded-2xl border border-surface-border bg-surface p-8 transition-transform hover:-translate-y-1">
+            <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent/40 to-transparent"></div>
+            <div class="mb-4 flex items-center justify-between">
+              <div class="inline-flex rounded-xl bg-accent/10 p-3 text-accent">
+                <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21m0-18L4.5 8.25m3.75 3.75L4.5 15"/><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              </div>
+              <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">us-central1</span>
+            </div>
+            <h3 class="font-display text-2xl font-medium">NVIDIA H200 SXM</h3>
+            <div class="mt-4 flex items-baseline gap-2">
+              <span class="font-display text-4xl font-medium text-text">From $3,614</span>
+              <span class="text-text-muted">/mo</span>
+            </div>
+            <p class="mt-4 text-sm text-text-muted">1 GPU bare-metal instance with dedicated vCPU and RAM. 8-GPU nodes available.</p>
+            <a href="https://vibecodingagency.com/gpus/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="mt-5 inline-flex w-full items-center justify-center rounded-full bg-cta px-6 py-3 text-base font-semibold text-cta-text hover:bg-accent-hover transition-colors">See details</a>
+          </div>
+
+          <div class="relative overflow-hidden rounded-2xl border border-surface-border bg-surface p-8 transition-transform hover:-translate-y-1">
+            <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent/40 to-transparent"></div>
+            <div class="mb-4 flex items-center justify-between">
+              <div class="inline-flex rounded-xl bg-accent/10 p-3 text-accent">
+                <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21m0-18L4.5 8.25m3.75 3.75L4.5 15"/><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              </div>
+              <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">us-central1</span>
+            </div>
+            <h3 class="font-display text-2xl font-medium">NVIDIA B200 SXM</h3>
+            <div class="mt-4 flex items-baseline gap-2">
+              <span class="font-display text-4xl font-medium text-text">From $5,742</span>
+              <span class="text-text-muted">/mo</span>
+            </div>
+            <p class="mt-4 text-sm text-text-muted">Next-gen Blackwell bare-metal. 1-GPU and 8-GPU configurations.</p>
+            <a href="https://vibecodingagency.com/gpus/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="mt-5 inline-flex w-full items-center justify-center rounded-full bg-cta px-6 py-3 text-base font-semibold text-cta-text hover:bg-accent-hover transition-colors">See details</a>
+          </div>
+
+          <div class="relative overflow-hidden rounded-2xl border border-surface-border bg-surface p-8 transition-transform hover:-translate-y-1">
+            <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent/40 to-transparent"></div>
+            <div class="mb-4 flex items-center justify-between">
+              <div class="inline-flex rounded-xl bg-accent/10 p-3 text-accent">
+                <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21m0-18L4.5 8.25m3.75 3.75L4.5 15"/><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              </div>
+              <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">us-central1</span>
+            </div>
+            <h3 class="font-display text-2xl font-medium">NVIDIA RTX PRO 6000</h3>
+            <div class="mt-4 flex items-baseline gap-2">
+              <span class="font-display text-4xl font-medium text-text">From $1,446</span>
+              <span class="text-text-muted">/mo</span>
+            </div>
+            <p class="mt-4 text-sm text-text-muted">Workstation-class GPU for inference, rendering, and ML prototyping.</p>
+            <a href="https://vibecodingagency.com/gpus/?utm_source=regicideos&utm_medium=website&utm_campaign=first_user" target="_blank" rel="noopener" class="mt-5 inline-flex w-full items-center justify-center rounded-full bg-cta px-6 py-3 text-base font-semibold text-cta-text hover:bg-accent-hover transition-colors">See details</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="border-t border-surface-border py-20">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6">
+        <div class="mb-12 text-center">
+          <p class="mb-3 text-sm font-semibold uppercase tracking-wider text-accent">Workload guidance</p>
+          <h2 class="font-display text-3xl font-medium sm:text-4xl">Pick the right GPU for the job</h2>
+          <p class="mx-auto mt-4 max-w-2xl text-text-muted">A quick reference for matching hardware to common AI/ML tasks.</p>
+        </div>
+        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <h3 class="font-display text-xl font-medium">Training large models</h3>
+            <ul class="mt-4 space-y-2 text-sm text-text-muted">
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>H200 SXM 8-GPU nodes</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>B200 SXM 8-GPU nodes</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>Highest memory bandwidth</li>
+            </ul>
+          </div>
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <h3 class="font-display text-xl font-medium">Inference &amp; serving</h3>
+            <ul class="mt-4 space-y-2 text-sm text-text-muted">
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>A100 / H100 1-GPU or 8-GPU</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>L40S for batch inference</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>RTX PRO 6000 for prototyping</li>
+            </ul>
+          </div>
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <h3 class="font-display text-xl font-medium">Fine-tuning &amp; LoRA</h3>
+            <ul class="mt-4 space-y-2 text-sm text-text-muted">
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>1x A100 80 GB</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>1x H100 80 GB</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>Scale to 8x for larger jobs</li>
+            </ul>
+          </div>
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <h3 class="font-display text-xl font-medium">Rendering &amp; simulation</h3>
+            <ul class="mt-4 space-y-2 text-sm text-text-muted">
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>RTX PRO 6000 1-GPU or 8-GPU</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>RTX 4090 for cost-sensitive work</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>L40S for production pipelines</li>
+            </ul>
+          </div>
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <h3 class="font-display text-xl font-medium">Experimentation</h3>
+            <ul class="mt-4 space-y-2 text-sm text-text-muted">
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>RTX 4090 single GPU</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>A10 for light models</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>Upgrade as you scale</li>
+            </ul>
+          </div>
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <h3 class="font-display text-xl font-medium">Multi-node clusters</h3>
+            <ul class="mt-4 space-y-2 text-sm text-text-muted">
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>8-GPU H200 / B200 nodes</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>Private networking</li>
+              <li class="flex items-start gap-2"><span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>Contact sales for fleet pricing</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="border-t border-surface-border bg-surface/40 py-20">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6">
+        <div class="mb-12 text-center">
+          <p class="mb-3 text-sm font-semibold uppercase tracking-wider text-accent">Why rent here</p>
+          <h2 class="font-display text-3xl font-medium sm:text-4xl">Built for builders</h2>
+        </div>
+        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-surface-border bg-surface-raised">
+              <svg class="h-6 w-6 text-accent" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h1.5m-1.5 4.5h1.5m-1.5-9h1.5m4.5 9h1.5m-1.5-4.5h1.5m-1.5-4.5h1.5m4.5 9h1.5m-1.5-4.5h1.5m-1.5-4.5h1.5M3.75 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25h12a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25h-12a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>
+            </div>
+            <h3 class="font-display text-xl font-medium">Bare-metal access</h3>
+            <p class="mt-2 text-text-muted">Root SSH into the host. Install your own drivers, containers, and distributed tools.</p>
+          </div>
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-surface-border bg-surface-raised">
+              <svg class="h-6 w-6 text-accent" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.179-2.074-.519A3.001 3.001 0 0 0 6.375 13.5c0 1.323.936 2.416 2.182 2.671"/></svg>
+            </div>
+            <h3 class="font-display text-xl font-medium">No long-term contract</h3>
+            <p class="mt-2 text-text-muted">Rent by the month. Scale up for a training run, then scale back down.</p>
+          </div>
+          <div class="rounded-2xl border border-surface-border bg-surface p-6">
+            <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-surface-border bg-surface-raised">
+              <svg class="h-6 w-6 text-accent" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"/></svg>
+            </div>
+            <h3 class="font-display text-xl font-medium">SSH-ready instances</h3>
+            <p class="mt-2 text-text-muted">Add your public key at checkout and connect immediately. Public IP included.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="relative overflow-hidden border-t border-surface-border">
+      <div class="absolute inset-0 bg-gradient-to-br from-accent/10 via-transparent to-blue-500/10"></div>
+      <div class="relative mx-auto max-w-4xl px-4 py-20 text-center sm:px-6">
+        <h2 class="font-display text-3xl font-medium sm:text-4xl">Need a custom fleet?</h2>
+        <p class="mt-4 text-lg text-text-muted">Multi-node clusters, private networking, and reserved capacity are available for teams.</p>
+        <a href="mailto:hello@vibecodingagency.com?subject=RegicideOS%20GPU%20fleet%20inquiry" class="mt-8 inline-flex items-center gap-2 rounded-full bg-cta px-7 py-3.5 text-base font-semibold text-cta-text hover:bg-accent-hover transition-colors">Contact sales</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-surface-border bg-bg py-12">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6">
+      <div class="flex flex-col items-center justify-between gap-4 text-xs text-text-dim sm:flex-row">
+        <p>&copy; 2026 Vibe Coding Agency LLC. All rights reserved.</p>
+        <a href="mailto:hello@vibecodingagency.com" class="hover:text-text transition-colors">hello@vibecodingagency.com</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

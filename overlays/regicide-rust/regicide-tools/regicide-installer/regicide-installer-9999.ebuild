@@ -64,9 +64,11 @@ src_install() {
 	dodoc "${S}/README.md"
 	dodoc "${S}/Handbook.md"
 
-	# Install example configurations
-	insinto /usr/share/regicide/installer
-	doins "${FILESDIR}/regicide-config-examples/"* 2>/dev/null || true
+	# Install example configurations if any exist.
+	if [[ -d "${FILESDIR}/regicide-config-examples" ]]; then
+		insinto /usr/share/regicide/installer
+		doins "${FILESDIR}/regicide-config-examples/"*
+	fi
 }
 
 pkg_postinst() {

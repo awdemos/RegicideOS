@@ -12,6 +12,16 @@ The canonical build command streams plain text progress (much easier to read for
 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
+> **Note:** the Dagger engine image needs to create the `dagger0` bridge, so it
+> requires a **rootful** Docker or Podman runtime. Rootless Podman is not
+> supported. If your default `docker` endpoint is rootless Podman, use the
+> rootful socket:
+>
+> ```bash
+> sudo systemctl enable --now podman.socket
+> DOCKER_HOST=unix:///run/podman/podman.sock sudo -E dagger run python build-system/dagger_pipeline.py --plain
+> ```
+
 Outputs (on success):
 - `regicide-cosmic.img` — live SquashFS image
 - `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz` — stage4 rootfs tarball

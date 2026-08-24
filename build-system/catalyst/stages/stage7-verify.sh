@@ -281,7 +281,44 @@ for path in /etc/hosts /etc/fstab /etc/portage/make.conf; do
     fi
 done
 
-# 17. Root README.md is world-readable.
+# 17. First-user GPU rental homepage and desktop shortcut are present.
+homepage_path="${ROOTS_DIR}/home/regicide/homepage.html"
+if [[ -f "${homepage_path}" ]]; then
+    pass "homepage.html present in /home/regicide"
+else
+    fail "homepage.html missing from /home/regicide"
+fi
+homepage_mode="$(stat -c '%a' "${homepage_path}" 2>/dev/null || true)"
+if [[ "${homepage_mode}" == "644" ]]; then
+    pass "homepage.html mode 0644"
+else
+    fail "homepage.html mode ${homepage_mode}, expected 644"
+fi
+if grep -q 'vibecodingagency.com/gpus/' "${homepage_path}" 2>/dev/null; then
+    pass "homepage.html links to vibecodingagency.com/gpus/"
+else
+    fail "homepage.html missing vibecodingagency.com/gpus/ link"
+fi
+
+desktop_path="${ROOTS_DIR}/home/regicide/Desktop/Rent-a-GPU.desktop"
+if [[ -f "${desktop_path}" ]]; then
+    pass "Rent-a-GPU.desktop present on Desktop"
+else
+    fail "Rent-a-GPU.desktop missing from Desktop"
+fi
+desktop_mode="$(stat -c '%a' "${desktop_path}" 2>/dev/null || true)"
+if [[ "${desktop_mode}" == "644" || "${desktop_mode}" == "755" ]]; then
+    pass "Rent-a-GPU.desktop mode ${desktop_mode}"
+else
+    fail "Rent-a-GPU.desktop mode ${desktop_mode}, expected 644 or 755"
+fi
+if grep -q '/home/regicide/homepage.html' "${desktop_path}" 2>/dev/null; then
+    pass "Rent-a-GPU.desktop points to /home/regicide/homepage.html"
+else
+    fail "Rent-a-GPU.desktop does not point to homepage.html"
+fi
+
+# 18. Root README.md is world-readable.
 readme_path="${ROOTS_DIR}/README.md"
 if [[ -f "${readme_path}" ]]; then
     readme_mode="$(stat -c '%a' "${readme_path}" 2>/dev/null || true)"
@@ -295,14 +332,14 @@ else
     pass "/README.md not present, skipping"
 fi
 
-# 18. SSH does not hang on DNS unavailability.
+# 19. SSH does not hang on DNS unavailability.
 if [[ -f "${ROOTS_DIR}/etc/ssh/sshd_config" ]] && grep -q '^UseDNS no' "${ROOTS_DIR}/etc/ssh/sshd_config"; then
     pass "sshd UseDNS disabled"
 else
     fail "sshd UseDNS no missing"
 fi
 
-# 19. NSS allows DNS fallback when systemd-resolved is inactive.
+# 20. NSS allows DNS fallback when systemd-resolved is inactive.
 if [[ -f "${ROOTS_DIR}/etc/nsswitch.conf" ]]; then
     if grep -q '^hosts:.*resolve \[!UNAVAIL=return\]' "${ROOTS_DIR}/etc/nsswitch.conf"; then
         fail "nsswitch.conf hosts line blocks DNS fallback"

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Rent a GPU
+Comment=Open the RegicideOS GPU rentals landing page
+Exec=xdg-open /home/regicide/homepage.html
+Type=Application
+Icon=applications-internet
+Terminal=false
+Categories=Network;WebBrowser;

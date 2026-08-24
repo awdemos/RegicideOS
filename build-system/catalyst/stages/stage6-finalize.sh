@@ -22,9 +22,17 @@ cp "${REPO_ROOT}/build-system/catalyst/seed-overlays.sh" \
     "${REGICIDE_UPDATE_STAGING}/build-system/catalyst/"
 cp "${REPO_ROOT}/data/regicide-rollback-apply.service" \
     "${REGICIDE_UPDATE_STAGING}/data/"
-install -d "${REGICIDE_UPDATE_STAGING}/data/fastfetch/logos"
+install -d "${REGICIDE_UPDATE_STAGING}/data/fastfetch/logos" \
+    "${REGICIDE_UPDATE_STAGING}/data/desktop" \
+    "${REGICIDE_UPDATE_STAGING}/data/homepage"
 cp "${REPO_ROOT}/data/fastfetch/logos/regicideos.txt" \
     "${REGICIDE_UPDATE_STAGING}/data/fastfetch/logos/" 2>/dev/null || true
+cp "${REPO_ROOT}/data/desktop/README.md" \
+    "${REGICIDE_UPDATE_STAGING}/data/desktop/README.md"
+cp "${REPO_ROOT}/data/homepage/homepage.html" \
+    "${REGICIDE_UPDATE_STAGING}/data/homepage/homepage.html"
+cp "${REPO_ROOT}/data/homepage/Rent-a-GPU.desktop" \
+    "${REGICIDE_UPDATE_STAGING}/data/homepage/Rent-a-GPU.desktop"
 
 run_in_chroot bash <<'STAGE6EOF'
     # The stage3/4 lineage leaves /etc as 0700, which breaks every service
@@ -35,7 +43,19 @@ run_in_chroot bash <<'STAGE6EOF'
     chmod -R go+rX /etc/portage 2>/dev/null || true
 
     if command -v dracut &> /dev/null; then
-        dracut --force --no-hostonly --kver "$(ls /lib/modules/ | head -n1)"
+        # Include proprietary NVIDIA modules in the initramfs if they were
+        # installed (e.g. for identical bare-metal hardware). This ensures the
+        # live ISO and installed system can drive NVIDIA GPUs from early boot.
+        local kver
+        kver=$(ls /lib/modules/ | head -n1)
+        if [[ -d "/lib/modules/${kver}/video" ]] && \
+           find "/lib/modules/${kver}/video" -name 'nvidia*.ko*' -print -quit 2>/dev/null | grep -q .; then
+            echo "Including NVIDIA modules in initramfs for kernel ${kver}"
+            dracut --force --no-hostonly --kver "${kver}" \
+                --add-drivers "nvidia nvidia_modeset nvidia_uvm nvidia_drm"
+        else
+            dracut --force --no-hostonly --kver "${kver}"
+        fi
     fi
 
     # Leave root password unset so the user manages it via regicide+sudo.
@@ -68,6 +88,37 @@ run_in_chroot bash <<'STAGE6EOF'
 FFEOF
         chown -R regicide:regicide /home/regicide/.config
     fi
+
+    # Place the OS handbook on the desktop so users can open it by double-clicking.
+    if [[ -f /var/tmp/regicide_update_src/data/desktop/README.md ]]; then
+        mkdir -p /home/regicide/Desktop
+        install -Dm644 /var/tmp/regicide_update_src/data/desktop/README.md \
+            /home/regicide/Desktop/README.md
+        chown regicide:regicide /home/regicide/Desktop /home/regicide/Desktop/README.md
+        # Ensure markdown files open with a text editor when double-clicked.
+        mkdir -p /home/regicide/.config
+        cat > /home/regicide/.config/mimeapps.list <<'MIMEEOF'
+[Default Applications]
+text/markdown=cosmic-text-editor.desktop
+text/plain=cosmic-text-editor.desktop
+MIMEEOF
+        chown -R regicide:regicide /home/regicide/.config
+    fi
+
+    # Local first-user GPU rental landing page + desktop shortcut.
+    if [[ -f /var/tmp/regicide_update_src/data/homepage/homepage.html ]]; then
+        install -Dm644 /var/tmp/regicide_update_src/data/homepage/homepage.html \
+            /home/regicide/homepage.html
+        chown regicide:regicide /home/regicide/homepage.html
+        chmod 0644 /home/regicide/homepage.html
+        mkdir -p /home/regicide/Desktop
+        install -Dm644 /var/tmp/regicide_update_src/data/homepage/Rent-a-GPU.desktop \
+            /home/regicide/Desktop/Rent-a-GPU.desktop
+        chown regicide:regicide /home/regicide/Desktop /home/regicide/Desktop/Rent-a-GPU.desktop
+        chmod 0755 /home/regicide/Desktop /home/regicide/Desktop/Rent-a-GPU.desktop
+        chmod 0644 /home/regicide/Desktop/Rent-a-GPU.desktop
+    fi
+
     # Suppress the common "tty: ttyname error" message from flatpak terminal
     # emulators (e.g. Rio) when shell startup files run `mesg n` without a TTY.
     # Write a minimal .profile that guards `mesg n` against missing TTY.
