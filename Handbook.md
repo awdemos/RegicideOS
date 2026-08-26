@@ -224,8 +224,43 @@ sudo ./target/release/installer -c regicide-local.toml
 
 **Other deployment formats:**
 
-- The live SquashFS (`regicide-cosmic.img`) can be written directly to a USB drive or deployed to a ROOTS partition.
-- Bootable ISO / hybrid image generation is not yet automated; track progress in `STATUS.md`.
+- The live SquashFS (`regicide-cosmic.img`) is **not** a bootable USB image on its own. It is deployed by the installer onto the ROOTS partition, or copied manually to an existing ROOTS partition.
+- The bootable live ISO (`regicide-cosmic-amd64.iso`) is the image you write to a USB drive or attach to a VM.
+
+**Write the live ISO to a USB drive:**
+
+Identify your USB device (`/dev/sdX` — replace `X` with the actual letter), then write the ISO:
+
+```bash
+# Unmount any partitions on the USB device first
+sudo umount /dev/sdX*
+
+# Write the ISO (destructive — all data on the device will be lost)
+sudo dd if=build-system/catalyst/output/regicide-cosmic-amd64.iso of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+A helper script is also provided:
+
+```bash
+./scripts/flash-usb.sh /dev/sdX
+```
+
+The script defaults to `build-system/catalyst/output/regicide-cosmic-amd64.iso`, verifies the ISO format and checksum if available, and optionally re-reads the device to confirm the write.
+
+**Regenerate the live ISO from an existing build:**
+
+If you rebuild the SquashFS (`regicide-cosmic.img`) and want a matching bootable ISO without recompiling the entire stage4, reuse the existing tarball and SquashFS:
+
+```bash
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py \
+  --plain \
+  --iso \
+  --from-tarball build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz \
+  --from-squashfs build-system/catalyst/output/regicide-cosmic.img \
+  --skip-sign
+```
+
+Output: `build-system/catalyst/output/regicide-cosmic-amd64.iso`
 
 #### 3.2.3 Bare-Metal Automated Installation
 

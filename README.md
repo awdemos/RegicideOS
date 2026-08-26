@@ -143,6 +143,13 @@ DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 REGICIDE_USE_BINPKGS=0 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
 
+> **Tip:** for faster local builds without Sigstore signing, add `--skip-sign`:
+> ```bash
+> DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --skip-sign
+> ```
+> This skips cosign artifact signing, which requires interactive browser authentication
+> for keyless mode or a cosign key pair for local signing.
+
 Both methods produce:
 - `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz`
 - `build-system/catalyst/output/regicide-cosmic.img` (live SquashFS image)
@@ -181,11 +188,35 @@ cat regicide-arch.iso.part* > regicide-arch.iso
 sha256sum -c regicide-arch.iso.sha256
 ```
 
-Both ISOs boot under UEFI in QEMU/virt-manager or can be written to a USB drive with `dd` or `cp` to boot on bare metal.
+Both ISOs boot under UEFI in QEMU/virt-manager or can be written to a USB drive to boot on bare metal. Identify the USB device (`/dev/sdX`), unmount any partitions on it, and write the ISO:
+
+```bash
+sudo umount /dev/sdX*
+sudo dd if=regicide-cosmic-amd64.iso of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+Or use the helper script in the repo, which defaults to the built ISO and verifies the write:
+
+```bash
+./scripts/flash-usb.sh /dev/sdX
+```
+
+**Regenerate the live ISO from an existing build:**
+
+If you already rebuilt the SquashFS (`regicide-cosmic.img`) and want a matching bootable ISO without recompiling the entire stage4, reuse the existing tarball and SquashFS:
+
+```bash
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py \
+  --plain \
+  --iso \
+  --from-tarball build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz \
+  --from-squashfs build-system/catalyst/output/regicide-cosmic.img \
+  --skip-sign
+```
 
 #### 4. Install to bare metal
 
-Boot an existing Linux live environment, clone the repo, build the installer, and point it at the local SquashFS image:
+Boot an existing Linux live environment, clone the repo, build the installer, and point it at the local SquashFS image (`regicide-cosmic.img`). The `.img` is **not** a bootable USB image; it is the ROOTS filesystem that the installer deploys:
 
 ```bash
 cd installer
