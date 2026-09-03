@@ -30,7 +30,8 @@ class TestInstallerIntegrationSafety(unittest.TestCase):
         """Test the complete installation workflow with all safety checks."""
         
         class SafetyTestInstaller:
-            def __init__(self):
+            def __init__(self, test_config):
+                self.test_config = test_config
                 self.dry_run = True
                 self.safety_log = []
                 self.operation_log = []
@@ -209,7 +210,7 @@ class TestInstallerIntegrationSafety(unittest.TestCase):
                 return True
         
         # Test the complete safety workflow
-        installer = SafetyTestInstaller()
+        installer = SafetyTestInstaller(self.test_config)
         result = installer.run_complete_installation(self.test_config)
         
         # Verify all safety mechanisms worked
@@ -286,7 +287,9 @@ class TestErrorHandlingSafety(unittest.TestCase):
             def _monitored_execution(self, operation):
                 """Execute operation with monitoring."""
                 print(f"[EXECUTE] {operation}")
-                # Simulate operation execution
+                # Simulate operation execution; dangerous operations fail in this test
+                if "format_drive" in operation:
+                    raise RuntimeError(f"Simulated failure for {operation}")
                 return {"status": "success", "operation": operation}
             
             def _post_operation_validation(self, result, operation):

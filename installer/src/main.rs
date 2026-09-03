@@ -23,6 +23,10 @@ use logging::{die, info, print_banner, warn, Colours};
 
 
 
+use std::sync::Mutex;
+
+static ACTIVE_KEYFILE: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
 // Execute commands with full error output
 fn validate_block_device_path(path: &str) -> Result<()> {
     if path.is_empty()
@@ -61,13 +65,14 @@ fn read_luks_passphrase() -> Result<String> {
 
 fn write_passphrase_key_file(passphrase: &str) -> Result<std::path::PathBuf> {
     use std::os::unix::fs::OpenOptionsExt;
-    let temp_dir = std::env::temp_dir();
-    let use_dir = if temp_dir.starts_with("/dev/shm") {
-        temp_dir
-    } else {
-        std::path::PathBuf::from("/dev/shm")
-    };
-    let key_file = use_dir.join(format!("regicide-luks-key-{}-XXXXXX", std::process::id()));
+    let use_dir = std::path::PathBuf::from("/dev/shm");
+    // Use a real mktemp suffix so the file is unique, not a literal "XXXXXX".
+    let mut rng = rand::thread_rng();
+    use rand::Rng;
+    let suffix: String = (0..6)
+        .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+        .collect();
+    let key_file = use_dir.join(format!("regicide-luks-key-{}-{}", std::process::id(), suffix));
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -77,6 +82,9 @@ fn write_passphrase_key_file(passphrase: &str) -> Result<std::path::PathBuf> {
     file.write_all(passphrase.as_bytes())
         .with_context(|| "Failed to write LUKS passphrase key file")?;
     file.flush().with_context(|| "Failed to flush LUKS passphrase key file")?;
+    if let Ok(mut guard) = ACTIVE_KEYFILE.lock() {
+        *guard = Some(key_file.clone());
+    }
     Ok(key_file)
 }
 
@@ -772,26 +780,17 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
         }
     }
 
-    // Set EFI boot flag using sgdisk if available
+    // For GPT/UEFI the partition type code (ef00) is what the firmware
+    // actually uses; the legacy "boot" attribute is not required and
+    // sgdisk `--set-flag` with a non-attribute name fails, so just refresh.
     if execute("which sgdisk").is_ok() {
-        let partition_num = partition
-            .chars()
-            .last()
-            .and_then(|c| c.to_digit(10))
-            .ok_or_else(|| {
-                anyhow::anyhow!("Could not determine partition number from {}", partition)
-            })?;
-
         let drive = if partition.contains("nvme") && partition.contains("p") {
             partition.rsplit_once("p").unwrap().0
         } else {
             partition.trim_end_matches(char::is_numeric)
         };
-
-        execute(&format!(
-            "sgdisk --set-flag={partition_num}:boot:on {drive}"
-        ))?;
-        info(&format!("Set EFI boot flag on partition {partition_num}"));
+        execute(&format!("sgdisk --refresh {drive}"))?;
+        info(&format!("Refreshed GPT partition table on {drive}"));
     } else {
         warn("sgdisk not available, EFI boot flag not set. System may not boot properly.");
         warn("Please install gdisk package manually: dnf install gdisk (Fedora) or apt install gdisk (Ubuntu)");
@@ -1096,19 +1095,18 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             "dd if=/dev/zero of={current_name} bs=1M count=1"
         ));
 
-        // Step 3: For NVMe drives, also try nvme sanitize if available (safer than format)
+        // Step 3: For NVMe drives, also try nvme format if available (safer than
+        // sanitize, which affects the whole namespace and may not be supported).
         if current_name.contains("nvme") && execute("which nvme").is_ok() {
-            // Extract the base NVMe device for sanitize operation
             let base_device = if let Some(pos) = current_name.rfind('p') {
                 &current_name[..pos]
             } else {
                 current_name
             };
-
-            // Try nvme sanitize - this is safer than format and works on individual namespaces
-            info(&format!("Attempting NVMe sanitize on {base_device}"));
+            validate_block_device_path(base_device)?;
+            info(&format!("Attempting NVMe format on {base_device}"));
             let _ = execute(&format!(
-                "nvme sanitize --no-flush --force {base_device}"
+                "nvme format --force --ses=0 {base_device}"
             ));
         }
 
@@ -1297,9 +1295,9 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                         current_name
                     };
                     validate_block_device_path(base_device)?;
-                    info(&format!("Attempting NVMe sanitize on {base_device}"));
+                    info(&format!("Attempting NVMe format on {base_device}"));
                     let _ = execute(&format!(
-                        "nvme sanitize --no-flush --force {base_device}"
+                        "nvme format --force --ses=0 {base_device}"
                     ));
                 }
 
@@ -1397,12 +1395,19 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
     Ok(())
 }
 
-fn chroot(command: &str) -> Result<()> {
-    // Execute chroot with proper PATH: chroot /mnt/root /bin/bash -c "export PATH=... && command"
-    let full_command = format!("chroot /mnt/root /bin/bash -c \"export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && {command}\"");
-
-    let output = ProcessCommand::new("bash")
-        .args(["-c", &full_command])
+fn chroot_raw(command: &str) -> Result<()> {
+    // Run a command inside the chroot without routing through any shell wrapper
+    // so quotes, pipes and heredocs are passed literally to /bin/bash inside the
+    // chroot. This avoids the double-escaping corruption that mangled the
+    // initramfs script when the caller built a single quoted string.
+    let output = ProcessCommand::new("chroot")
+        .args([
+            "/mnt/root",
+            "/bin/bash",
+            "-c",
+            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && ",
+        ])
+        .arg(command)
         .output()
         .with_context(|| format!("Failed to execute chroot command: {command}"))?;
 
@@ -1424,11 +1429,19 @@ fn chroot(command: &str) -> Result<()> {
     Ok(())
 }
 
-fn chroot_with_output(command: &str) -> Result<String> {
-    let full_command = format!("chroot /mnt/root /bin/bash -c \"export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && {command}\"");
+fn chroot(command: &str) -> Result<()> {
+    chroot_raw(command)
+}
 
-    let output = ProcessCommand::new("bash")
-        .args(["-c", &full_command])
+fn chroot_with_output(command: &str) -> Result<String> {
+    let output = ProcessCommand::new("chroot")
+        .args([
+            "/mnt/root",
+            "/bin/bash",
+            "-c",
+            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && ",
+        ])
+        .arg(command)
         .output()
         .with_context(|| format!("Failed to execute chroot command: {command}"))?;
 
@@ -2114,13 +2127,13 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         // Install GRUB for EFI systems with crypto modules embedded
         if use_host_grub {
             let grub_install_cmd = format!(
-                "{grub}-install --modules={crypto_modules} --force --target=\"{platform}\" --efi-directory=\"/mnt/root/boot/efi\" --boot-directory=\"/mnt/root/boot/efi\" --recheck"
+                "{grub}-install --modules={crypto_modules} --force --target={platform} --efi-directory=/mnt/root/boot/efi --boot-directory=/mnt/root/boot --recheck"
             );
             execute(&grub_install_cmd)?;
             info("✓ Host GRUB EFI installation completed");
         } else {
             let grub_install_cmd = format!(
-                "{grub}-install --modules={crypto_modules} --force --target=\"{platform}\" --efi-directory=\"/boot/efi\" --boot-directory=\"/boot/efi\" --recheck"
+                "{grub}-install --modules={crypto_modules} --force --target={platform} --efi-directory=/boot/efi --boot-directory=/boot --recheck"
             );
             chroot(&grub_install_cmd)?;
         }
@@ -2304,22 +2317,22 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                 Ok(devices) => {
                     let device = devices.lines().next().map(|s| s.trim()).unwrap_or("");
                     if device.is_empty() {
-                        "regicideos".to_string()
+                        bail!("No crypto_LUKS device found")
                     } else {
                         match execute(&format!("blkid -s UUID -o value {device}")) {
                             Ok(uuid) => {
                                 let uuid = uuid.trim();
                                 if uuid.is_empty() {
-                                    "regicideos".to_string()
+                                    bail!("LUKS device {device} has no UUID")
                                 } else {
                                     uuid.to_string()
                                 }
                             }
-                            Err(_) => "regicideos".to_string(),
+                            Err(e) => bail!("Failed to read LUKS UUID for {device}: {e}"),
                         }
                     }
                 }
-                Err(_) => "regicideos".to_string(),
+                Err(_) => bail!("blkid failed to list crypto_LUKS devices"),
             };
 
             info(&format!("Using LUKS UUID: {luks_uuid}"));
@@ -2337,22 +2350,23 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
         // GRUB configuration will be created in post_install() via create_grub_configuration()
     } else {
-        // For BIOS, use exact same commands as Python reference
+        // For BIOS, install GRUB to the MBR of the target device, not to an EFI
+        // directory. BIOS GRUB cannot use --boot-directory=/boot/efi.
         if use_host_grub {
             let grub_install_cmd = format!(
-                "{grub}-install --force --target=\"{platform}\" --boot-directory=\"/mnt/root/boot/efi\" {device}"
+                "{grub}-install --force --target={platform} --boot-directory=/mnt/root/boot {device}"
             );
             execute(&grub_install_cmd)?;
             info("✓ Host GRUB BIOS installation completed");
         } else {
             let grub_install_cmd = format!(
-                "{grub}-install --force --target=\"{platform}\" --boot-directory=\"/boot/efi\" {device}"
+                "{grub}-install --force --target={platform} --boot-directory=/boot {device}"
             );
             chroot(&grub_install_cmd)?;
 
             // Ensure boot partition is writable for GRUB config generation
             info("Ensuring boot partition is writable for GRUB config generation");
-            chroot("mount -o remount,rw /boot/efi")?;
+            chroot("mount -o remount,rw /boot")?;
 
             // Verify GRUB environment before running grub-mkconfig
             info("Verifying GRUB environment before config generation");
@@ -2545,14 +2559,14 @@ fn create_grub_configuration() -> Result<()> {
     let (root_param, boot_options) = if is_encrypted {
         info("Detected LUKS encryption - using encrypted boot parameters");
 
-        // Get actual LUKS partition UUID from the crypto_LUKS device directly,
+        // Get the actual LUKS partition UUID from the crypto_LUKS device directly,
         // avoiding shell pipelines that are rejected by the command allowlist.
         let luks_uuid = match find_crypto_luks_device() {
             Ok(device) => match get_luks_uuid(&device) {
                 Ok(uuid) => uuid,
-                Err(_) => "regicideos".to_string(),
+                Err(e) => bail!("Failed to read LUKS UUID: {e}"),
             },
-            Err(_) => "regicideos".to_string(),
+            Err(e) => bail!("No crypto_LUKS device found: {e}"),
         };
 
         info(&format!("Using LUKS UUID: {luks_uuid}"));
@@ -2868,8 +2882,15 @@ EOF",
             let luks_uuid = match execute(
                 "blkid -t TYPE=crypto_LUKS -o device 2>/dev/null | head -1 | xargs -I{} blkid -s UUID -o value {} 2>/dev/null || echo 'regicideos'",
             ) {
-                Ok(uuid) => uuid.trim().to_string(),
-                Err(_) => "regicideos".to_string(),
+                Ok(uuid) => {
+                    let uuid = uuid.trim();
+                    if uuid.is_empty() || uuid == "regicideos" {
+                        bail!("Failed to read LUKS UUID for initramfs device")
+                    } else {
+                        uuid.to_string()
+                    }
+                }
+                Err(_) => bail!("Failed to read LUKS UUID for initramfs device"),
             };
 
             info(&format!("Using LUKS UUID for initramfs: {luks_uuid}"));
@@ -3199,6 +3220,13 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
 
 fn cleanup_on_failure() {
     warn("Cleaning up due to installation failure...");
+
+    // Wipe any live LUKS passphrase key file before unmounting/closing.
+    if let Ok(mut guard) = ACTIVE_KEYFILE.lock() {
+        if let Some(key_file) = guard.take() {
+            let _ = secure_wipe_file(&key_file);
+        }
+    }
 
     // Unmount filesystems
     let _ = execute("umount -R /mnt/root 2>/dev/null");

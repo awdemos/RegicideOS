@@ -4,7 +4,7 @@
 import os
 import time
 from datetime import datetime
-from regicide_update import common as rc
+from regicide_update import common as rc, validation
 
 
 def _make_name(tag: str) -> str:
@@ -44,7 +44,7 @@ def read_current() -> str:
 
 def create_snapshot_set(tag: str = "manual") -> str:
     ensure_snapshot_dir()
-    name = _make_name(tag)
+    name = _make_name(validation.safe_snapshot_name(tag))
     target = os.path.join(rc.SNAPSHOT_DIR, name)
     os.makedirs(target, exist_ok=False)
     for subvol in rc.OVERLAY_SUBVOLUMES:
@@ -57,7 +57,7 @@ def create_snapshot_set(tag: str = "manual") -> str:
 
 
 def delete_snapshot_set(name: str) -> None:
-    target = os.path.join(rc.SNAPSHOT_DIR, name)
+    target = os.path.join(rc.SNAPSHOT_DIR, validation.safe_snapshot_name(name))
     if not os.path.isdir(target):
         rc.die(f"Snapshot set '{name}' not found.")
     if name == "initial":
@@ -70,7 +70,7 @@ def delete_snapshot_set(name: str) -> None:
 
 
 def set_revert(name: str) -> None:
-    target = os.path.join(rc.SNAPSHOT_DIR, name)
+    target = os.path.join(rc.SNAPSHOT_DIR, validation.safe_snapshot_name(name))
     if not os.path.isdir(target):
         rc.die(f"Cannot revert to '{name}': snapshot set does not exist.")
     with open(rc.REVERT_FLAG, "w") as f:

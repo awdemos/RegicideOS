@@ -299,16 +299,21 @@ else
     echo "Attaching loop device..."
     LOOP_DEV=$(losetup -f --show -P "${RAW_IMG}")
 
-    # Wait for kernel to create partition devices
-    for _ in {1..10}; do
+    # Wait for kernel/udev to create partition devices
+    partprobe "${LOOP_DEV}" 2>/dev/null || true
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle --timeout=10 2>/dev/null || true
+    fi
+
+    for _ in {1..20}; do
         if [[ -e "${LOOP_DEV}p1" && -e "${LOOP_DEV}p2" && -e "${LOOP_DEV}p3" && -e "${LOOP_DEV}p4" ]]; then
             break
         fi
-        sleep 0.5
+        sleep 0.25
     done
 
     if [[ ! -e "${LOOP_DEV}p1" ]]; then
-        echo "Error: loop partitions did not appear."
+        echo "Error: loop partitions did not appear on ${LOOP_DEV}"
         exit 1
     fi
 
@@ -334,24 +339,30 @@ ROOTS_TARGET="${ROOTS_PART}"
 LUKS_UUID=""
 if [[ "${ENCRYPT}" == true ]]; then
     echo "Setting up LUKS encryption on ROOTS partition..."
-    # Canonicalize the passphrase: cryptsetup --key-file consumes the file
-    # verbatim, including any trailing newline, which interactive boot
-    # prompts (GRUB cryptomount, initramfs ask-password) can never produce.
-    PASS_KEY_FILE="$(mktemp -p /dev/shm regicide-luks-XXXXXX)"
+    PASS_KEY_FILE="$(mktemp -p /run regicide-luks-XXXXXX)"
     chmod 0600 "${PASS_KEY_FILE}"
     if [[ "${PASSPHRASE_FILE}" == "-" ]]; then
         pass="$(cat)"
     else
         pass="$(cat "${PASSPHRASE_FILE}")"
     fi
+    # Canonicalize the passphrase: cryptsetup --key-file consumes the file
+    # verbatim, including any trailing newline, which interactive boot prompts
+    # (GRUB cryptomount, initramfs ask-password) can never produce.
+    if [[ "${pass}" == *$'\r'* ]]; then
+        pass="${pass%$'\r'}"
+    fi
+    if [[ "${pass}" == *$'\n' ]]; then
+        pass="${pass%$'\n'}"
+    fi
+    if [[ -z "${pass}" ]]; then
+        echo "Error: LUKS passphrase is empty"
+        exit 1
+    fi
     printf '%s' "${pass}" > "${PASS_KEY_FILE}"
 
-    # Generate a random binary key for initramfs-only unlock. The human
-    # passphrase unlocks ROOTS at the GRUB/bootloader prompt; the binary key
-    # is added as a secondary keyslot and embedded in the initramfs so the
-    # system can unlock itself without storing the human passphrase in the
-    # initramfs image.
-    INITRAMFS_KEY_FILE="$(mktemp -p /dev/shm regicide-initramfs-key-XXXXXX)"
+    # Generate a random binary key for initramfs-only unlock.
+    INITRAMFS_KEY_FILE="$(mktemp -p /run regicide-initramfs-key-XXXXXX)"
     chmod 0600 "${INITRAMFS_KEY_FILE}"
     dd if=/dev/urandom of="${INITRAMFS_KEY_FILE}" bs=512 count=1 status=none
 

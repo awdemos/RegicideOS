@@ -7,7 +7,8 @@ source "$(dirname "$0")/common.sh"
 STAGE_NAME="stage7-sbom"
 
 REGICIDE_ARCH="${REGICIDE_ARCH:-amd64}"
-TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd-cosmic.tar.xz"
+REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
+TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}.tar.xz"
 ROOTS_DIR="$(mktemp -d -t regicide-sbom-XXXXXX)"
 LEGACY_SBOM_FILE="${OUTPUT_DIR}/sbom.json"
 SPDX_FILE="${OUTPUT_DIR}/sbom.spdx.json"
@@ -23,7 +24,10 @@ if [[ ! -f "${TARBALL}" ]]; then
 fi
 
 echo "Extracting Portage database from tarball..."
-tar -C "${ROOTS_DIR}" -xpJf "${TARBALL}" ./var/db/pkg 2>/dev/null || true
+if ! tar -C "${ROOTS_DIR}" -xpJf "${TARBALL}" ./var/db/pkg 2>/dev/null; then
+    echo "ERROR: failed to extract /var/db/pkg from ${TARBALL}"
+    exit 1
+fi
 
 if [[ ! -d "${ROOTS_DIR}/var/db/pkg" ]]; then
     echo "ERROR: /var/db/pkg not found in tarball"
@@ -71,13 +75,13 @@ echo "Legacy SBOM written to ${LEGACY_SBOM_FILE}"
 
 # SPDX-2.3 JSON SBOM generated from the same Portage package data.
 SPDX_ID_NS="SPDXRef-Package"
-DOCUMENT_NAMESPACE="https://regicideos.dev/spbom/stage4-${REGICIDE_ARCH}-systemd-cosmic-$(date -u +%Y%m%d%H%M%S)"
+DOCUMENT_NAMESPACE="https://regicideos.dev/spbom/stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}-$(date -u +%Y%m%d%H%M%S)"
 {
     echo "{"
     echo "  \"spdxVersion\": \"SPDX-2.3\","
     echo "  \"dataLicense\": \"CC0-1.0\","
     echo "  \"SPDXID\": \"SPDXRef-DOCUMENT\","
-    echo "  \"name\": \"RegicideOS-stage4-amd64-systemd-cosmic\","
+    echo "  \"name\": \"RegicideOS-stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}\","
     echo "  \"documentNamespace\": \"${DOCUMENT_NAMESPACE}\","
     echo "  \"creationInfo\": {"
     echo "    \"created\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
@@ -134,8 +138,10 @@ echo "COSMIC packages: ${COSMIC_PKGS}"
 
 ERRORS=0
 
-# Gate: COSMIC greeter must be installed.
-if find "${ROOTS_DIR}/var/db/pkg" -mindepth 2 -maxdepth 2 -type d \( -name 'cosmic-greeter' -o -name 'cosmic-greeter-*' \) | grep -q .; then
+# Gate: COSMIC greeter must be installed unless this is a headless image.
+if [[ "${REGICIDE_HEADLESS}" == "1" ]]; then
+    echo "PASS: headless build; skipping cosmic-greeter gate"
+elif find "${ROOTS_DIR}/var/db/pkg" -mindepth 2 -maxdepth 2 -type d \( -name 'cosmic-greeter' -o -name 'cosmic-greeter-*' \) | grep -q .; then
     echo "PASS: cosmic-greeter installed"
 else
     echo "FAIL: cosmic-greeter not found in package database"

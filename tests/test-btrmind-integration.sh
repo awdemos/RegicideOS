@@ -253,6 +253,8 @@ test_btrmind_configuration() {
     # Create test configuration
     local config_file="$TEMP_DIR/btrmind-test.toml"
     cat > "$config_file" << EOF
+dry_run = true
+
 [monitoring]
 target_path = "$BTRFS_MOUNT"
 poll_interval = 5
@@ -278,7 +280,6 @@ exploration_rate = 0.1
 learning_rate = 0.001
 discount_factor = 0.99
 
-dry_run = true
 verbose = true
 EOF
     

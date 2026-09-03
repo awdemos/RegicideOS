@@ -33,8 +33,34 @@ class TestBtrMindCore(unittest.TestCase):
             import shutil
             shutil.rmtree(self.temp_dir)
     
-    def create_mock_btrmind(self):
+    def create_mock_btrmind(self, config=None):
         """Create a mock BtrMind instance for testing."""
+        if config is None:
+            config = {
+                "monitoring": {
+                    "target_path": self.mock_btrfs_dir,
+                    "poll_interval": 60
+                },
+                "thresholds": {
+                    "warning_level": 85.0,
+                    "critical_level": 95.0,
+                    "emergency_level": 98.0
+                },
+                "actions": {
+                    "enable_compression": True,
+                    "enable_balance": True,
+                    "enable_temp_cleanup": True,
+                    "enable_snapshot_cleanup": True
+                },
+                "learning": {
+                    "model_path": os.path.join(self.temp_dir, "model"),
+                    "learning_rate": 0.001,
+                    "exploration_rate": 0.1
+                },
+                "dry_run": True,
+                "verbose": False
+            }
+        
         class MockBtrMind:
             def __init__(self, config):
                 self.config = config
@@ -140,30 +166,7 @@ class TestBtrMindCore(unittest.TestCase):
                     return None
                 
                 # Simple action selection based on priority and learning
-        return MockBtrMind({
-            "monitoring": {
-                "target_path": self.mock_btrfs_dir,
-                "poll_interval": 60
-            },
-            "thresholds": {
-                "warning_level": 85.0,
-                "critical_level": 95.0,
-                "emergency_level": 98.0
-            },
-            "actions": {
-                "enable_compression": True,
-                "enable_balance": True,
-                "enable_temp_cleanup": True,
-                "enable_snapshot_cleanup": True
-            },
-            "learning": {
-                "model_path": os.path.join(self.temp_dir, "model"),
-                "learning_rate": 0.001,
-                "exploration_rate": 0.1
-            },
-            "dry_run": True,
-            "verbose": False
-        })
+        return MockBtrMind(config)
     
     def test_metrics_collection(self):
         """Test BTRFS metrics collection."""
@@ -262,8 +265,7 @@ class TestBtrMindCore(unittest.TestCase):
             }
         }
         
-        btrmind = self.create_mock_btrmind()
-        btrmind.config = valid_config
+        btrmind = self.create_mock_btrmind(valid_config)
         
         self.assertEqual(btrmind.monitoring_path, "/mnt/btrfs")
         self.assertEqual(btrmind.poll_interval, 60)
@@ -360,7 +362,8 @@ class TestBtrMindLearning(unittest.TestCase):
         class MockLearningSystem:
             def __init__(self, config):
                 self.config = config
-                self.model_path = config.get("model_path", self.model_path)
+                default_model_path = os.path.join(tempfile.gettempdir(), "btrmind_model")
+                self.model_path = config.get("model_path", default_model_path)
                 self.learning_rate = config.get("learning_rate", 0.001)
                 self.exploration_rate = config.get("exploration_rate", 0.1)
                 self.discount_factor = config.get("discount_factor", 0.99)

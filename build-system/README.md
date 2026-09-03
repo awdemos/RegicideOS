@@ -191,6 +191,7 @@ Environment knobs:
 - `REGICIDE_USE_BINPKGS=0` — force full source builds, bypassing the local binpkg cache.
 - `REGICIDE_BINPKGS_DIR=<path>` — override the chroot PKGDIR (defaults to the `regicide-binpkgs-v5` Dagger cache volume in Dagger, or `var/cache/binpkgs` inside the rootfs for manual builds).
 - `REGICIDE_DEFER_FLATPAKS=0` — install the heavy Flatpak apps (protonvpn, Zed, BoxBuddy, ungoogled-chromium, SoundRecorder, virt-manager) at build time instead of via the first-boot `regicide-deferred-flatpaks.service`.
+- `--skip-sign` — skip Sigstore cosign signing (useful for local test builds without cosign credentials or to speed up iteration).
 
 The SquashFS image is built locally as root; when the pipeline runs unprivileged it is built inside the Dagger engine instead (same as RegicideOSArch), so no host sudo is required.
 

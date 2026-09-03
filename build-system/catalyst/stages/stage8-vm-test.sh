@@ -27,6 +27,10 @@ fi
 export REGICIDE_ARCH
 echo "Guest architecture: ${REGICIDE_ARCH}"
 
+# When COSMIC is skipped at build time, stage7 already skips COSMIC checks and
+# stage8 must do the same or the VM test will fail on a legitimate headless image.
+REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
+
 
 # Pick a free local SSH forwarding port.  A fixed port (2222) collides when
 # another RegicideOS VM is already running on the host.
@@ -262,7 +266,7 @@ ready=false
 sleep 3
 for _ in $(seq 1 180); do
     # Read one line rather than a fixed byte count; OpenSSH banners are
-    # shorter than 32 bytes ("SSH-2.0-...\\r\\n"), so head -c 32 can block
+    # shorter than 32 bytes ("SSH-2.0-...\r\n"), so head -c 32 can block
     # waiting for more data and cause the timeout to fire even when sshd is
     # already listening.
     # Use 127.0.0.1 explicitly; QEMU user networking binds to IPv4 only and
@@ -342,6 +346,8 @@ check_luks_keyfile_leak() {
     return 0
 }
 
+REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
+
 checks=(
     # 1-3. Distrobox container lifecycle (create, enter, remove)
     "distrobox-create-enter-rm:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; rm -rf /home/regicide/.local/share/containers /var/tmp/regicide-distrobox-* /run/user/1000/libpod /run/user/1000/containers 2>/dev/null || true; distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1 || true; timeout 120 podman pull docker.io/library/alpine >/dev/null 2>&1; pull_rc=\$?; timeout 300 distrobox create --image docker.io/library/alpine --name regicide-smoke-alpine --yes >/dev/null 2>&1; create_rc=\$?; timeout 120 distrobox enter regicide-smoke-alpine -- whoami >/tmp/dbox-enter.log 2>&1; enter_rc=\$?; timeout 60 distrobox rm regicide-smoke-alpine --force >/dev/null 2>&1; rm_rc=\$?; echo pull_rc=\${pull_rc} create_rc=\${create_rc} enter_rc=\${enter_rc} rm_rc=\${rm_rc}; test \${pull_rc} -eq 0 && test \${create_rc} -eq 0 && test \${enter_rc} -eq 0 && grep -qx regicide /tmp/dbox-enter.log && test \${rm_rc} -eq 0 && echo distrobox-lifecycle-ok:distrobox-lifecycle-ok"
@@ -376,17 +382,12 @@ checks=(
     "podman:command -v podman:podman"
     "distrobox-binary:command -v distrobox:distrobox"
     "flatpak:command -v flatpak:flatpak"
-    "cosmic-session:command -v cosmic-session:cosmic-session"
-    "cosmic-greeter-binary:command -v cosmic-greeter:cosmic-greeter"
-    "minimon-binary:command -v cosmic-ext-applet-minimon:cosmic-ext-applet-minimon"
-    "minimon-desktop:test -f /usr/share/applications/io.github.cosmic_utils.minimon-applet.desktop && echo desktop-ok:desktop-ok"
     "btrfs:command -v btrfs:btrfs"
 
     # 11. NVIDIA userspace stack (best-effort in a VM without GPU)
     "nvidia-smi:command -v nvidia-smi >/dev/null 2>&1 && (nvidia-smi >/tmp/nvidia-smi.log 2>&1 && grep -q NVIDIA-SMI /tmp/nvidia-smi.log && echo nvidia-ok || grep -Eiq 'nvml|driver|gpu|device' /tmp/nvidia-smi.log && echo nvidia-ok) || echo nvidia-missing"
 
-
-    # 13. Extended BTRFS layout checks (applicable to both encrypted and unencrypted images).
+    # 12. Extended BTRFS layout checks (applicable to both encrypted and unencrypted images).
     "btrfs-roots-label:findmnt -n -o LABEL / | grep -q ROOTS && echo roots-label:roots-label"
     "btrfs-overlay-label:findmnt -n -o LABEL /overlay | grep -q OVERLAY && echo overlay-label:overlay-label"
     "btrfs-home-label:findmnt -n -o LABEL /home | grep -q HOME && echo home-label:home-label"
@@ -397,11 +398,10 @@ checks=(
     "groups:id:wheel"
     "sudo:sudo -n whoami:root"
     "kernel:uname -r:"
-    "cosmic-greeter:systemctl is-active cosmic-greeter-daemon.service:active"
     "sshd-socket:systemctl is-active sshd.socket:active"
-    "failed-units:cnt=\$(systemctl --failed --no-pager --plain | awk '/^\\303\242\\302\226/{print \$2}' | grep -v '^cosmic-greeter.service$' | wc -l); echo other-failed=\${cnt}; test \${cnt} -eq 0 && echo failed-units-ok:failed-units-ok"
+    "failed-units:cnt=\$(systemctl --failed --no-pager --plain | awk '/^\xc3\xa2\xc2\x96/{print \$2}' | grep -v '^cosmic-greeter.service$' | wc -l); echo other-failed=\${cnt}; test \${cnt} -eq 0 && echo failed-units-ok:failed-units-ok"
     "network-interface:ip -o link show up | grep -v lo | grep state | grep UP | head -1 && echo up:up"
-    "loopback-up:ip link show lo:<LOOPBACK,UP,LOWER_UP>"
+    "loopback-up:ip -o link show lo | grep -q 'state UNKNOWN\\|state UP' && echo up:up"
     "resolv-conf:cat /etc/resolv.conf:nameserver"
     "ssh-listen:ss -tlnp | grep -q LISTEN && echo listening:listening"
     "podman-smoke:export HOME=/home/regicide XDG_RUNTIME_DIR=/run/user/1000; timeout 120 podman run --rm docker.io/library/alpine echo podman-smoke-ok:podman-smoke-ok"
@@ -420,6 +420,17 @@ checks=(
     "regicide-boot-revert-installed:command -v regicide-boot-revert >/dev/null 2>&1 && echo installed || echo regicide-boot-revert-skipped"
     "regicide-rollback-roundtrip:command -v regicide-rollback >/dev/null 2>&1 && (sudo -n regicide-rollback create --tag stage8smoke | grep -q Created && sudo -n regicide-rollback list | grep -q stage8smoke && cd /overlay/.regicide-snapshots && sudo -n regicide-rollback delete \$(ls -t | grep stage8smoke | head -1) | grep -q Deleted && echo roundtrip-ok) || echo regicide-rollback-skipped"
 )
+
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    checks+=(
+        # COSMIC-specific checks, gated so headless images skip them.
+        "cosmic-session:command -v cosmic-session:cosmic-session"
+        "cosmic-greeter-binary:command -v cosmic-greeter:cosmic-greeter"
+        "cosmic-greeter:systemctl is-active cosmic-greeter-daemon.service:active"
+        "minimon-binary:command -v cosmic-ext-applet-minimon:cosmic-ext-applet-minimon"
+        "minimon-desktop:test -f /usr/share/applications/io.github.cosmic_utils.minimon-applet.desktop && echo desktop-ok:desktop-ok"
+    )
+fi
 
 failures=""
 for entry in "${checks[@]}"; do

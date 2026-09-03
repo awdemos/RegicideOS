@@ -58,12 +58,30 @@ class CliUpdateTransactionTests(unittest.TestCase):
         return ns
 
     @mock.patch("regicide_update.cli_update.subprocess.call")
-    def test_run_emerge_builds_emerge_command(self, mock_call):
+    def test_run_emerge_rejects_long_option_injection(self, mock_call):
         mock_call.return_value = 0
         rc.PRETEND = False
-        code = cli_update.run_emerge("-uDU", "@world")
-        self.assertEqual(code, 0)
-        mock_call.assert_called_once_with(["emerge", "-uDU", "@world"])
+        with self.assertRaises(SystemExit):
+            cli_update.run_emerge("--config-root=/etc")
+        mock_call.assert_not_called()
+
+    @mock.patch("regicide_update.cli_update.subprocess.call")
+    def test_cmd_install_rejects_option_injection_in_packages(self, mock_call):
+        mock_call.return_value = 0
+        args = self._make_namespace("install", packages=["--config-root=/etc"], no_rollback=True)
+        with self.assertRaises(SystemExit) as ctx:
+            cli_update.cmd_install(args)
+        self.assertEqual(ctx.exception.code, 1)
+        mock_call.assert_not_called()
+
+    @mock.patch("regicide_update.cli_update.subprocess.call")
+    def test_cmd_remove_rejects_option_injection_in_packages(self, mock_call):
+        mock_call.return_value = 0
+        args = self._make_namespace("remove", packages=["--config-root=/etc"], no_rollback=True)
+        with self.assertRaises(SystemExit) as ctx:
+            cli_update.cmd_remove(args)
+        self.assertEqual(ctx.exception.code, 1)
+        mock_call.assert_not_called()
 
     @mock.patch("regicide_update.cli_update.subprocess.call")
     @mock.patch("regicide_update.snapshots.create_snapshot_set")
@@ -124,6 +142,23 @@ class CliUpdateTransactionTests(unittest.TestCase):
             cli_update.cmd_search(args)
         self.assertEqual(ctx.exception.code, 0)
         mock_call.assert_called_once_with(["emerge", "-s", "firefox"])
+
+    @mock.patch("regicide_update.cli_update.subprocess.call")
+    def test_cmd_search_rejects_shell_metacharacters(self, mock_call):
+        mock_call.return_value = 0
+        args = self._make_namespace("search", query="foo; rm -rf /")
+        with self.assertRaises(SystemExit) as ctx:
+            cli_update.cmd_search(args)
+        self.assertEqual(ctx.exception.code, 1)
+        mock_call.assert_not_called()
+
+    @mock.patch("regicide_update.cli_update.subprocess.call")
+    def test_run_emerge_accepts_short_options_and_sets(self, mock_call):
+        mock_call.return_value = 0
+        rc.PRETEND = False
+        code = cli_update.run_emerge("-u", "@world")
+        self.assertEqual(code, 0)
+        mock_call.assert_called_once_with(["emerge", "-u", "@world"])
 
     @mock.patch("regicide_update.cli_update.subprocess.call")
     @mock.patch("os.geteuid", return_value=0)

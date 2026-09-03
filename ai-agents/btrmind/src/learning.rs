@@ -219,15 +219,24 @@ impl ReinforcementLearner {
         adjusted_quality.clamp(0.0, 1.0)
     }
     
+    fn _model_info_path(&self) -> std::path::PathBuf {
+        // Canonical path: append `.json` to the configured model_path, matching
+        // both save_model and load_model. This fixes a prior mismatch where
+        // load_model checked `with_extension("json")` (which *replaces* the
+        // extension) while save_model appended `.json`.
+        let s = format!("{}.json", self.config.model_path);
+        Path::new(&s).to_path_buf()
+    }
+
     fn save_model(&self) -> Result<()> {
-        let model_path = Path::new(&self.config.model_path);
-        
+        let model_info_path = self._model_info_path();
+
         // Create parent directory if it doesn't exist
-        if let Some(parent) = model_path.parent() {
+        if let Some(parent) = model_info_path.parent() {
             std::fs::create_dir_all(parent)
                 .context("Failed to create model directory")?;
         }
-        
+
         // Save model state information including success rates
         let model_info = ModelInfo {
             step_count: self.step_count,
@@ -235,37 +244,37 @@ impl ReinforcementLearner {
             buffer_size: self.replay_buffer.len(),
             action_success_rates: self.action_success_rates.clone(),
         };
-        
+
         let serialized = serde_json::to_string_pretty(&model_info)
             .context("Failed to serialize model info")?;
-        
-        std::fs::write(format!("{}.json", model_path.display()), serialized)
+
+        std::fs::write(&model_info_path, serialized)
             .context("Failed to write model info")?;
-        
-        debug!("Model saved to {}", model_path.display());
+
+        debug!("Model saved to {}", model_info_path.display());
         Ok(())
     }
-    
+
     fn load_model(&mut self) -> Result<()> {
-        let model_path = Path::new(&self.config.model_path);
-        
-        if !model_path.with_extension("json").exists() {
+        let model_info_path = self._model_info_path();
+
+        if !model_info_path.exists() {
             return Err(anyhow::anyhow!("Model file does not exist"));
         }
-        
-        let content = std::fs::read_to_string(format!("{}.json", model_path.display()))
+
+        let content = std::fs::read_to_string(&model_info_path)
             .context("Failed to read model info")?;
-        
+
         let model_info: ModelInfo = serde_json::from_str(&content)
             .context("Failed to deserialize model info")?;
-        
+
         self.step_count = model_info.step_count;
         self.epsilon = model_info.epsilon;
         self.action_success_rates = model_info.action_success_rates;
-        
-        info!("Model loaded from {} (steps: {}, epsilon: {:.3})", 
-              model_path.display(), self.step_count, self.epsilon);
-        
+
+        info!("Model loaded from {} (steps: {}, epsilon: {:.3})",
+              model_info_path.display(), self.step_count, self.epsilon);
+
         Ok(())
     }
     
@@ -440,5 +449,40 @@ mod tests {
         let stats = learner.get_learning_stats();
         assert_eq!(stats.average_reward, 5.0);
         assert!(!stats.has_trained_model);
+    }
+    
+    #[test]
+    fn test_save_and_load_model_round_trip() {
+        // Use a temp file base name with an extension to verify the canonical
+        // path derivation (appending `.json`) is identical on save and load.
+        let tmpdir = std::env::temp_dir().join(format!("btrmind-model-test-{}", std::process::id()));
+        let model_base = tmpdir.join("model.safetensors");
+        let model_json = tmpdir.join("model.safetensors.json");
+        
+        let config = LearningConfig {
+            model_path: model_base.to_str().unwrap().to_string(),
+            ..create_test_config()
+        };
+        
+        // Ensure fresh state
+        let _ = std::fs::remove_dir_all(&tmpdir);
+        assert!(!model_json.exists());
+        
+        let mut learner = ReinforcementLearner::new(&config).unwrap();
+        learner.step_count = 123;
+        learner.epsilon = 0.42;
+        learner.action_success_rates = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+        learner.save_model().unwrap();
+        
+        assert!(model_json.exists(), "save_model should write {}", model_json.display());
+        
+        let mut loaded = ReinforcementLearner::new(&config).unwrap();
+        loaded.load_model().unwrap();
+        
+        assert_eq!(loaded.step_count, 123);
+        assert!((loaded.epsilon - 0.42).abs() < 1e-9);
+        assert_eq!(loaded.action_success_rates, vec![0.1, 0.2, 0.3, 0.4, 0.5]);
+        
+        let _ = std::fs::remove_dir_all(&tmpdir);
     }
 }

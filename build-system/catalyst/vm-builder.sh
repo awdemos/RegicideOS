@@ -40,14 +40,21 @@ if [[ -z "${REGICIDE_ARCH}" ]]; then
 fi
 
 # Locate an optional passphrase file (used when encrypting). Only the
-# ram-backed fw_cfg copy provided by the host initramfs is trusted; the legacy
-# data-disk copy has been removed because the data SquashFS cannot enforce
-# per-file confidentiality.
+# ram-backed fw_cfg copy provided by the host initramfs is trusted.
 PASSPHRASE_FILE=""
 ENCRYPT_FLAG=""
 if [[ -f "/run/regicide-luks-passphrase" ]]; then
     PASSPHRASE_FILE="/run/regicide-luks-passphrase"
     ENCRYPT_FLAG="--encrypt"
+fi
+
+# If the host requested encryption but the passphrase did not arrive, fail loud
+# rather than silently building a plaintext image.
+if [[ -f "${DATA_DIR}/encrypt-requested" ]]; then
+    if [[ -z "${PASSPHRASE_FILE}" ]]; then
+        echo "Error: encryption was requested but /run/regicide-luks-passphrase is missing (qemu_fw_cfg did not deliver it)."
+        exit 1
+    fi
 fi
 
 # The target disk is attached as /dev/vda.

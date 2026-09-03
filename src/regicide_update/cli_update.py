@@ -6,13 +6,26 @@ import glob
 import os
 import subprocess
 import sys
-from regicide_update import snapshots, common as rc
+from regicide_update import snapshots, common as rc, validation
 
 
 def run_emerge(*args: str) -> int:
+    """Run emerge, rejecting long-option injection in positional args.
+
+    ``--sync`` is a legitimate long option used by ``cmd_sync``; it is allowed
+    explicitly. All other ``--`` prefixed arguments are treated as option
+    injection and rejected.
+    """
+    for a in args:
+        if a.startswith("--") and a != "--sync":
+            rc.die(f"Disallowed emerge option: {a}")
     cmd = ["emerge"] + list(args)
     rc.info("Running: " + " ".join(cmd))
     return subprocess.call(cmd)
+
+
+def _validate_packages(packages: list[str]) -> list[str]:
+    return [validation.safe_package_name(p) for p in packages]
 
 
 def _latest_kernel_version() -> str | None:
@@ -60,7 +73,7 @@ def cmd_sync(_args: argparse.Namespace) -> None:
 
 
 def cmd_search(args: argparse.Namespace) -> None:
-    sys.exit(run_emerge("-s", args.query))
+    sys.exit(run_emerge("-s", validation.safe_shell_arg(args.query)))
 
 
 def _transaction(args: argparse.Namespace, tag_prefix: str, emerge_args: list[str], packages: list[str]) -> None:
@@ -85,11 +98,11 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
 
 
 def cmd_install(args: argparse.Namespace) -> None:
-    _transaction(args, "install", args.packages, args.packages)
+    _transaction(args, "install", args.packages, _validate_packages(args.packages))
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
-    _transaction(args, "remove", ["--unmerge", *args.packages], args.packages)
+    _transaction(args, "remove", ["--unmerge", *_validate_packages(args.packages)], _validate_packages(args.packages))
 
 
 def main() -> None:

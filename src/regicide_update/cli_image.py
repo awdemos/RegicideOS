@@ -5,29 +5,29 @@ import argparse
 from pathlib import Path
 from regicide_update import common as rc
 from regicide_update import image
+from regicide_update import validation
 
 
 def cmd_fetch(args: argparse.Namespace) -> None:
-    path = image.fetch(args.url)
+    path = image.fetch(validation.safe_url(args.url))
     if args.checksum_url:
-        image.verify_checksum(path, args.checksum_url)
+        image.verify_checksum(path, validation.safe_url(args.checksum_url))
     rc.info(f"Image cached at {path}")
 
 
 def cmd_install(args: argparse.Namespace) -> None:
-    path = Path(args.path)
-    if not path.is_file():
-        rc.die(f"Image not found: {path}")
+    path = validation.safe_path(args.path, must_exist=True)
+    roots_mount = validation.safe_path(args.roots_mount, must_be_absolute=True)
     if args.ab:
         from regicide_update import boot_entry
         slot = boot_entry.install_and_sync(path)
         rc.info(f"A/B root update staged in slot {slot}; reboot to boot into it.")
     else:
-        image.install_tarball(path, args.roots_mount, args.reseed)
+        image.install_tarball(path, str(roots_mount), args.reseed)
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
-    image.verify_checksum(Path(args.path), args.checksum_url)
+    image.verify_checksum(validation.safe_path(args.path, must_exist=True), args.checksum_url)
 
 
 def cmd_rollback(_args: argparse.Namespace) -> None:

@@ -355,15 +355,14 @@ if data.endswith(b"\r\n"):
     data = data[:-2]
 elif data.endswith(b"\n"):
     data = data[:-1]
+if len(data) == 0:
+    print("Error: LUKS passphrase is empty", file=sys.stderr)
+    sys.exit(1)
 with open(sys.argv[1], "wb") as f:
     f.write(data)
 PYEOF
 
-    # Generate a random binary key for initramfs-only unlock. The human
-    # passphrase unlocks ROOTS at the GRUB/bootloader prompt; the binary key
-    # is added as a secondary keyslot and embedded in the initramfs so the
-    # system can unlock itself without storing the human passphrase in the
-    # initramfs image.
+    # Generate a random binary key for initramfs-only unlock.
     INITRAMFS_KEY_FILE="$(mktemp -p /run regicide-initramfs-key-XXXXXX)"
     chmod 0600 "${INITRAMFS_KEY_FILE}"
     dd if=/dev/urandom of="${INITRAMFS_KEY_FILE}" bs=512 count=1 status=none
@@ -775,27 +774,22 @@ fi
 
 dracut -v --force --no-hostonly --kver "${KVER}" 2>&1 | tee /boot/dracut-v83.log
 
-    # Do NOT copy the initramfs to the unencrypted ESP: it embeds the
-    # /etc/luks-keyfile binary key and would allow offline ROOTS unlock.
+    if [[ -f "/boot/vmlinuz-${KVER}" ]]; then
+        cp -f "/boot/vmlinuz-${KVER}" /boot/vmlinuz
+    fi
+    cp -f "/boot/initramfs-${KVER}.img" /boot/initramfs.img
 
-    # GRUB's config references the canonical /boot/vmlinuz and /boot/initramfs.img
-# names, so make sure those point at the kernel/initramfs dracut just built.
-if [[ -f "/boot/vmlinuz-${KVER}" ]]; then
-    cp -f "/boot/vmlinuz-${KVER}" /boot/vmlinuz
-fi
-cp -f "/boot/initramfs-${KVER}.img" /boot/initramfs.img
+    GRUB_MODULES="cryptodisk luks luks2 gcry_rijndael gcry_sha256 gcry_sha1 part_gpt btrfs"
 
-GRUB_MODULES="cryptodisk luks luks2 gcry_rijndael gcry_sha256 gcry_sha1 part_gpt btrfs"
-
-grub-install \
-    --modules="${GRUB_MODULES}" \
-    --force \
-    --target="x86_64-efi" \
-    --efi-directory="/boot/efi" \
-    --boot-directory="/boot/efi" \
-    --removable \
-    --recheck \
-    --no-nvram
+    grub-install \
+        --modules="${GRUB_MODULES}" \
+        --force \
+        --target="x86_64-efi" \
+        --efi-directory="/boot/efi" \
+        --boot-directory="/boot" \
+        --removable \
+        --recheck \
+        --no-nvram
 CHROOTEOF
 
 chmod +x "${CHROOT_SCRIPT}"

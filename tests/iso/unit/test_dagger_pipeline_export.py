@@ -11,7 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import importlib.util
 
-import dagger
+import pytest
+
+dagger = pytest.importorskip("dagger")
 
 ROOT = Path(__file__).parent.parent.parent.parent
 
