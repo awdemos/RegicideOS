@@ -237,9 +237,13 @@ if data.endswith(b"\r\n"):
     data = data[:-2]
 elif data.endswith(b"\n"):
     data = data[:-1]
+if len(data) == 0:
+    print("Error: LUKS passphrase file is empty", file=sys.stderr)
+    sys.exit(1)
 with open(dest, "wb") as f:
     f.write(data)
 PYEOF
+    echo "encrypt-requested" > "${DATA_STAGING}/encrypt-requested"
 fi
 
 echo "Packing data disk squashfs..."
@@ -319,7 +323,7 @@ modprobe fat || insmod /lib/modules/*/kernel/fs/fat/fat.ko
 modprobe vfat || insmod /lib/modules/*/kernel/fs/fat/vfat.ko
 modprobe nls_cp437 || insmod /lib/modules/*/kernel/fs/nls/nls_cp437.ko
 modprobe nls_ascii || insmod /lib/modules/*/kernel/fs/nls/nls_ascii.ko
-modprobe qemu_fw_cfg || insmod /lib/modules/*/kernel/drivers/firmware/qemu-fw-cfg/qemu_fw_cfg.ko 2>/dev/null || true
+modprobe qemu_fw_cfg || insmod /lib/modules/*/kernel/drivers/firmware/qemu-fw-cfg/qemu_fw_cfg.ko
 
 mkdir -p /sysroot /data
 
@@ -562,6 +566,10 @@ if grep -qiE '^Error:|Fatal error|Powering off\.' "${VM_SERIAL_LOG}" | grep -qv 
 fi
 
 if [[ "${ENCRYPT}" == true ]]; then
+    if [[ -z "${FW_CFG_PASSPHRASE_FILE:-}" || ! -f "${FW_CFG_PASSPHRASE_FILE}" ]]; then
+        echo "Error: encryption requested but fw_cfg passphrase file was not created."
+        exit 1
+    fi
     ROOTS_OFFSET=$(parted -s "${TARGET_RAW}" unit B print 2>/dev/null | awk '/^ 2 / {gsub(/B$/, "", $2); print $2}')
     if [[ -z "${ROOTS_OFFSET}" ]]; then
         echo "Error: could not determine ROOTS partition offset."
@@ -585,7 +593,7 @@ if [[ "${ENCRYPT}" == true ]]; then
         fi
         losetup -d "${LUKS_LOOP}" 2>/dev/null || true
     else
-        echo "Warning: cannot allocate loop device for LUKS verification (insufficient host permissions); relying on sample header check."
+        echo "Warning: cannot allocate loop device for LUKS verification (insufficient host privileges); sample-header check only."
     fi
 fi
 

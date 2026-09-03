@@ -9,12 +9,38 @@ log_status "start" "installing COSMIC core packages"
 
 if [[ "${REGICIDE_SKIP_COSMIC:-0}" == "1" ]]; then
     echo "REGICIDE_SKIP_COSMIC=1: skipping COSMIC core packages."
+
+    # Stage 5 still needs the regicide-rust overlay and repos.conf to emerge
+    # regicide-tools, so stage those even when COSMIC is skipped.
+    REGICIDE_OVERLAY="${CATALYST_DIR}/../../overlays/regicide-rust"
+    if [[ -d "${REGICIDE_OVERLAY}" ]]; then
+        echo "Installing regicide-rust overlay into rootfs..."
+        rm -rf "${ROOTFS}/var/db/repos/regicide-rust"
+        cp -a "${REGICIDE_OVERLAY}" "${ROOTFS}/var/db/repos/regicide-rust"
+    else
+        echo "WARNING: regicide-rust overlay not found at ${REGICIDE_OVERLAY}"
+    fi
+
+    mkdir -p "${ROOTFS}/etc/portage/repos.conf"
+    cat > "${ROOTFS}/etc/portage/repos.conf/regicide.conf" << 'EOF'
+[regicide-rust]
+location = /var/db/repos/regicide-rust
+sync-type = git
+sync-uri = https://github.com/awdemos/RegicideOS.git
+auto-sync = no
+EOF
+
+    if [[ -d "${CATALYST_DIR}/overlay" ]]; then
+        cp -a "${CATALYST_DIR}/overlay"/* "${ROOTFS}" 2>/dev/null || true
+    fi
+
     log_status "skip" "COSMIC core packages skipped"
     clean_rootfs_transient
     log_status "complete" "COSMIC core packages skipped"
     echo "Stage 4a complete (skipped)."
     exit 0
 fi
+
 COSMIC_OVERLAY_DIR="${REGICIDE_COSMIC_OVERLAY_DIR:-${ROOTFS}/var/db/repos/cosmic-overlay}"
 mkdir -p "${ROOTFS}/var/db/repos"
 

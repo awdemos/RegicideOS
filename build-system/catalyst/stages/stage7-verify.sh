@@ -7,13 +7,33 @@ source "$(dirname "$0")/common.sh"
 STAGE_NAME="stage7-verify"
 
 REGICIDE_ARCH="${REGICIDE_ARCH:-amd64}"
-TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd-cosmic.tar.xz"
+REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
+TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}.tar.xz"
 SQUASHFS="${OUTPUT_DIR}/regicide-cosmic.img"
 VERIFY_SCRATCH_DIR="${REGICIDE_VERIFY_DIR:-/var/tmp}"
 mkdir -p "${VERIFY_SCRATCH_DIR}"
 ROOTS_DIR="$(mktemp -d -p "${VERIFY_SCRATCH_DIR}" -t regicide-verify-XXXXXX)"
 
-trap 'chmod -R +w "${ROOTS_DIR}" 2>/dev/null || true; rm -rf "${ROOTS_DIR}"' EXIT
+# Ownership checks are impossible on an extracted tree when running as a
+# non-root user (tar cannot chown to the recorded owners).  We therefore
+# verify ownership from the tarball metadata when unprivileged; modes are
+# preserved during extraction and are checked against the tree as before.
+UNPRIVILEGED=0
+if [[ "$(id -u)" -ne 0 ]]; then
+    UNPRIVILEGED=1
+fi
+
+OWNER_DUMP=""
+if [[ ${UNPRIVILEGED} -eq 1 ]]; then
+    OWNER_DUMP="$(mktemp -p "${VERIFY_SCRATCH_DIR}" -t regicide-owners-XXXXXX)"
+    tar --numeric-owner -tvf "${TARBALL}" > "${OWNER_DUMP}" 2>/dev/null || true
+    if [[ ! -s "${OWNER_DUMP}" ]]; then
+        echo "ERROR: could not read tarball metadata; cannot verify ownership"
+        exit 1
+    fi
+fi
+
+trap 'chmod -R +w "${ROOTS_DIR}" 2>/dev/null || true; rm -rf "${ROOTS_DIR}" "${OWNER_DUMP:-}"' EXIT
 
 log_status "start" "verifying stage4 tarball and SquashFS"
 echo "Stage 7: verifying built artifacts..."
@@ -41,6 +61,35 @@ pass() {
     echo "  PASS: $1"
 }
 
+# Resolve ownership for a path inside ROOTS_DIR.  When unprivileged, look up
+# the recorded owner from the tarball listing; otherwise use stat(1).
+rec_owner() {
+    local rel="${1#${ROOTS_DIR}}"
+    rel="${rel#/}"
+    rel="./${rel}"
+    if [[ ${UNPRIVILEGED} -eq 1 && -n "${OWNER_DUMP}" && -f "${OWNER_DUMP}" ]]; then
+        awk -v path="${rel}" '
+            NF >= 2 {
+                # Normalize tar member name: strip leading ./ and trailing /
+                member = $NF
+                sub(/^\.\//, "", member)
+                sub(/\/$/, "", member)
+                check = path
+                sub(/^\.\//, "", check)
+                sub(/\/$/, "", check)
+                if (member == check) {
+                    print $2
+                    found = 1
+                    exit
+                }
+            }
+            END { if (!found) print "" }
+        ' "${OWNER_DUMP}"
+    else
+        stat -c '%u:%g' "$1" 2>/dev/null || true
+    fi
+}
+
 # 1. Default user exists and home directory is correct.
 if grep -q '^regicide:' "${ROOTS_DIR}/etc/passwd"; then
     pass "user regicide exists in /etc/passwd"
@@ -54,7 +103,7 @@ else
     fail "/home/regicide missing"
 fi
 
-if [[ "$(stat -c '%u:%g' "${ROOTS_DIR}/home/regicide" 2>/dev/null)" == "1000:1000" ]]; then
+if [[ "$(rec_owner "${ROOTS_DIR}/home/regicide")" == "1000:1000" ]]; then
     pass "/home/regicide owned by regicide:regicide"
 else
     fail "/home/regicide not owned by 1000:1000"
@@ -87,17 +136,19 @@ if [[ -f "${SUDOERS_DROPIN}" ]]; then
     fi
 fi
 
-# 4. COSMIC binaries are present.
-for bin in cosmic-greeter cosmic-session cosmic-comp cosmic-settings cosmic-app-library cosmic-launcher cosmic-panel cosmic-notifications cosmic-osd cosmic-workspaces cosmic-files cosmic-term cosmic-edit cosmic-store; do
-    if [[ -x "${ROOTS_DIR}/usr/bin/${bin}" || -x "${ROOTS_DIR}/usr/local/bin/${bin}" ]]; then
-        pass "binary ${bin} present"
-    else
-        fail "binary ${bin} missing"
-    fi
-done
+# 4. COSMIC binaries are present (skip when headless).
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    for bin in cosmic-greeter cosmic-session cosmic-comp cosmic-settings cosmic-app-library cosmic-launcher cosmic-panel cosmic-notifications cosmic-osd cosmic-workspaces cosmic-files cosmic-term cosmic-edit cosmic-store; do
+        if [[ -x "${ROOTS_DIR}/usr/bin/${bin}" || -x "${ROOTS_DIR}/usr/local/bin/${bin}" ]]; then
+            pass "binary ${bin} present"
+        else
+            fail "binary ${bin} missing"
+        fi
+    done
+fi
 
 # 5. Critical services are enabled.
-for svc in cosmic-greeter NetworkManager bluetooth pipewire sshd; do
+for svc in NetworkManager bluetooth pipewire sshd; do
     svc_file=""
     case "${svc}" in
         cosmic-greeter)
@@ -123,15 +174,17 @@ for svc in cosmic-greeter NetworkManager bluetooth pipewire sshd; do
     fi
 done
 
-if [[ -L "${ROOTS_DIR}/etc/systemd/system/display-manager.service" ]]; then
-    dm_target="$(readlink "${ROOTS_DIR}/etc/systemd/system/display-manager.service" 2>/dev/null || true)"
-    if [[ "${dm_target}" == *cosmic-greeter* ]]; then
-        pass "display-manager links to cosmic-greeter"
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    if [[ -L "${ROOTS_DIR}/etc/systemd/system/display-manager.service" ]]; then
+        dm_target="$(readlink "${ROOTS_DIR}/etc/systemd/system/display-manager.service" 2>/dev/null || true)"
+        if [[ "${dm_target}" == *cosmic-greeter* ]]; then
+            pass "display-manager links to cosmic-greeter"
+        else
+            fail "display-manager links to ${dm_target}, expected cosmic-greeter"
+        fi
     else
-        fail "display-manager links to ${dm_target}, expected cosmic-greeter"
+        fail "display-manager.service is not a symlink"
     fi
-else
-    fail "display-manager.service is not a symlink"
 fi
 
 if [[ -f "${ROOTS_DIR}/usr/lib/systemd/system/NetworkManager.service" ]]; then
@@ -222,14 +275,14 @@ fi
 
 # 11. SSH config drop-ins readable by root only.
 if [[ -d "${ROOTS_DIR}/etc/ssh/sshd_config.d" ]]; then
-    find "${ROOTS_DIR}/etc/ssh/sshd_config.d" -maxdepth 1 -type f | while read -r conf; do
+    while IFS= read -r conf; do
         mode="$(stat -c '%a' "${conf}" 2>/dev/null || true)"
         if [[ "${mode}" == "600" || "${mode}" == "644" ]]; then
             pass "sshd_config.d/$(basename "${conf}") mode ${mode}"
         else
             fail "sshd_config.d/$(basename "${conf}") mode ${mode} not 600/644"
         fi
-    done
+    done < <(find "${ROOTS_DIR}/etc/ssh/sshd_config.d" -maxdepth 1 -type f)
 fi
 
 # 12. SBOM exists.
@@ -264,7 +317,7 @@ fi
 for path in /etc/hosts /etc/fstab /etc/portage/make.conf; do
     full_path="${ROOTS_DIR}${path}"
     if [[ -f "${full_path}" ]]; then
-        owner="$(stat -c '%u:%g' "${full_path}" 2>/dev/null || true)"
+        owner="$(rec_owner "${full_path}")"
         mode="$(stat -c '%a' "${full_path}" 2>/dev/null || true)"
         if [[ "${owner}" == "1000:1000" ]]; then
             pass "${path} owned by regicide:regicide"

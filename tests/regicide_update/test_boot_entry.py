@@ -1,3 +1,4 @@
+import glob
 import os
 import tempfile
 import unittest
@@ -26,40 +27,38 @@ class BootEntryTests(unittest.TestCase):
         rc.PRETEND = True
         self.addCleanup(setattr, rc, "PRETEND", self._orig_pretend)
 
-    def test_ensure_dirs_creates_loader_entries(self):
-        boot_entry.ensure_dirs()
-        self.assertTrue((boot_entry.ESP_BOOT_DIR / "loader" / "entries").is_dir())
-
     def _make_slot_boot_dir(self, slot: str, kernel: str, initrd: str):
         boot_dir = os.path.join(rc.ROOTS_DIR, f"roots_{slot}", "boot")
         os.makedirs(boot_dir, exist_ok=True)
         Path(os.path.join(boot_dir, kernel)).touch()
         Path(os.path.join(boot_dir, initrd)).touch()
 
-    def test_write_entry_creates_conf_file(self):
-        boot_entry.write_entry("a", "/vmlinuz", "/initramfs.img")
-        entry = boot_entry.ESP_BOOT_DIR / "loader" / "entries" / "regicide-a.conf"
-        self.assertTrue(entry.is_file())
-        text = entry.read_text()
-        self.assertIn("title RegicideOS A", text)
-        self.assertIn("linux /vmlinuz", text)
-        self.assertIn("initrd /initramfs.img", text)
-        self.assertIn("root=LABEL=ROOTS ro rootflags=subvol=roots_a", text)
+    def _slot_kernel_path(self, slot: str, name: str) -> str:
+        return f"/roots/roots_{slot}/boot/{name}"
 
-    def test_set_default_writes_loader_conf(self):
-        boot_entry.write_entry("a", "/vmlinuz", "/initramfs.img")
-        boot_entry.write_entry("b", "/vmlinuz", "/initramfs.img")
-        boot_entry.set_default("b")
-        loader_conf = boot_entry.ESP_BOOT_DIR / "loader" / "loader.conf"
-        text = loader_conf.read_text()
-        self.assertIn("default regicide-b", text)
-        self.assertIn("timeout 5", text)
+    def test_ensure_grub_cfg_creates_grub_cfg(self):
+        boot_entry.ensure_grub_cfg()
+        cfg = boot_entry._grub_cfg()
+        self.assertTrue(cfg.is_file())
+        text = cfg.read_text()
+        self.assertIn("regicide_slot", text)
+        self.assertIn('menuentry "RegicideOS ($regicide_slot)"', text)
+
+    def test_ensure_grub_cfg_is_idempotent(self):
+        boot_entry.ensure_grub_cfg()
+        cfg = boot_entry._grub_cfg()
+        first = cfg.read_text()
+        # Manually append noise; ensure_grub_cfg should leave it alone.
+        with open(cfg, "a") as f:
+            f.write("# extra\n")
+        boot_entry.ensure_grub_cfg()
+        self.assertIn("# extra", cfg.read_text())
 
     def test_discover_kernel_initrd_finds_versioned_names(self):
         self._make_slot_boot_dir("a", "vmlinuz-6.8.0-gentoo", "initramfs-6.8.0-gentoo.img")
         kernel, initrd = boot_entry.discover_kernel_initrd("a")
-        self.assertEqual(kernel, "/vmlinuz-6.8.0-gentoo")
-        self.assertEqual(initrd, "/initramfs-6.8.0-gentoo.img")
+        self.assertEqual(kernel, "vmlinuz-6.8.0-gentoo")
+        self.assertEqual(initrd, "initramfs-6.8.0-gentoo.img")
 
     def test_discover_kernel_initrd_prefers_stable_names(self):
         boot_dir = os.path.join(rc.ROOTS_DIR, "roots_a", "boot")
@@ -69,8 +68,8 @@ class BootEntryTests(unittest.TestCase):
         Path(os.path.join(boot_dir, "initramfs-6.8.0-gentoo.img")).touch()
         Path(os.path.join(boot_dir, "initramfs.img")).touch()
         kernel, initrd = boot_entry.discover_kernel_initrd("a")
-        self.assertEqual(kernel, "/vmlinuz")
-        self.assertEqual(initrd, "/initramfs.img")
+        self.assertEqual(kernel, "vmlinuz")
+        self.assertEqual(initrd, "initramfs.img")
 
     def test_discover_kernel_initrd_is_deterministic_with_many_files(self):
         boot_dir = os.path.join(rc.ROOTS_DIR, "roots_a", "boot")
@@ -80,57 +79,49 @@ class BootEntryTests(unittest.TestCase):
         for name in ["initramfs-6.10.0-gentoo.img", "initramfs-6.8.0-gentoo.img", "initramfs-6.9.0-gentoo.img"]:
             Path(os.path.join(boot_dir, name)).touch()
         kernel, initrd = boot_entry.discover_kernel_initrd("a")
-        self.assertEqual(kernel, "/vmlinuz-6.8.0-gentoo")
-        self.assertEqual(initrd, "/initramfs-6.8.0-gentoo.img")
+        self.assertEqual(kernel, "vmlinuz-6.10.0-gentoo")
+        self.assertEqual(initrd, "initramfs-6.10.0-gentoo.img")
 
-    def test_write_entry_preserves_old_entry_on_failure(self):
-        self._make_slot_boot_dir("a", "vmlinuz-a", "initramfs-a.img")
-        boot_entry.write_entry("a", "/vmlinuz-a", "/initramfs-a.img")
-        entry = boot_entry.ESP_BOOT_DIR / "loader" / "entries" / "regicide-a.conf"
-        original = entry.read_text()
+    def test_write_slot_to_grubenv_rejects_invalid_slot(self):
+        with self.assertRaises(SystemExit):
+            boot_entry.write_slot_to_grubenv("c")
 
-        def boom(*args, **kwargs):
-            raise RuntimeError("disk full")
+    @mock.patch.object(boot_entry, "_grub_editenv")
+    def test_write_slot_to_grubenv_sets_slot(self, mock_editenv):
+        boot_entry._init_grubenv()
+        boot_entry.write_slot_to_grubenv("b")
+        mock_editenv.assert_called_once_with(["set", "regicide_slot=b"])
 
-        with mock.patch.object(boot_entry.Path, "write_text", side_effect=boom):
-            with self.assertRaises(RuntimeError):
-                boot_entry.write_entry("a", "/vmlinuz-b", "/initramfs-b.img")
-        self.assertEqual(entry.read_text(), original)
-        backup = entry.parent / (entry.name + boot_entry._BACKUP_SUFFIX)
-        self.assertFalse(backup.exists())
-
-    def test_set_default_preserves_old_loader_conf_on_failure(self):
-        boot_entry.write_entry("a", "/vmlinuz-a", "/initramfs-a.img")
-        boot_entry.write_entry("b", "/vmlinuz-b", "/initramfs-b.img")
-        boot_entry.set_default("a")
-        loader_conf = boot_entry.ESP_BOOT_DIR / "loader" / "loader.conf"
-        original = loader_conf.read_text()
+    def test_write_slot_to_grubenv_restores_backup_on_failure(self):
+        boot_entry._init_grubenv()
+        env_path = boot_entry._grubenv_path()
+        env_path.write_text("# existing block\n")
 
         def boom(*args, **kwargs):
             raise RuntimeError("disk full")
 
-        with mock.patch.object(boot_entry.Path, "write_text", side_effect=boom):
+        with mock.patch.object(boot_entry, "_grub_editenv", side_effect=boom):
             with self.assertRaises(RuntimeError):
-                boot_entry.set_default("b")
-        self.assertEqual(loader_conf.read_text(), original)
-        backup = loader_conf.parent / (loader_conf.name + boot_entry._BACKUP_SUFFIX)
-        self.assertFalse(backup.exists())
+                boot_entry.write_slot_to_grubenv("b")
+        self.assertIn("# existing block", env_path.read_text())
 
-    def test_sync_entries_defaults_to_active_slot(self):
+    @mock.patch.object(boot_entry, "_grub_editenv")
+    def test_sync_entries_sets_active_slot(self, mock_editenv):
         root_ab.write_active_slot("b")
         self._make_slot_boot_dir("a", "vmlinuz-a", "initramfs-a.img")
         self._make_slot_boot_dir("b", "vmlinuz-b", "initramfs-b.img")
         boot_entry.sync_entries()
-        a_entry = (boot_entry.ESP_BOOT_DIR / "loader" / "entries" / "regicide-a.conf").read_text()
-        b_entry = (boot_entry.ESP_BOOT_DIR / "loader" / "entries" / "regicide-b.conf").read_text()
-        self.assertIn("linux /vmlinuz-a", a_entry)
-        self.assertIn("initrd /initramfs-a.img", a_entry)
-        self.assertIn("linux /vmlinuz-b", b_entry)
-        self.assertIn("initrd /initramfs-b.img", b_entry)
-        loader_conf = (boot_entry.ESP_BOOT_DIR / "loader" / "loader.conf").read_text()
-        self.assertIn("default regicide-b", loader_conf)
+        mock_editenv.assert_called_once_with(["set", "regicide_slot=b"])
 
-    def test_install_and_sync_activates_slot_and_writes_entries(self):
+    def test_sync_entries_discovers_both_slots(self):
+        root_ab.write_active_slot("b")
+        self._make_slot_boot_dir("a", "vmlinuz-a", "initramfs-a.img")
+        self._make_slot_boot_dir("b", "vmlinuz-b", "initramfs-b.img")
+        boot_entry.ensure_grub_cfg()
+        # Real discovery; should not raise.
+        boot_entry.sync_entries()
+
+    def test_install_and_sync_activates_slot_and_updates_grub(self):
         from regicide_update import boot_entry as be
 
         image_path = Path(self.tmpdir.name) / "new-root.tar.xz"

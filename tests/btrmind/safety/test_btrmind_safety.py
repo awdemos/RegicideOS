@@ -46,6 +46,8 @@ class BtrMindSafetyTester:
     def create_safety_config(self):
         """Create safety-focused configuration."""
         config_content = f"""
+dry_run = true
+
 [monitoring]
 target_path = "{self.mount_point}"
 poll_interval = 1
@@ -70,8 +72,6 @@ reward_smoothing = 0.8
 exploration_rate = 0.05
 learning_rate = 0.001
 discount_factor = 0.9
-
-dry_run = true
 """
         
         config_file = os.path.join(self.test_dir, 'btrmind-safety.toml')

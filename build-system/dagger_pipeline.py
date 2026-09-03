@@ -332,13 +332,13 @@ async def build_iso(
         client.container()
         .from_("alpine:latest")
         .with_exec(["apk", "add", "squashfs-tools", "tar", "xz"])
-        .with_file("/tmp/stage4.tar.xz", tarball)
-        .with_exec(["mkdir", "-p", "/tmp/rootfs"])
+        .with_file("/var/tmp/stage4.tar.xz", tarball)
+        .with_exec(["mkdir", "-p", "/var/tmp/rootfs"])
         .with_exec([
-            "tar", "-C", "/tmp/rootfs", "-xpJf", "/tmp/stage4.tar.xz",
+            "tar", "-C", "/var/tmp/rootfs", "-xpJf", "/var/tmp/stage4.tar.xz",
         ])
         .with_exec([
-            "mksquashfs", "/tmp/rootfs", "/tmp/regicide-cosmic.img",
+            "mksquashfs", "/var/tmp/rootfs", "/var/tmp/regicide-cosmic.img",
             "-comp", "zstd", "-Xcompression-level", str(compression_level),
             "-processors", str(processors),
         ])
@@ -370,8 +370,8 @@ async def build_live_iso(
     initrd_builder = (
         client.container()
         .from_(base_image)
-        .with_file("/tmp/stage4.tar.xz", tarball)
-        .with_exec(["sh", "-c", "tar -C / -xpJf /tmp/stage4.tar.xz --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./opt --exclude=./etc/hosts --exclude=./etc/resolv.conf && rm /tmp/stage4.tar.xz"])
+        .with_file("/var/tmp/stage4.tar.xz", tarball)
+        .with_exec(["sh", "-c", "tar -C / -xpJf /var/tmp/stage4.tar.xz --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./opt --exclude=./etc/hosts --exclude=./etc/resolv.conf && rm /var/tmp/stage4.tar.xz"])
         .with_exec([
             "sh", "-c",
             "set -e; mkdir -p /work; kver=$(ls /lib/modules | head -1); "
