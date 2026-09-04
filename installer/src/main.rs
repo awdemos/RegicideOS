@@ -13,9 +13,11 @@ use installer::{
     check_username, get_flatpak_packages, get_fs, get_package_sets, is_efi, Config, Partition,
 };
 
+mod commands;
 mod filesystem;
 mod logging;
 mod validation;
+use commands::{chroot_cmd, mkfs_args, run_cmd, sgdisk_new_args};
 use filesystem::{
     safe_create_dir_all, safe_read_file, safe_remove_dir_all, safe_remove_file, safe_write_file,
 };
@@ -825,13 +827,19 @@ fn partition_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 
             let label = partition.label.as_deref().unwrap_or("");
 
-            execute(&format!(
-                "sgdisk --new={part_num}:{size} --typecode={part_num}:{typecode} --change-name={part_num}:'{label}' {drive}"
-            ))?;
+            run_cmd(
+                "sgdisk",
+                &sgdisk_new_args(part_num, size, typecode, Some(label), drive)
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|e| anyhow::anyhow!("sgdisk failed for partition {part_num}: {e}"))?;
         }
 
         // Use --refresh flag to notify kernel
-        execute(&format!("sgdisk --refresh {drive}"))?;
+        run_cmd("sgdisk", &["--refresh", drive])
+            .map_err(|e| anyhow::anyhow!("sgdisk --refresh failed: {e}"))?;
     } else {
         bail!("sgdisk not available");
     }
@@ -860,22 +868,13 @@ fn format_partition(device: &str, partition: &Partition) -> Result<()> {
     match partition.format.as_str() {
         "btrfs" => {
             // Create BTRFS filesystem on the device (usually a LUKS mapper)
-            if let Some(ref label) = partition.label {
-                info(&format!(
-                    "Creating BTRFS filesystem with label '{label}' on {device}"
-                ));
-                if let Err(e) = execute(&format!("mkfs.btrfs -L {label} {device}")) {
-                    bail!(
-                        "Failed to create BTRFS filesystem with label '{}': {}",
-                        label,
-                        e
-                    );
-                }
-            } else {
-                info(&format!("Creating BTRFS filesystem on {device}"));
-                if let Err(e) = execute(&format!("mkfs.btrfs {device}")) {
-                    bail!("Failed to create BTRFS filesystem: {}", e);
-                }
+            let label = partition.label.as_deref().unwrap_or("");
+            info(&format!(
+                "Creating BTRFS filesystem with label '{label}' on {device}"
+            ));
+            let args: Vec<String> = mkfs_args("mkfs.btrfs", device, Some(label));
+            if let Err(e) = run_cmd("mkfs.btrfs", &args.iter().map(String::as_str).collect::<Vec<_>>()) {
+                bail!("Failed to create BTRFS filesystem: {}", e);
             }
 
             // Create subvolumes if specified
@@ -2125,17 +2124,32 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         info(&format!("Installing GRUB with modules: {crypto_modules}"));
 
         // Install GRUB for EFI systems with crypto modules embedded
+        let grub_program = format!("{grub}-install");
+        let grub_args = vec![
+            "--modules".to_string(),
+            crypto_modules.to_string(),
+            "--force".to_string(),
+            format!("--target={platform}"),
+            "--recheck".to_string(),
+        ];
         if use_host_grub {
-            let grub_install_cmd = format!(
-                "{grub}-install --modules={crypto_modules} --force --target={platform} --efi-directory=/mnt/root/boot/efi --boot-directory=/mnt/root/boot --recheck"
-            );
-            execute(&grub_install_cmd)?;
+            let mut host_args = grub_args.clone();
+            host_args.extend([
+                "--efi-directory=/mnt/root/boot/efi".to_string(),
+                "--boot-directory=/mnt/root/boot".to_string(),
+            ]);
+            let host_args_ref: Vec<&str> = host_args.iter().map(String::as_str).collect();
+            run_cmd(&grub_program, &host_args_ref)
+                .map_err(|e| anyhow::anyhow!("host grub-install failed: {e}"))?;
             info("✓ Host GRUB EFI installation completed");
         } else {
-            let grub_install_cmd = format!(
-                "{grub}-install --modules={crypto_modules} --force --target={platform} --efi-directory=/boot/efi --boot-directory=/boot --recheck"
-            );
-            chroot(&grub_install_cmd)?;
+            let mut chroot_args = grub_args.clone();
+            chroot_args.extend([
+                "--efi-directory=/boot/efi".to_string(),
+                "--boot-directory=/boot".to_string(),
+            ]);
+            let chroot_args_ref: Vec<&str> = chroot_args.iter().map(String::as_str).collect();
+            chroot_cmd(&grub_program, &chroot_args_ref)?;
         }
 
         // GRUB configuration will be created in post_install after overlay filesystem is mounted
@@ -2392,7 +2406,12 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         };
 
         // Try to create EFI boot entry using efibootmgr
-        match chroot(&format!("efibootmgr --create --disk {efi_device} --part 1 --label \"RegicideOS\" --loader \"\\EFI\\fedora\\grubx64.efi\"")) {
+        let efi_args_primary = vec![
+            "--create", "--disk", efi_device, "--part", "1",
+            "--label", "RegicideOS",
+            "--loader", r"\EFI\fedora\grubx64.efi",
+        ];
+        match chroot_cmd("efibootmgr", &efi_args_primary) {
             Ok(_) => {
                 info("✓ EFI boot entry created successfully");
             }
@@ -2400,8 +2419,12 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                 warn(&format!("Failed to create EFI boot entry: {e}"));
                 info("Trying alternative EFI boot entry creation...");
 
-                // Alternative approach - try different loader path
-                match chroot(&format!("efibootmgr --create --disk {efi_device} --part 1 --label \"RegicideOS\" --loader \"\\EFI\\BOOT\\BOOTX64.EFI\"")) {
+                let efi_args_alt = vec![
+                    "--create", "--disk", efi_device, "--part", "1",
+                    "--label", "RegicideOS",
+                    "--loader", r"\EFI\BOOT\BOOTX64.EFI",
+                ];
+                match chroot_cmd("efibootmgr", &efi_args_alt) {
                     Ok(_) => {
                         info("✓ Alternative EFI boot entry created successfully");
                     }
@@ -2414,7 +2437,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
         }
 
         // Set boot order to prioritize RegicideOS
-        match chroot("efibootmgr --bootorder 0000,0001,0002") {
+        match chroot_cmd("efibootmgr", &["--bootorder", "0000,0001,0002"]) {
             Ok(_) => info("✓ Boot order configured"),
             Err(_) => warn("Failed to set boot order"),
         }
@@ -2820,12 +2843,12 @@ EOF",
 
     if !config.username.is_empty() {
         info("Creating user");
-        chroot(&format!("useradd -m {}", config.username))?;
+        chroot_cmd("useradd", &["-m", &config.username])?;
 
         // Password setting with retry loop (matches Xenia reference behavior)
         let mut valid = false;
         while !valid {
-            match chroot(&format!("passwd {}", config.username)) {
+            match chroot_cmd("passwd", &[&config.username]) {
                 Ok(_) => {
                     valid = true;
                     info("Password set successfully");
@@ -2837,7 +2860,7 @@ EOF",
             }
         }
 
-        chroot(&format!("usermod -aG wheel,video {}", config.username))?;
+        chroot_cmd("usermod", &["-aG", "wheel,video", &config.username])?;
         info(&format!(
             "User {} created and added to wheel,video groups",
             config.username
@@ -2855,7 +2878,11 @@ EOF",
 
         // Create /etc/declare directory and flatpak file (for declareflatpak service compatibility)
         chroot("mkdir -p /etc/declare")?;
-        chroot(&format!("echo '{flatpaks}' > /etc/declare/flatpak"))?;
+        safe_write_file(
+            "/mnt/root/etc/declare/flatpak",
+            flatpaks.as_bytes(),
+            "/mnt/root",
+        )?;
 
         // Initialize flatpak and add Flathub repository
         info("Adding Flathub repository...");

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::process::Command;
 use tracing::{info, warn, debug};
 use crate::config::ActionConfig;
@@ -79,6 +79,12 @@ impl ActionExecutor {
         })
     }
     
+    /// Allowed literal directories for temp cleanup. Any configured path outside
+    /// this set is ignored to prevent accidental deletion of system data.
+    const ALLOWED_TEMP_DIRS: &[&str] = &["/tmp", "/var/tmp", "/var/cache"];
+    /// Allowed glob patterns that expand to safe per-user cache directories.
+    const ALLOWED_GLOB_PATTERNS: &[&str] = &["/home/*/.cache"];
+
     async fn delete_temp_files(&self) -> Result<ActionResult> {
         if !self.config.enable_temp_cleanup {
             return Ok(ActionResult {
@@ -88,11 +94,11 @@ impl ActionExecutor {
                 message: "Temp cleanup disabled in config".to_string(),
             });
         }
-        
+
         info!("Cleaning up temporary files");
         let mut total_freed = 0.0;
         let mut messages = Vec::new();
-        
+
         for temp_path in &self.config.temp_paths {
             match self.cleanup_path(temp_path).await {
                 Ok(freed) => {
@@ -105,7 +111,7 @@ impl ActionExecutor {
                 }
             }
         }
-        
+
         Ok(ActionResult {
             action: Action::DeleteTempFiles,
             success: true,
@@ -113,89 +119,117 @@ impl ActionExecutor {
             message: messages.join("; "),
         })
     }
-    
+
     async fn cleanup_path(&self, path: &str) -> Result<f64> {
-        // Get initial size
-        let initial_size = self.get_directory_size(path).await.unwrap_or(0.0);
-        
-        // Handle glob patterns like /home/*/.cache
-        if path.contains('*') {
-            return self.cleanup_glob_pattern(path).await;
+        // Reject paths that contain shell metacharacters or traversal
+        // sequences before any filesystem access.
+        if !Self::is_safe_temp_path(path) {
+            bail!("Refusing to clean unsafe temp path: {}", path);
         }
-        
-        // Clean specific directories
+
+        // Handle the single supported glob pattern.
+        if path.contains('*') {
+            if Self::ALLOWED_GLOB_PATTERNS.contains(&path) {
+                return self.cleanup_glob_pattern(path).await;
+            }
+            bail!("Unsupported glob pattern: {}", path);
+        }
+
+        // Only clean explicitly allowlisted directories.
+        if !Self::ALLOWED_TEMP_DIRS.contains(&path) {
+            debug!("Skipping cleanup for non-allowed path: {}", path);
+            return Ok(0.0);
+        }
+
+        let initial_size = self.get_directory_size(path).await.unwrap_or(0.0);
+
         match path {
             "/tmp" | "/var/tmp" => {
-                // Clean files older than 7 days
-                let output = Command::new("find")
-                    .args([path, "-type", "f", "-atime", "+7", "-delete"])
-                    .output()
+                Self::find_delete_older_than(path, 7)
                     .context("Failed to clean temporary files")?;
-                
-                if !output.status.success() {
-                    warn!("find command failed: {}", String::from_utf8_lossy(&output.stderr));
-                }
             }
             "/var/cache" => {
-                // Clean package caches and other system caches
                 self.clean_system_cache().await?;
             }
-            _ => {
-                // Generic cleanup for other paths
-                debug!("Skipping cleanup for path: {}", path);
-            }
+            _ => {}
         }
-        
-        // Calculate freed space
+
         let final_size = self.get_directory_size(path).await.unwrap_or(initial_size);
         let freed = (initial_size - final_size).max(0.0);
-        
+
         debug!("Freed {:.1}MB from {}", freed, path);
         Ok(freed)
     }
-    
+
+    /// Validate that a configured temp path is safe to use.
+    fn is_safe_temp_path(path: &str) -> bool {
+        if path.contains('\0') || path.contains("..") {
+            return false;
+        }
+        // Allow only a restricted character set to avoid shell injection.
+        path.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.' | '*'))
+    }
+
+    /// Delete files under `path` older than `days` using a fixed argv array.
+    fn find_delete_older_than(path: &str, days: u32) -> Result<()> {
+        let output = Command::new("find")
+            .args([path, "-type", "f", "-atime", "+"])
+            .arg(days.to_string())
+            .arg("-delete")
+            .output()
+            .context("Failed to run find for temp cleanup")?;
+
+        if !output.status.success() {
+            warn!("find command failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        Ok(())
+    }
+
     async fn cleanup_glob_pattern(&self, pattern: &str) -> Result<f64> {
-        // Simple implementation for /home/*/.cache pattern
-        if pattern == "/home/*/.cache" {
-            let output = Command::new("find")
-                .args(["/home", "-maxdepth", "2", "-type", "d", "-name", ".cache"])
-                .output()
-                .context("Failed to find cache directories")?;
-            
-            if output.status.success() {
-                let cache_dirs = String::from_utf8_lossy(&output.stdout);
-                let mut total_freed = 0.0;
-                
-                for cache_dir in cache_dirs.lines() {
-                    if let Ok(freed) = self.cleanup_cache_directory(cache_dir).await {
-                        total_freed += freed;
-                    }
-                }
-                
-                return Ok(total_freed);
+        if pattern != "/home/*/.cache" {
+            bail!("Unsupported glob pattern: {}", pattern);
+        }
+
+        let output = Command::new("find")
+            .args(["/home", "-maxdepth", "2", "-type", "d", "-name", ".cache"])
+            .output()
+            .context("Failed to find cache directories")?;
+
+        if !output.status.success() {
+            bail!("find failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+
+        let cache_dirs = String::from_utf8_lossy(&output.stdout);
+        let mut total_freed = 0.0;
+
+        for cache_dir in cache_dirs.lines() {
+            if !Self::is_safe_temp_path(cache_dir) || cache_dir.contains("..") {
+                warn!("Skipping unsafe cache directory: {}", cache_dir);
+                continue;
+            }
+            if let Ok(freed) = self.cleanup_cache_directory(cache_dir).await {
+                total_freed += freed;
             }
         }
-        
-        Ok(0.0)
+
+        Ok(total_freed)
     }
-    
+
     async fn cleanup_cache_directory(&self, cache_dir: &str) -> Result<f64> {
-        let initial_size = self.get_directory_size(cache_dir).await.unwrap_or(0.0);
-        
-        // Clean cache files older than 30 days
-        let output = Command::new("find")
-            .args([cache_dir, "-type", "f", "-atime", "+30", "-delete"])
-            .output()
-            .context("Failed to clean cache directory")?;
-        
-        if !output.status.success() {
-            debug!("Cache cleanup failed for {}: {}", cache_dir, String::from_utf8_lossy(&output.stderr));
+        if !Self::is_safe_temp_path(cache_dir) || cache_dir.contains("..") {
+            bail!("Unsafe cache directory: {}", cache_dir);
         }
-        
+
+        let initial_size = self.get_directory_size(cache_dir).await.unwrap_or(0.0);
+
+        Self::find_delete_older_than(cache_dir, 30)
+            .context("Failed to clean cache directory")?;
+
         let final_size = self.get_directory_size(cache_dir).await.unwrap_or(initial_size);
         Ok((initial_size - final_size).max(0.0))
     }
-    
+
     async fn clean_system_cache(&self) -> Result<()> {
         // Clean package manager caches
         let cache_commands = [
@@ -339,17 +373,16 @@ impl ActionExecutor {
                 message: "Snapshot cleanup disabled in config".to_string(),
             });
         }
-        
+
         info!("Cleaning up old snapshots");
-        
-        // List all snapshots
+
         let output = Command::new("btrfs")
             .args(["subvolume", "list", "-s", "/"])
             .output();
-        
-        let snapshots = match output {
+
+        let snapshot_paths = match output {
             Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).to_string()
+                Self::parse_snapshot_paths(&String::from_utf8_lossy(&output.stdout))
             }
             _ => {
                 return Ok(ActionResult {
@@ -360,12 +393,9 @@ impl ActionExecutor {
                 });
             }
         };
-        
-        // Parse snapshot list and identify old snapshots to delete
-        let snapshot_lines: Vec<&str> = snapshots.lines().collect();
+
         let snapshots_to_keep = self.config.snapshot_keep_count;
-        
-        if snapshot_lines.len() <= snapshots_to_keep {
+        if snapshot_paths.len() <= snapshots_to_keep {
             return Ok(ActionResult {
                 action: Action::CleanupSnapshots,
                 success: true,
@@ -373,29 +403,75 @@ impl ActionExecutor {
                 message: format!("No snapshots to clean (keeping {snapshots_to_keep} snapshots)"),
             });
         }
-        
-        // This is a simplified implementation - in practice, you'd want more sophisticated
-        // snapshot selection logic based on age, type, etc.
-        let total_freed = 0.0;
-        let snapshots_to_delete = snapshot_lines.len() - snapshots_to_keep;
-        
-        // For now, just report what would be done
+
+        // Delete oldest snapshots first. The btrfs output is sorted by generation,
+        // so the first entries are the oldest.
+        let mut total_freed = 0.0;
+        let mut deleted = 0usize;
+        for path in snapshot_paths.iter().take(snapshot_paths.len() - snapshots_to_keep) {
+            if Self::is_safe_temp_path(path) && !path.contains("..") {
+                match Self::delete_snapshot(path) {
+                    Ok(freed) => {
+                        total_freed += freed;
+                        deleted += 1;
+                    }
+                    Err(e) => warn!("Failed to delete snapshot {}: {}", path, e),
+                }
+            } else {
+                warn!("Skipping unsafe snapshot path: {}", path);
+            }
+        }
+
         Ok(ActionResult {
             action: Action::CleanupSnapshots,
             success: true,
             space_freed_mb: total_freed,
-            message: format!("Would delete {snapshots_to_delete} old snapshots"),
+            message: format!("Deleted {deleted} old snapshots ({total_freed:.1}MB freed)"),
         })
+    }
+
+    /// Parse the output of `btrfs subvolume list -s /` into absolute paths.
+    /// Output lines look like: ID 257 gen 10 top level 5 path @home/.snapshots/1/snapshot
+    fn parse_snapshot_paths(output: &str) -> Vec<String> {
+        output
+            .lines()
+            .filter_map(|line| {
+                line.rsplit_once(" path ")
+                    .map(|(_, p)| format!("/{}", p))
+            })
+            .collect()
+    }
+
+    /// Delete a single BTRFS snapshot and return the estimated freed space in MB.
+    fn delete_snapshot(path: &str) -> Result<f64> {
+        let initial_size = std::fs::metadata(path)
+            .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+            .unwrap_or(0.0);
+
+        let result = Command::new("btrfs")
+            .args(["subvolume", "delete", path])
+            .output()
+            .context(format!("Failed to delete snapshot {}", path))?;
+
+        if !result.status.success() {
+            bail!(
+                "btrfs subvolume delete failed for {}: {}",
+                path,
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+
+        Ok(initial_size)
     }
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct ActionResult {
-    pub action: Action,
-    pub success: bool,
-    pub space_freed_mb: f64,
-    pub message: String,
+    action: Action,
+    success: bool,
+    space_freed_mb: f64,
+    message: String,
 }
 
 #[cfg(test)]
@@ -430,6 +506,46 @@ mod tests {
         assert!(result.message.contains("Dry run"));
     }
     
+    #[tokio::test]
+    async fn test_snapshot_paths_parsing() {
+        let sample = "ID 257 gen 10 top level 5 path @home/.snapshots/1/snapshot\n\
+            ID 258 gen 11 top level 5 path @.snapshots/2/snapshot";
+        let paths = ActionExecutor::parse_snapshot_paths(sample);
+        assert_eq!(paths, vec![
+            "/@home/.snapshots/1/snapshot",
+            "/@.snapshots/2/snapshot",
+        ]);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_path_rejects_unsafe_path() {
+        let config = ActionConfig {
+            enable_compression: false,
+            enable_balance: false,
+            enable_snapshot_cleanup: false,
+            enable_temp_cleanup: true,
+            temp_paths: vec![],
+            snapshot_keep_count: 10,
+        };
+        let executor = ActionExecutor::new(config, false);
+        assert!(executor.cleanup_path("/etc; rm -rf /").await.is_err());
+        assert!(executor.cleanup_path("/tmp/../etc").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_path_ignores_non_allowed_dir() {
+        let config = ActionConfig {
+            enable_compression: false,
+            enable_balance: false,
+            enable_snapshot_cleanup: false,
+            enable_temp_cleanup: true,
+            temp_paths: vec![],
+            snapshot_keep_count: 10,
+        };
+        let executor = ActionExecutor::new(config, false);
+        assert_eq!(executor.cleanup_path("/home").await.unwrap(), 0.0);
+    }
+
     #[tokio::test]
     async fn test_no_operation() {
         let config = ActionConfig {

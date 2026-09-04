@@ -57,8 +57,12 @@ class ImageTests(unittest.TestCase):
         self.assertTrue(image.CACHE_DIR.is_dir())
 
     def test_fetch_downloads_to_cache(self):
-        url_root = self._serve({"release.tar.xz": b"image payload"})
-        dest = image.fetch(f"{url_root}/release.tar.xz")
+        from unittest.mock import patch, MagicMock
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            response = MagicMock()
+            response.__enter__.return_value.read.side_effect = [b"image payload", b""]
+            mock_urlopen.return_value = response
+            dest = image.fetch("https://example.com/release.tar.xz")
         self.assertEqual(dest, image.CACHE_DIR / "release.tar.xz")
         self.assertEqual(dest.read_bytes(), b"image payload")
 
