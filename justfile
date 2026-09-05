@@ -23,11 +23,11 @@ lint:
 # Auto-fix warnings and formatting
 fix:
     cargo fix --workspace --allow-dirty
-    cargo fmt --workspace
+    cargo fmt
 
 # Check formatting
 check-fmt:
-    cargo fmt --workspace -- --check
+    cargo fmt -- --check
 
 # Clean build artifacts
 clean:

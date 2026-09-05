@@ -127,7 +127,10 @@ pub fn validate_filesystem_type(fs: &str) -> Result<()> {
 pub fn validate_flavour(flavour: &str) -> Result<()> {
     // Only allow cosmic-desktop for RegicideOS
     if flavour != "cosmic-desktop" {
-        bail!("Unsupported flavour: {}. Only 'cosmic-desktop' is supported.", flavour);
+        bail!(
+            "Unsupported flavour: {}. Only 'cosmic-desktop' is supported.",
+            flavour
+        );
     }
     Ok(())
 }

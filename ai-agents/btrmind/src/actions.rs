@@ -1,7 +1,7 @@
+use crate::config::ActionConfig;
 use anyhow::{bail, Context, Result};
 use std::process::Command;
-use tracing::{info, warn, debug};
-use crate::config::ActionConfig;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -23,7 +23,7 @@ impl Action {
             _ => None,
         }
     }
-    
+
     pub fn all_actions() -> Vec<Action> {
         vec![
             Action::NoOperation,
@@ -33,7 +33,7 @@ impl Action {
             Action::CleanupSnapshots,
         ]
     }
-    
+
     pub fn action_count() -> usize {
         5
     }
@@ -48,7 +48,7 @@ impl ActionExecutor {
     pub fn new(config: ActionConfig, dry_run: bool) -> Self {
         Self { config, dry_run }
     }
-    
+
     pub async fn execute_action(&self, action: Action) -> Result<ActionResult> {
         if self.dry_run {
             info!("DRY-RUN: Would execute action: {:?}", action);
@@ -59,7 +59,7 @@ impl ActionExecutor {
                 message: "Dry run - no action taken".to_string(),
             });
         }
-        
+
         match action {
             Action::NoOperation => self.no_operation().await,
             Action::DeleteTempFiles => self.delete_temp_files().await,
@@ -68,7 +68,7 @@ impl ActionExecutor {
             Action::CleanupSnapshots => self.cleanup_snapshots().await,
         }
     }
-    
+
     async fn no_operation(&self) -> Result<ActionResult> {
         debug!("No operation - monitoring only");
         Ok(ActionResult {
@@ -78,7 +78,7 @@ impl ActionExecutor {
             message: "No action taken".to_string(),
         })
     }
-    
+
     /// Allowed literal directories for temp cleanup. Any configured path outside
     /// this set is ignored to prevent accidental deletion of system data.
     const ALLOWED_TEMP_DIRS: &[&str] = &["/tmp", "/var/tmp", "/var/cache"];
@@ -145,8 +145,7 @@ impl ActionExecutor {
 
         match path {
             "/tmp" | "/var/tmp" => {
-                Self::find_delete_older_than(path, 7)
-                    .context("Failed to clean temporary files")?;
+                Self::find_delete_older_than(path, 7).context("Failed to clean temporary files")?;
             }
             "/var/cache" => {
                 self.clean_system_cache().await?;
@@ -181,7 +180,10 @@ impl ActionExecutor {
             .context("Failed to run find for temp cleanup")?;
 
         if !output.status.success() {
-            warn!("find command failed: {}", String::from_utf8_lossy(&output.stderr));
+            warn!(
+                "find command failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }
@@ -223,10 +225,12 @@ impl ActionExecutor {
 
         let initial_size = self.get_directory_size(cache_dir).await.unwrap_or(0.0);
 
-        Self::find_delete_older_than(cache_dir, 30)
-            .context("Failed to clean cache directory")?;
+        Self::find_delete_older_than(cache_dir, 30).context("Failed to clean cache directory")?;
 
-        let final_size = self.get_directory_size(cache_dir).await.unwrap_or(initial_size);
+        let final_size = self
+            .get_directory_size(cache_dir)
+            .await
+            .unwrap_or(initial_size);
         Ok((initial_size - final_size).max(0.0))
     }
 
@@ -242,7 +246,7 @@ impl ActionExecutor {
             // Clean portage distfiles (Gentoo)
             ("eclean", vec!["distfiles"]),
         ];
-        
+
         for (cmd, args) in &cache_commands {
             if let Ok(output) = Command::new(cmd).args(args).output() {
                 if output.status.success() {
@@ -250,27 +254,27 @@ impl ActionExecutor {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn get_directory_size(&self, path: &str) -> Result<f64> {
         let output = Command::new("du")
             .args(["-sm", path])
             .output()
             .context("Failed to get directory size")?;
-        
+
         if !output.status.success() {
             return Ok(0.0);
         }
-        
+
         let output_str = String::from_utf8_lossy(&output.stdout);
         let size_str = output_str.split_whitespace().next().unwrap_or("0");
         let size_mb: f64 = size_str.parse().unwrap_or(0.0);
-        
+
         Ok(size_mb)
     }
-    
+
     async fn compress_files(&self) -> Result<ActionResult> {
         if !self.config.enable_compression {
             return Ok(ActionResult {
@@ -280,14 +284,14 @@ impl ActionExecutor {
                 message: "Compression disabled in config".to_string(),
             });
         }
-        
+
         info!("Compressing files");
-        
+
         // For BTRFS, we can use filesystem-level compression
         let output = Command::new("btrfs")
             .args(["filesystem", "defragment", "-r", "-v", "-clzo", "/"])
             .output();
-        
+
         match output {
             Ok(output) if output.status.success() => {
                 Ok(ActionResult {
@@ -298,12 +302,18 @@ impl ActionExecutor {
                 })
             }
             Ok(output) => {
-                warn!("BTRFS compression failed: {}", String::from_utf8_lossy(&output.stderr));
+                warn!(
+                    "BTRFS compression failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
                 Ok(ActionResult {
                     action: Action::CompressFiles,
                     success: false,
                     space_freed_mb: 0.0,
-                    message: format!("BTRFS compression failed: {}", String::from_utf8_lossy(&output.stderr)),
+                    message: format!(
+                        "BTRFS compression failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ),
                 })
             }
             Err(e) => {
@@ -317,7 +327,7 @@ impl ActionExecutor {
             }
         }
     }
-    
+
     async fn balance_metadata(&self) -> Result<ActionResult> {
         if !self.config.enable_balance {
             return Ok(ActionResult {
@@ -327,13 +337,13 @@ impl ActionExecutor {
                 message: "Balance disabled in config".to_string(),
             });
         }
-        
+
         info!("Balancing BTRFS metadata");
-        
+
         let output = Command::new("btrfs")
             .args(["balance", "start", "-musage=50", "/"])
             .output();
-        
+
         match output {
             Ok(output) if output.status.success() => {
                 Ok(ActionResult {
@@ -344,12 +354,18 @@ impl ActionExecutor {
                 })
             }
             Ok(output) => {
-                warn!("BTRFS balance failed: {}", String::from_utf8_lossy(&output.stderr));
+                warn!(
+                    "BTRFS balance failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
                 Ok(ActionResult {
                     action: Action::BalanceMetadata,
                     success: false,
                     space_freed_mb: 0.0,
-                    message: format!("BTRFS balance failed: {}", String::from_utf8_lossy(&output.stderr)),
+                    message: format!(
+                        "BTRFS balance failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ),
                 })
             }
             Err(e) => {
@@ -363,7 +379,7 @@ impl ActionExecutor {
             }
         }
     }
-    
+
     async fn cleanup_snapshots(&self) -> Result<ActionResult> {
         if !self.config.enable_snapshot_cleanup {
             return Ok(ActionResult {
@@ -408,7 +424,10 @@ impl ActionExecutor {
         // so the first entries are the oldest.
         let mut total_freed = 0.0;
         let mut deleted = 0usize;
-        for path in snapshot_paths.iter().take(snapshot_paths.len() - snapshots_to_keep) {
+        for path in snapshot_paths
+            .iter()
+            .take(snapshot_paths.len() - snapshots_to_keep)
+        {
             if Self::is_safe_temp_path(path) && !path.contains("..") {
                 match Self::delete_snapshot(path) {
                     Ok(freed) => {
@@ -435,10 +454,7 @@ impl ActionExecutor {
     fn parse_snapshot_paths(output: &str) -> Vec<String> {
         output
             .lines()
-            .filter_map(|line| {
-                line.rsplit_once(" path ")
-                    .map(|(_, p)| format!("/{}", p))
-            })
+            .filter_map(|line| line.rsplit_once(" path ").map(|(_, p)| format!("/{}", p)))
             .collect()
     }
 
@@ -478,7 +494,7 @@ pub struct ActionResult {
 mod tests {
     use super::*;
     use crate::config::ActionConfig;
-    
+
     #[test]
     fn test_action_enum() {
         assert_eq!(Action::from_id(0), Some(Action::NoOperation));
@@ -486,7 +502,7 @@ mod tests {
         assert_eq!(Action::from_id(5), None);
         assert_eq!(Action::action_count(), 5);
     }
-    
+
     #[tokio::test]
     async fn test_dry_run_mode() {
         let config = ActionConfig {
@@ -497,24 +513,27 @@ mod tests {
             temp_paths: vec!["/tmp".to_string()],
             snapshot_keep_count: 10,
         };
-        
+
         let executor = ActionExecutor::new(config, true);
-        let result = executor.execute_action(Action::DeleteTempFiles).await.unwrap();
-        
+        let result = executor
+            .execute_action(Action::DeleteTempFiles)
+            .await
+            .unwrap();
+
         assert!(result.success);
         assert_eq!(result.space_freed_mb, 0.0);
         assert!(result.message.contains("Dry run"));
     }
-    
+
     #[tokio::test]
     async fn test_snapshot_paths_parsing() {
         let sample = "ID 257 gen 10 top level 5 path @home/.snapshots/1/snapshot\n\
             ID 258 gen 11 top level 5 path @.snapshots/2/snapshot";
         let paths = ActionExecutor::parse_snapshot_paths(sample);
-        assert_eq!(paths, vec![
-            "/@home/.snapshots/1/snapshot",
-            "/@.snapshots/2/snapshot",
-        ]);
+        assert_eq!(
+            paths,
+            vec!["/@home/.snapshots/1/snapshot", "/@.snapshots/2/snapshot",]
+        );
     }
 
     #[tokio::test]
@@ -556,10 +575,10 @@ mod tests {
             temp_paths: vec![],
             snapshot_keep_count: 10,
         };
-        
+
         let executor = ActionExecutor::new(config, false);
         let result = executor.execute_action(Action::NoOperation).await.unwrap();
-        
+
         assert!(result.success);
         assert_eq!(result.space_freed_mb, 0.0);
     }
