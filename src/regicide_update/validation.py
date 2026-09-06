@@ -6,7 +6,6 @@ command-injection bugs when values are passed to emerge, tar, shell scripts,
 grub tools, or network fetches.
 """
 
-import os
 import re
 import urllib.parse
 from pathlib import Path

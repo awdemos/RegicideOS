@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from regicide_update import cli_update, common as rc, snapshots
+from regicide_update import cli_update, common as rc
 
 
 class CliUpdateTransactionTests(unittest.TestCase):
