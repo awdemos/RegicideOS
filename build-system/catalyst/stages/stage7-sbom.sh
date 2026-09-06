@@ -134,9 +134,12 @@ echo "COSMIC packages: ${COSMIC_PKGS}"
 
 ERRORS=0
 
-# Gate: COSMIC greeter must be installed.
+# Gate: COSMIC greeter must be installed (desktop variant only; headless
+# builds intentionally omit COSMIC, so a zero-package count is expected).
 if find "${ROOTS_DIR}/var/db/pkg" -mindepth 2 -maxdepth 2 -type d \( -name 'cosmic-greeter' -o -name 'cosmic-greeter-*' \) | grep -q .; then
     echo "PASS: cosmic-greeter installed"
+elif [[ "${REGICIDE_SKIP_COSMIC:-0}" == "1" ]]; then
+    echo "PASS: cosmic-greeter absent (headless build, REGICIDE_SKIP_COSMIC=1)"
 else
     echo "FAIL: cosmic-greeter not found in package database"
     ERRORS=$((ERRORS + 1))

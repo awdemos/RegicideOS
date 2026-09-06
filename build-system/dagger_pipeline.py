@@ -69,6 +69,13 @@ def _check_container_runtime() -> None:
     """
     if os.environ.get("_EXPERIMENTAL_DAGGER_RUNNER_HOST"):
         return
+    # Explicit operator opt-out: DOCKER_HOST may point at a rootful Podman
+    # socket (podman.socket), which `docker info` reports as "rootless"
+    # because the *client user* is unprivileged — even though the engine side
+    # is rootful and the dagger0 bridge works. The operator knows their
+    # runtime; skip the heuristic when they ask.
+    if os.environ.get("REGICIDE_SKIP_ROOTLESS_CHECK", "") == "1":
+        return
     try:
         result = subprocess.run(
             ["docker", "info"],
@@ -82,8 +89,12 @@ def _check_container_runtime() -> None:
     if result.returncode != 0:
         return
     output = result.stdout.lower()
-    # Podman rootless reports a standalone "rootless" line under Security Options.
-    # Docker rootless reports "rootless: true".
+    # Podman's docker-compat endpoint reports "rootless: true" even on a
+    # rootful podman.socket (observed 2026-09: DOCKER_HOST=unix:///run/podman/
+    # podman.sock docker info -> rootless: true, rootlessNetworkCmd: pasta).
+    # Only a true rootless Podman (user-owned socket) actually breaks the
+    # dagger0 bridge, so the check is a heuristic — operators can override it:
+    # see REGICIDE_SKIP_ROOTLESS_CHECK below and run-dagger-build-local.sh.
     if re.search(r"^\s*rootless\s*$", output, re.MULTILINE) or "rootless: true" in output:
         print(
             "ERROR: Rootless Podman is not supported by the Dagger engine.\n"
@@ -887,6 +898,11 @@ async def main() -> None:
         help="Also build a bootable live ISO (GRUB + dracut dmsquash-live) from the artifacts",
     )
     parser.add_argument(
+        "--check-runtime",
+        action="store_true",
+        help="Preflight the container runtime and exit; does not start Dagger or the build",
+    )
+    parser.add_argument(
         "--skip-sign",
         action="store_true",
         help="Skip Sigstore signing (useful for local test builds without cosign credentials)",
@@ -922,6 +938,9 @@ async def main() -> None:
             sys.exit(1)
 
     _check_container_runtime()
+    if args.check_runtime:
+        print("Runtime check OK: proceeding to Dagger session would start here.")
+        return
 
     config = dagger.Config(log_output=sys.stdout)
     os.environ.setdefault("DAGGER_CLOUD_ORG", _dagger_cloud_org())

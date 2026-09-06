@@ -9,7 +9,38 @@ log_status "start" "installing COSMIC core packages"
 
 if [[ "${REGICIDE_SKIP_COSMIC:-0}" == "1" ]]; then
     echo "REGICIDE_SKIP_COSMIC=1: skipping COSMIC core packages."
-    log_status "skip" "COSMIC core packages skipped"
+    # Headless builds still need the shared overlay infrastructure:
+    # stage5-regicide.sh emerges regicide-tools/* from the regicide-rust
+    # overlay, which is only cloned/copied and wired into repos.conf here.
+    # Stage the overlays + repos.conf BEFORE the early exit.
+    mkdir -p "${ROOTFS}/var/db/repos" "${ROOTFS}/etc/portage/repos.conf"
+
+    REGICIDE_OVERLAY="${CATALYST_DIR}/../../overlays/regicide-rust"
+    if [[ -d "${REGICIDE_OVERLAY}" ]]; then
+        echo "Installing regicide-rust overlay into rootfs..."
+        rm -rf "${ROOTFS}/var/db/repos/regicide-rust"
+        cp -a "${REGICIDE_OVERLAY}" "${ROOTFS}/var/db/repos/regicide-rust"
+    else
+        echo "WARNING: regicide-rust overlay not found at ${REGICIDE_OVERLAY}" >&2
+    fi
+
+    cat > "${ROOTFS}/etc/portage/repos.conf/regicide.conf" << 'EOF'
+[DEFAULT]
+main-repo = gentoo
+
+[gentoo]
+location = /var/db/repos/gentoo
+sync-type = rsync
+sync-uri = rsync://rsync.gentoo.org/gentoo-portage
+auto-sync = yes
+
+[regicide-rust]
+location = /var/db/repos/regicide-rust
+# This overlay lives inside the RegicideOS repo at overlays/regicide-rust/
+# Clone the repo and symlink: ln -sf /path/to/RegicideOS/overlays/regicide-rust /var/db/repos/regicide-rust
+auto-sync = no
+EOF
+
     clean_rootfs_transient
     log_status "complete" "COSMIC core packages skipped"
     echo "Stage 4a complete (skipped)."
