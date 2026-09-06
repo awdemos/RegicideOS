@@ -2,7 +2,6 @@
 """CLI for fetching and installing release images."""
 
 import argparse
-from pathlib import Path
 from regicide_update import common as rc
 from regicide_update import image
 from regicide_update import validation
