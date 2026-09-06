@@ -19,7 +19,7 @@ class TestISOCreationSafety(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.temp_dir = tempfile.mkdtemp()
+        self.temp_dir = tempfile.mkdtemp(dir="/tmp")
         self.build_dir = os.path.join(self.temp_dir, "build")
         self.work_dir = os.path.join(self.build_dir, "work")
         self.output_dir = os.path.join(self.build_dir, "output")
@@ -152,8 +152,8 @@ mkfs.ext4 /dev/sdb1
         """Test file access safety during ISO creation."""
         class FileAccessSafety:
             def __init__(self, allowed_dirs, forbidden_paths):
-                self.allowed_dirs = allowed_dirs
-                self.forbidden_paths = forbidden_paths
+                self.allowed_dirs = [os.path.abspath(d) for d in allowed_dirs]
+                self.forbidden_paths = [os.path.abspath(p) for p in forbidden_paths]
                 self.violations = []
             
             def check_file_access(self, file_path, operation="read"):
@@ -161,13 +161,7 @@ mkfs.ext4 /dev/sdb1
                 # Normalize path
                 file_path = os.path.abspath(file_path)
                 
-                # Check forbidden paths
-                for forbidden in self.forbidden_paths:
-                    if file_path.startswith(forbidden):
-                        self.violations.append(f"Access to forbidden path: {file_path}")
-                        return False
-                
-                # Check if path is within allowed directories
+                # Check if path is within allowed directories first
                 in_allowed_dir = False
                 for allowed_dir in self.allowed_dirs:
                     if file_path.startswith(allowed_dir):
@@ -177,6 +171,12 @@ mkfs.ext4 /dev/sdb1
                 if not in_allowed_dir:
                     self.violations.append(f"Access outside allowed directories: {file_path}")
                     return False
+                
+                # Then check forbidden paths
+                for forbidden in self.forbidden_paths:
+                    if file_path.startswith(forbidden):
+                        self.violations.append(f"Access to forbidden path: {file_path}")
+                        return False
                 
                 return True
             
@@ -226,8 +226,8 @@ mkfs.ext4 /dev/sdb1
                 return self.check_file_access(file_path, "delete")
         
         # Setup safety checker
-        allowed_dirs = [self.work_dir, self.output_dir, "/tmp"]
-        forbidden_paths = ["/etc", "/boot", "/root", "/home"]
+        allowed_dirs = [self.work_dir, self.output_dir, "/tmp", "/var/tmp"]
+        forbidden_paths = ["/etc/", "/boot/", "/root/", "/home/"]
         
         safety = FileAccessSafety(allowed_dirs, forbidden_paths)
         

@@ -52,6 +52,9 @@ def _restore_subvolume(subvol: str, target: str) -> None:
     the temporary subvolume is renamed into the live path, and only then the
     backup is deleted. If a previous attempt was interrupted, the recovery
     logic restores the live path from whatever consistent pieces remain.
+
+    The whole swap is wrapped in a single rollback block so that a failure
+    mid-sequence can recover the previous live data if possible.
     """
     live_path = os.path.join(rc.OVERLAY_DIR, subvol)
     snap_path = os.path.join(target, subvol)
@@ -83,10 +86,23 @@ def _restore_subvolume(subvol: str, target: str) -> None:
     rc.execute("btrfs", ["subvolume", "snapshot", snap_path, temp_path])
 
     # Atomic swap: old live -> backup, temp -> live, then delete backup.
-    _cleanup_existing(backup_path)
-    rc.execute("mv", [live_path, backup_path])
-    rc.execute("mv", [temp_path, live_path])
-    _cleanup_existing(backup_path)
+    try:
+        _cleanup_existing(backup_path)
+        rc.execute("mv", [live_path, backup_path])
+        rc.execute("mv", [temp_path, live_path])
+        _cleanup_existing(backup_path)
+    except SystemExit:
+        # Roll back: restore the previous live subvolume if the second rename
+        # failed or left live_path missing. Prefer the already-swapped new data
+        # if it exists, otherwise fall back to the backup.
+        if not os.path.isdir(live_path):
+            if os.path.isdir(temp_path):
+                rc.execute("mv", [temp_path, live_path])
+            elif os.path.isdir(backup_path):
+                rc.execute("mv", [backup_path, live_path])
+        _cleanup_existing(temp_path)
+        _cleanup_existing(backup_path)
+        raise
 
 
 def apply_revert() -> bool:

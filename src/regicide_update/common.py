@@ -56,7 +56,10 @@ def execute(
         return ""
     result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
     if check and result.returncode != 0:
-        die(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
+        stderr = result.stderr.strip()
+        die(f"Command failed: {' '.join(cmd)}\n{stderr}")
+    elif not check and result.returncode != 0 and result.stderr.strip():
+        warn(f"Command returned {result.returncode}: {' '.join(cmd)}\n{result.stderr.strip()}")
     return result.stdout
 
 

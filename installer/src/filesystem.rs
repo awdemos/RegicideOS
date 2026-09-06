@@ -42,9 +42,9 @@ pub fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
         .with_context(|| format!("Base directory does not exist: {allowed_base}"))?;
 
     let path_to_check = if absolute_path.exists() {
-        absolute_path.canonicalize().with_context(|| {
-            format!("Failed to canonicalize path: {}", absolute_path.display())
-        })?
+        absolute_path
+            .canonicalize()
+            .with_context(|| format!("Failed to canonicalize path: {}", absolute_path.display()))?
     } else {
         let parent = absolute_path
             .parent()
@@ -55,7 +55,10 @@ pub fn validate_safe_path(path: &str, allowed_base: &str) -> Result<PathBuf> {
         }
 
         let canonical_parent = parent.canonicalize().with_context(|| {
-            format!("Failed to canonicalize parent directory: {}", parent.display())
+            format!(
+                "Failed to canonicalize parent directory: {}",
+                parent.display()
+            )
         })?;
         if !canonical_parent.starts_with(&base_path) {
             bail!(

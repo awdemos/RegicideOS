@@ -35,6 +35,8 @@ cp "${REPO_ROOT}/data/homepage/Rent-a-GPU.desktop" \
     "${REGICIDE_UPDATE_STAGING}/data/homepage/Rent-a-GPU.desktop"
 
 run_in_chroot bash <<'STAGE6EOF'
+set -euo pipefail
+
     # The stage3/4 lineage leaves /etc as 0700, which breaks every service
     # that runs as a non-root user or reads config as a non-root user (dbus,
     # timesyncd, cosmic-greeter, shells reading /etc/profile). Ensure /etc
@@ -46,7 +48,6 @@ run_in_chroot bash <<'STAGE6EOF'
         # Include proprietary NVIDIA modules in the initramfs if they were
         # installed (e.g. for identical bare-metal hardware). This ensures the
         # live ISO and installed system can drive NVIDIA GPUs from early boot.
-        local kver
         kver=$(ls /lib/modules/ | head -n1)
         if [[ -d "/lib/modules/${kver}/video" ]] && \
            find "/lib/modules/${kver}/video" -name 'nvidia*.ko*' -print -quit 2>/dev/null | grep -q .; then
@@ -391,7 +392,7 @@ EOF
     # Gentoo kernels are installed as /boot/kernel-*; create the canonical
     # /boot/vmlinuz symlink so installers and verifiers have a stable path.
     if [[ ! -f /boot/vmlinuz ]]; then
-        latest_kernel="$(ls -1 /boot/kernel-* /boot/vmlinuz-* 2>/dev/null | head -n1)"
+        latest_kernel="$(ls -1v /boot/kernel-* /boot/vmlinuz-* 2>/dev/null | tail -n1)"
         if [[ -n "${latest_kernel}" ]]; then
             ln -sf "$(basename "${latest_kernel}")" /boot/vmlinuz
         fi
@@ -538,10 +539,13 @@ run_in_chroot bash <<'STAGE6CLEANEOF'
 STAGE6CLEANEOF
 
 echo "Creating stage4 tarball..."
-TARBALL_NAME="stage4-${REGICIDE_ARCH:-amd64}-systemd-cosmic.tar.xz"
+TARBALL_NAME="stage4-${REGICIDE_ARCH:-amd64}-systemd${REGICIDE_HEADLESS:--cosmic}.tar.xz"
 log_status "tarball" "creating ${TARBALL_NAME}"
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_FILE="${OUTPUT_DIR}/${TARBALL_NAME}"
+
+# stage7-sbom and stage8-vm-test key off the same filename pattern.
+export REGICIDE_HEADLESS
 
 tar -C "${ROOTFS}" -cpJf "${OUTPUT_FILE}" \
     --xattrs-include='*.*' \

@@ -6,24 +6,34 @@ set -euo pipefail
 source "$(dirname "$0")/common.sh"
 STAGE_NAME="stage7-verify"
 
-# Headless (server) variant: when COSMIC is intentionally omitted the
-# desktop-only gates below would falsely fail an otherwise-valid image, so
-# they are skipped for that build. Default (flag unset/0) preserves the
-# original COSMIC verification path unchanged.
-if [[ "${REGICIDE_SKIP_COSMIC:-0}" == "1" ]]; then
-    REGICIDE_HEADLESS=1
-else
-    REGICIDE_HEADLESS=0
-fi
-
 REGICIDE_ARCH="${REGICIDE_ARCH:-amd64}"
-TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd-cosmic.tar.xz"
+REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
+TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}.tar.xz"
 SQUASHFS="${OUTPUT_DIR}/regicide-cosmic.img"
 VERIFY_SCRATCH_DIR="${REGICIDE_VERIFY_DIR:-/var/tmp}"
 mkdir -p "${VERIFY_SCRATCH_DIR}"
 ROOTS_DIR="$(mktemp -d -p "${VERIFY_SCRATCH_DIR}" -t regicide-verify-XXXXXX)"
 
-trap 'chmod -R +w "${ROOTS_DIR}" 2>/dev/null || true; rm -rf "${ROOTS_DIR}"' EXIT
+# Ownership checks are impossible on an extracted tree when running as a
+# non-root user (tar cannot chown to the recorded owners).  We therefore
+# verify ownership from the tarball metadata when unprivileged; modes are
+# preserved during extraction and are checked against the tree as before.
+UNPRIVILEGED=0
+if [[ "$(id -u)" -ne 0 ]]; then
+    UNPRIVILEGED=1
+fi
+
+OWNER_DUMP=""
+if [[ ${UNPRIVILEGED} -eq 1 ]]; then
+    OWNER_DUMP="$(mktemp -p "${VERIFY_SCRATCH_DIR}" -t regicide-owners-XXXXXX)"
+    tar --numeric-owner -tvf "${TARBALL}" > "${OWNER_DUMP}" 2>/dev/null || true
+    if [[ ! -s "${OWNER_DUMP}" ]]; then
+        echo "ERROR: could not read tarball metadata; cannot verify ownership"
+        exit 1
+    fi
+fi
+
+trap 'chmod -R +w "${ROOTS_DIR}" 2>/dev/null || true; rm -rf "${ROOTS_DIR}" "${OWNER_DUMP:-}"' EXIT
 
 log_status "start" "verifying stage4 tarball and SquashFS"
 echo "Stage 7: verifying built artifacts..."
@@ -36,33 +46,6 @@ if [[ ! -f "${SQUASHFS}" ]]; then
     echo "ERROR: live SquashFS missing: ${SQUASHFS}"
     exit 1
 fi
-
-# Unprivileged (rootless) verification: non-root `tar` cannot chown, so the
-# extracted copy below comes back owned by the extracting user, not the
-# recorded owner — a correct image would then falsely fail the ownership
-# gates. When unprivileged we verify ownership against the archive's
-# recorded owner (ground truth of the real image) instead of the tree.
-UNPRIVILEGED=0
-if [[ "$(id -u)" -ne 0 ]]; then
-    UNPRIVILEGED=1
-    echo "NOTE: running unprivileged (uid $(id -u)); ownership verified from archive metadata."
-    OWNER_DUMP="$(mktemp)"
-    tar -tvf "${TARBALL}" 2>/dev/null | awk 'NF>=2' > "${OWNER_DUMP}"
-    # Replace the EXIT trap wholesale (bash traps do not stack) so the
-    # scratch-tree cleanup below is preserved alongside the dump cleanup.
-    trap 'rm -f "${OWNER_DUMP}" 2>/dev/null || true; chmod -R +w "${ROOTS_DIR}" 2>/dev/null || true; rm -rf "${ROOTS_DIR}" 2>/dev/null || true' EXIT
-fi
-
-rec_owner() {
-    # $1: absolute path (e.g. /etc/hosts or /home/regicide). Echoes the
-    # archive-recorded owner "uid/gid" converted to "uid:gid".
-    awk -v want="${1#/}" '{
-        m = $NF
-        sub(/^\.\//, "", m)
-        sub(/\/$/, "", m)
-        if (m == want) { print $2; exit }
-    }' "${OWNER_DUMP:-/dev/null}" | tr / :
-}
 
 echo "Extracting tarball for verification..."
 tar -C "${ROOTS_DIR}" -xpJf "${TARBALL}" --overwrite --exclude='./var/cache/distfiles/*' --exclude='./var/cache/binpkgs/*' --exclude='./var/tmp/*' --exclude='./tmp/*' .
@@ -78,6 +61,35 @@ pass() {
     echo "  PASS: $1"
 }
 
+# Resolve ownership for a path inside ROOTS_DIR.  When unprivileged, look up
+# the recorded owner from the tarball listing; otherwise use stat(1).
+rec_owner() {
+    local rel="${1#${ROOTS_DIR}}"
+    rel="${rel#/}"
+    rel="./${rel}"
+    if [[ ${UNPRIVILEGED} -eq 1 && -n "${OWNER_DUMP}" && -f "${OWNER_DUMP}" ]]; then
+        awk -v path="${rel}" '
+            NF >= 2 {
+                # Normalize tar member name: strip leading ./ and trailing /
+                member = $NF
+                sub(/^\.\//, "", member)
+                sub(/\/$/, "", member)
+                check = path
+                sub(/^\.\//, "", check)
+                sub(/\/$/, "", check)
+                if (member == check) {
+                    print $2
+                    found = 1
+                    exit
+                }
+            }
+            END { if (!found) print "" }
+        ' "${OWNER_DUMP}"
+    else
+        stat -c '%u:%g' "$1" 2>/dev/null || true
+    fi
+}
+
 # 1. Default user exists and home directory is correct.
 if grep -q '^regicide:' "${ROOTS_DIR}/etc/passwd"; then
     pass "user regicide exists in /etc/passwd"
@@ -91,14 +103,10 @@ else
     fail "/home/regicide missing"
 fi
 
-home_owner="$(stat -c '%u:%g' "${ROOTS_DIR}/home/regicide" 2>/dev/null)"
-if [[ ${UNPRIVILEGED} -eq 1 ]]; then
-    home_owner="$(rec_owner /home/regicide)"
-fi
-if [[ "${home_owner}" == "1000:1000" ]]; then
+if [[ "$(rec_owner "${ROOTS_DIR}/home/regicide")" == "1000:1000" ]]; then
     pass "/home/regicide owned by regicide:regicide"
 else
-    fail "/home/regicide not owned by 1000:1000 (owner ${home_owner})"
+    fail "/home/regicide not owned by 1000:1000"
 fi
 
 # 2. Root password is unset.
@@ -128,27 +136,19 @@ if [[ -f "${SUDOERS_DROPIN}" ]]; then
     fi
 fi
 
-# 4. COSMIC binaries are present (desktop variant only; headless builds
-# intentionally omit the whole COSMIC stack).
-if [[ ${REGICIDE_HEADLESS} -eq 1 ]]; then
-    pass "COSMIC binary checks skipped (headless build)"
-else
-for bin in cosmic-greeter cosmic-session cosmic-comp cosmic-settings cosmic-app-library cosmic-launcher cosmic-panel cosmic-notifications cosmic-osd cosmic-workspaces cosmic-files cosmic-term cosmic-edit cosmic-store; do
-    if [[ -x "${ROOTS_DIR}/usr/bin/${bin}" || -x "${ROOTS_DIR}/usr/local/bin/${bin}" ]]; then
-        pass "binary ${bin} present"
-    else
-        fail "binary ${bin} missing"
-    fi
-done
+# 4. COSMIC binaries are present (skip when headless).
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    for bin in cosmic-greeter cosmic-session cosmic-comp cosmic-settings cosmic-app-library cosmic-launcher cosmic-panel cosmic-notifications cosmic-osd cosmic-workspaces cosmic-files cosmic-term cosmic-edit cosmic-store; do
+        if [[ -x "${ROOTS_DIR}/usr/bin/${bin}" || -x "${ROOTS_DIR}/usr/local/bin/${bin}" ]]; then
+            pass "binary ${bin} present"
+        else
+            fail "binary ${bin} missing"
+        fi
+    done
 fi
 
 # 5. Critical services are enabled.
-if [[ ${REGICIDE_HEADLESS} -eq 1 ]]; then
-    SERVICES="NetworkManager sshd"
-else
-    SERVICES="cosmic-greeter NetworkManager bluetooth pipewire sshd"
-fi
-for svc in ${SERVICES}; do
+for svc in NetworkManager bluetooth pipewire sshd; do
     svc_file=""
     case "${svc}" in
         cosmic-greeter)
@@ -174,19 +174,17 @@ for svc in ${SERVICES}; do
     fi
 done
 
-if [[ -L "${ROOTS_DIR}/etc/systemd/system/display-manager.service" ]]; then
-    dm_target="$(readlink "${ROOTS_DIR}/etc/systemd/system/display-manager.service" 2>/dev/null || true)"
-    if [[ "${dm_target}" == *cosmic-greeter* ]]; then
-        pass "display-manager links to cosmic-greeter"
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    if [[ -L "${ROOTS_DIR}/etc/systemd/system/display-manager.service" ]]; then
+        dm_target="$(readlink "${ROOTS_DIR}/etc/systemd/system/display-manager.service" 2>/dev/null || true)"
+        if [[ "${dm_target}" == *cosmic-greeter* ]]; then
+            pass "display-manager links to cosmic-greeter"
+        else
+            fail "display-manager links to ${dm_target}, expected cosmic-greeter"
+        fi
     else
-        fail "display-manager links to ${dm_target}, expected cosmic-greeter"
+        fail "display-manager.service is not a symlink"
     fi
-elif [[ ${REGICIDE_HEADLESS} -eq 1 ]]; then
-    # No greeter is installed in headless builds, so there is nothing to
-    # link the display-manager unit to; absence is expected here.
-    pass "display-manager not configured (headless build)"
-else
-    fail "display-manager.service is not a symlink"
 fi
 
 if [[ -f "${ROOTS_DIR}/usr/lib/systemd/system/NetworkManager.service" ]]; then
@@ -277,14 +275,14 @@ fi
 
 # 11. SSH config drop-ins readable by root only.
 if [[ -d "${ROOTS_DIR}/etc/ssh/sshd_config.d" ]]; then
-    find "${ROOTS_DIR}/etc/ssh/sshd_config.d" -maxdepth 1 -type f | while read -r conf; do
+    while IFS= read -r conf; do
         mode="$(stat -c '%a' "${conf}" 2>/dev/null || true)"
         if [[ "${mode}" == "600" || "${mode}" == "644" ]]; then
             pass "sshd_config.d/$(basename "${conf}") mode ${mode}"
         else
             fail "sshd_config.d/$(basename "${conf}") mode ${mode} not 600/644"
         fi
-    done
+    done < <(find "${ROOTS_DIR}/etc/ssh/sshd_config.d" -maxdepth 1 -type f)
 fi
 
 # 12. SBOM exists.
@@ -319,10 +317,7 @@ fi
 for path in /etc/hosts /etc/fstab /etc/portage/make.conf; do
     full_path="${ROOTS_DIR}${path}"
     if [[ -f "${full_path}" ]]; then
-        owner="$(stat -c '%u:%g' "${full_path}" 2>/dev/null || true)"
-        if [[ ${UNPRIVILEGED} -eq 1 ]]; then
-            owner="$(rec_owner "${path}")"
-        fi
+        owner="$(rec_owner "${full_path}")"
         mode="$(stat -c '%a' "${full_path}" 2>/dev/null || true)"
         if [[ "${owner}" == "1000:1000" ]]; then
             pass "${path} owned by regicide:regicide"

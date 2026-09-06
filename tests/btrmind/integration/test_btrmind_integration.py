@@ -65,6 +65,8 @@ class BtrMindIntegrationTester:
     def create_test_config(self):
         """Create test configuration for BtrMind."""
         config_content = f"""
+dry_run = true
+
 [monitoring]
 target_path = "{self.mount_point}"
 poll_interval = 2
@@ -89,8 +91,6 @@ reward_smoothing = 0.9
 exploration_rate = 0.2
 learning_rate = 0.01
 discount_factor = 0.95
-
-dry_run = true
 """
         
         config_file = os.path.join(self.test_dir, 'btrmind-test.toml')
