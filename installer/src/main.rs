@@ -23,8 +23,6 @@ use filesystem::{
 };
 use logging::{die, info, print_banner, warn, Colours};
 
-
-
 use std::sync::Mutex;
 
 static ACTIVE_KEYFILE: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
@@ -34,9 +32,17 @@ fn validate_block_device_path(path: &str) -> Result<()> {
     if path.is_empty()
         || !path.starts_with("/dev/")
         || path.contains("..")
-        || path.chars().any(|c| [';', '&', '|', '<', '>', '(', ')', '`', '$', '\'', '"', ' ', '\t', '\n'].contains(&c))
+        || path.chars().any(|c| {
+            [
+                ';', '&', '|', '<', '>', '(', ')', '`', '$', '\'', '"', ' ', '\t', '\n',
+            ]
+            .contains(&c)
+        })
     {
-        bail!("Invalid or unsafe block device path: {}", logging::sanitize_error_message(path));
+        bail!(
+            "Invalid or unsafe block device path: {}",
+            logging::sanitize_error_message(path)
+        );
     }
     Ok(())
 }
@@ -44,9 +50,14 @@ fn validate_block_device_path(path: &str) -> Result<()> {
 fn validate_label(label: &str) -> Result<()> {
     if label.is_empty()
         || label.len() > 32
-        || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        || !label
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     {
-        bail!("Invalid filesystem label: {}", logging::sanitize_error_message(label));
+        bail!(
+            "Invalid filesystem label: {}",
+            logging::sanitize_error_message(label)
+        );
     }
     Ok(())
 }
@@ -74,7 +85,11 @@ fn write_passphrase_key_file(passphrase: &str) -> Result<std::path::PathBuf> {
     let suffix: String = (0..6)
         .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
         .collect();
-    let key_file = use_dir.join(format!("regicide-luks-key-{}-{}", std::process::id(), suffix));
+    let key_file = use_dir.join(format!(
+        "regicide-luks-key-{}-{}",
+        std::process::id(),
+        suffix
+    ));
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -83,7 +98,8 @@ fn write_passphrase_key_file(passphrase: &str) -> Result<std::path::PathBuf> {
         .with_context(|| "Failed to create LUKS passphrase key file")?;
     file.write_all(passphrase.as_bytes())
         .with_context(|| "Failed to write LUKS passphrase key file")?;
-    file.flush().with_context(|| "Failed to flush LUKS passphrase key file")?;
+    file.flush()
+        .with_context(|| "Failed to flush LUKS passphrase key file")?;
     if let Ok(mut guard) = ACTIVE_KEYFILE.lock() {
         *guard = Some(key_file.clone());
     }
@@ -95,10 +111,7 @@ fn secure_wipe_file(path: &std::path::Path) -> Result<()> {
     let metadata = std::fs::metadata(path).ok();
     let size = metadata.as_ref().map(|m| m.len() as usize).unwrap_or(0);
     if size > 0 {
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .ok();
+        let file = std::fs::OpenOptions::new().write(true).open(path).ok();
         if let Some(mut f) = file {
             let _ = f.rewind();
             let _ = f.write_all(&vec![0u8; size]);
@@ -114,7 +127,10 @@ fn get_luks_uuid(device: &str) -> Result<String> {
     let output = execute_safe_command("blkid", &["-s", "UUID", "-o", "value", device])?;
     let uuid = output.trim().to_string();
     if uuid.is_empty() {
-        bail!("Could not determine LUKS UUID for {}", logging::sanitize_error_message(device));
+        bail!(
+            "Could not determine LUKS UUID for {}",
+            logging::sanitize_error_message(device)
+        );
     }
     Ok(uuid)
 }
@@ -183,10 +199,8 @@ fn execute(command: &str) -> Result<String> {
 
         // Filesystem commands
         "mkfs.vfat" | "mkfs.ext4" | "mkfs.btrfs" | "fsck.fat" | "fsck.ext4" | "btrfs"
-        | "wipefs" | "file" | "lsof" | "sync" | "dd" | "ls" | "fdisk" | "dmsetup"
-        | "losetup" | "nvme" => {
-            execute_safe_command(program, args)
-        }
+        | "wipefs" | "file" | "lsof" | "sync" | "dd" | "ls" | "fdisk" | "dmsetup" | "losetup"
+        | "nvme" => execute_safe_command(program, args),
 
         // Mount/unmount commands
         "mount" | "umount" => execute_safe_command(program, args),
@@ -748,9 +762,7 @@ fn wait_for_partitions(drive: &str, expected_count: usize) -> Result<Vec<String>
     }
 
     if partition_names.len() == expected_count {
-        info(&format!(
-            "Found {expected_count} partitions after refresh"
-        ));
+        info(&format!("Found {expected_count} partitions after refresh"));
         return Ok(partition_names);
     }
 
@@ -873,7 +885,10 @@ fn format_partition(device: &str, partition: &Partition) -> Result<()> {
                 "Creating BTRFS filesystem with label '{label}' on {device}"
             ));
             let args: Vec<String> = mkfs_args("mkfs.btrfs", device, Some(label));
-            if let Err(e) = run_cmd("mkfs.btrfs", &args.iter().map(String::as_str).collect::<Vec<_>>()) {
+            if let Err(e) = run_cmd(
+                "mkfs.btrfs",
+                &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            ) {
                 bail!("Failed to create BTRFS filesystem: {}", e);
             }
 
@@ -1090,9 +1105,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
         let _ = execute(&format!("wipefs -af {current_name}"));
 
         // Step 2: Zero out the first 1MB to clear partition table and filesystem metadata
-        let _ = execute(&format!(
-            "dd if=/dev/zero of={current_name} bs=1M count=1"
-        ));
+        let _ = execute(&format!("dd if=/dev/zero of={current_name} bs=1M count=1"));
 
         // Step 3: For NVMe drives, also try nvme format if available (safer than
         // sanitize, which affects the whole namespace and may not be supported).
@@ -1104,9 +1117,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             };
             validate_block_device_path(base_device)?;
             info(&format!("Attempting NVMe format on {base_device}"));
-            let _ = execute(&format!(
-                "nvme format --force --ses=0 {base_device}"
-            ));
+            let _ = execute(&format!("nvme format --force --ses=0 {base_device}"));
         }
 
         // Step 6: Sync and wait
@@ -1166,9 +1177,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
 
                         // Try with different options
                         let alt_cmd = if let Some(ref label) = partition.label {
-                            format!(
-                                "mkfs.ext4 -F -L {label} -E lazy_itable_init {current_name}"
-                            )
+                            format!("mkfs.ext4 -F -L {label} -E lazy_itable_init {current_name}")
                         } else {
                             format!("mkfs.ext4 -F -E lazy_itable_init {current_name}")
                         };
@@ -1238,8 +1247,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     for subvolume in subvolumes {
                         let subvol_path = format!("{temp_mount}{subvolume}");
                         info(&format!("Creating BTRFS subvolume: {subvolume}"));
-                        if let Err(e) = execute(&format!("btrfs subvolume create {subvol_path}"))
-                        {
+                        if let Err(e) = execute(&format!("btrfs subvolume create {subvol_path}")) {
                             // Attempt cleanup on failure
                             let _ = execute(&format!("umount {temp_mount}"));
                             bail!("Failed to create BTRFS subvolume '{}': {}", subvolume, e);
@@ -1283,9 +1291,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 ));
 
                 let _ = execute(&format!("wipefs -af {current_name}"));
-                let _ = execute(&format!(
-                    "dd if=/dev/zero of={current_name} bs=1M count=1"
-                ));
+                let _ = execute(&format!("dd if=/dev/zero of={current_name} bs=1M count=1"));
 
                 if current_name.contains("nvme") && execute("which nvme").is_ok() {
                     let base_device = if let Some(pos) = current_name.rfind('p') {
@@ -1295,9 +1301,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                     };
                     validate_block_device_path(base_device)?;
                     info(&format!("Attempting NVMe format on {base_device}"));
-                    let _ = execute(&format!(
-                        "nvme format --force --ses=0 {base_device}"
-                    ));
+                    let _ = execute(&format!("nvme format --force --ses=0 {base_device}"));
                 }
 
                 std::thread::sleep(std::time::Duration::from_millis(5000));
@@ -1578,7 +1582,11 @@ async fn get_url(config: &Config) -> Result<String> {
             config.repository, arch, config.release_branch, filename
         ))
     } else {
-        bail!("Could not find 'url' or 'filename' in manifest for flavour '{}' branch '{}'", config.flavour, config.release_branch)
+        bail!(
+            "Could not find 'url' or 'filename' in manifest for flavour '{}' branch '{}'",
+            config.flavour,
+            config.release_branch
+        )
     }
 }
 
@@ -1890,9 +1898,7 @@ fn verify_grub_environment() -> Result<()> {
                     Ok(direct_output) => {
                         let direct_result = direct_output.trim();
                         if direct_result != "not found" && !direct_result.is_empty() {
-                            info(&format!(
-                                "✓ GRUB probe found in /usr/sbin: {direct_result}"
-                            ));
+                            info(&format!("✓ GRUB probe found in /usr/sbin: {direct_result}"));
                             true
                         } else {
                             false
@@ -2178,9 +2184,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                 ) {
                     Ok(files) if !files.trim().is_empty() => {
                         kernel_path = files.trim().to_string();
-                        info(&format!(
-                            "Found kernel on attempt {attempt}: {kernel_path}"
-                        ));
+                        info(&format!("Found kernel on attempt {attempt}: {kernel_path}"));
                         found = true;
                         break;
                     }
@@ -2240,9 +2244,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                 ) {
                     Ok(files) if !files.trim().is_empty() => {
                         initrd_path = files.trim().to_string();
-                        info(&format!(
-                            "Found initrd on attempt {attempt}: {initrd_path}"
-                        ));
+                        info(&format!("Found initrd on attempt {attempt}: {initrd_path}"));
                         found = true;
                         break;
                     }
@@ -2407,9 +2409,15 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
         // Try to create EFI boot entry using efibootmgr
         let efi_args_primary = vec![
-            "--create", "--disk", efi_device, "--part", "1",
-            "--label", "RegicideOS",
-            "--loader", r"\EFI\fedora\grubx64.efi",
+            "--create",
+            "--disk",
+            efi_device,
+            "--part",
+            "1",
+            "--label",
+            "RegicideOS",
+            "--loader",
+            r"\EFI\fedora\grubx64.efi",
         ];
         match chroot_cmd("efibootmgr", &efi_args_primary) {
             Ok(_) => {
@@ -2420,9 +2428,15 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
                 info("Trying alternative EFI boot entry creation...");
 
                 let efi_args_alt = vec![
-                    "--create", "--disk", efi_device, "--part", "1",
-                    "--label", "RegicideOS",
-                    "--loader", r"\EFI\BOOT\BOOTX64.EFI",
+                    "--create",
+                    "--disk",
+                    efi_device,
+                    "--part",
+                    "1",
+                    "--label",
+                    "RegicideOS",
+                    "--loader",
+                    r"\EFI\BOOT\BOOTX64.EFI",
                 ];
                 match chroot_cmd("efibootmgr", &efi_args_alt) {
                     Ok(_) => {
@@ -2471,9 +2485,7 @@ fn create_grub_configuration() -> Result<()> {
             match chroot_with_output("find /boot -name 'vmlinuz-*' -type f 2>/dev/null | head -1") {
                 Ok(files) if !files.trim().is_empty() => {
                     kernel_path = files.trim().to_string();
-                    info(&format!(
-                        "Found kernel on attempt {attempt}: {kernel_path}"
-                    ));
+                    info(&format!("Found kernel on attempt {attempt}: {kernel_path}"));
                     found = true;
                     break;
                 }
@@ -2516,9 +2528,7 @@ fn create_grub_configuration() -> Result<()> {
             match chroot_with_output("find /boot -name 'initrd-*' -type f 2>/dev/null | head -1") {
                 Ok(files) if !files.trim().is_empty() => {
                     initrd_path = files.trim().to_string();
-                    info(&format!(
-                        "Found initrd on attempt {attempt}: {initrd_path}"
-                    ));
+                    info(&format!("Found initrd on attempt {attempt}: {initrd_path}"));
                     found = true;
                     break;
                 }
@@ -3156,10 +3166,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
                         e
                     ));
                 } else {
-                    die(&format!(
-                        "Failed to fetch flavours from repository: {}",
-                        e
-                    ));
+                    die(&format!("Failed to fetch flavours from repository: {}", e));
                 }
             }
         }
@@ -3189,10 +3196,7 @@ async fn parse_config(mut config: Config, interactive: bool) -> Result<Config> {
                         config.release_branch = "main".to_string();
                     }
                 } else {
-                    die(&format!(
-                        "Failed to fetch releases from repository: {}",
-                        e
-                    ));
+                    die(&format!("Failed to fetch releases from repository: {}", e));
                 }
             }
         }
