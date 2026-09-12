@@ -9,15 +9,21 @@ import sys
 from regicide_update import snapshots, common as rc, validation
 
 
-def run_emerge(*args: str) -> int:
-    """Run emerge, rejecting long-option injection in positional args.
+# Emerge options the tool itself passes. Anything else starting with `-` is
+# treated as option injection and rejected; package args are validated
+# separately via validation.safe_package_name.
+_ALLOWED_EMERGE_OPTIONS = ("--sync", "-s", "-uDU", "--unmerge")
 
-    ``--sync`` is a legitimate long option used by ``cmd_sync``; it is allowed
-    explicitly. All other ``--`` prefixed arguments are treated as option
-    injection and rejected.
+
+def run_emerge(*args: str) -> int:
+    """Run emerge, rejecting option injection in positional args.
+
+    Only options from ``_ALLOWED_EMERGE_OPTIONS`` may appear; the install and
+    remove commands build their argv purely from validated package names and
+    contain no dashed options at all.
     """
     for a in args:
-        if a.startswith("--") and a != "--sync":
+        if a.startswith("-") and a not in _ALLOWED_EMERGE_OPTIONS:
             rc.die(f"Disallowed emerge option: {a}")
     cmd = ["emerge"] + list(args)
     rc.info("Running: " + " ".join(cmd))
@@ -66,6 +72,11 @@ def maybe_refresh_bootloader(packages: list[str]) -> None:
     rc.info(f"Kernel {kver} changed; refreshing bootloader.")
     rc.execute("dracut", ["--force", "--no-hostonly", "--kver", kver])
     rc.execute("grub-mkconfig", ["-o", "/boot/grub/grub.cfg"])
+    # grub-mkconfig rewrites grub.cfg from scratch; restore the A/B dispatch
+    # source line so the regicide.cfg menu keeps loading.
+    from regicide_update import boot_entry
+
+    boot_entry.ensure_source_stub()
 
 
 def cmd_sync(_args: argparse.Namespace) -> None:
@@ -98,11 +109,13 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
 
 
 def cmd_install(args: argparse.Namespace) -> None:
-    _transaction(args, "install", args.packages, _validate_packages(args.packages))
+    packages = _validate_packages(args.packages)
+    _transaction(args, "install", packages, packages)
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
-    _transaction(args, "remove", ["--unmerge", *_validate_packages(args.packages)], _validate_packages(args.packages))
+    packages = _validate_packages(args.packages)
+    _transaction(args, "remove", ["--unmerge", *packages], packages)
 
 
 def main() -> None:

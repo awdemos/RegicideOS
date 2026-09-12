@@ -80,6 +80,18 @@ def verify_checksum(image: Path, checksum_url: str | None) -> bool:
     return True
 
 
+def verify_sha256(image: Path, expected: str) -> bool:
+    """Verify a local image against an expected SHA256 hex digest."""
+    hasher = hashlib.sha256()
+    with open(image, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    if hasher.hexdigest().lower() != expected.strip().lower():
+        rc.die(f"SHA256 mismatch for {image.name}")
+    rc.info("SHA256 verified.")
+    return True
+
+
 def install_tarball(image: Path, roots_mount: str, reseed: bool = True) -> None:
     roots_path = validation.safe_path(roots_mount, must_be_absolute=True)
     if not rc.is_btrfs(str(roots_path)):

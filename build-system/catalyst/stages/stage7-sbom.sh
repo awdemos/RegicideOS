@@ -8,7 +8,17 @@ STAGE_NAME="stage7-sbom"
 
 REGICIDE_ARCH="${REGICIDE_ARCH:-amd64}"
 REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
-TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}.tar.xz"
+# Headless images drop the "-cosmic" suffix; COSMIC images keep it.
+# (REGICIDE_HEADLESS is always "0" or "1" here, so ${VAR:--cosmic} can never
+# produce the suffix — it must be derived from the value, not its non-emptiness.)
+TARBALL_VARIANT=""
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    TARBALL_VARIANT="-cosmic"
+fi
+# REGICIDE_TARBALL lets callers (e.g. the Dagger pipeline with --from-tarball)
+# pin the exact tarball the SBOM must describe, instead of whatever same-named
+# file happens to be sitting in OUTPUT_DIR from a previous run.
+TARBALL="${REGICIDE_TARBALL:-${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd${TARBALL_VARIANT}.tar.xz}"
 ROOTS_DIR="$(mktemp -d -t regicide-sbom-XXXXXX)"
 LEGACY_SBOM_FILE="${OUTPUT_DIR}/sbom.json"
 SPDX_FILE="${OUTPUT_DIR}/sbom.spdx.json"
@@ -75,13 +85,13 @@ echo "Legacy SBOM written to ${LEGACY_SBOM_FILE}"
 
 # SPDX-2.3 JSON SBOM generated from the same Portage package data.
 SPDX_ID_NS="SPDXRef-Package"
-DOCUMENT_NAMESPACE="https://regicideos.dev/spbom/stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}-$(date -u +%Y%m%d%H%M%S)"
+DOCUMENT_NAMESPACE="https://regicideos.dev/spbom/stage4-${REGICIDE_ARCH}-systemd${TARBALL_VARIANT}-$(date -u +%Y%m%d%H%M%S)"
 {
     echo "{"
     echo "  \"spdxVersion\": \"SPDX-2.3\","
     echo "  \"dataLicense\": \"CC0-1.0\","
     echo "  \"SPDXID\": \"SPDXRef-DOCUMENT\","
-    echo "  \"name\": \"RegicideOS-stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}\","
+    echo "  \"name\": \"RegicideOS-stage4-${REGICIDE_ARCH}-systemd${TARBALL_VARIANT}\","
     echo "  \"documentNamespace\": \"${DOCUMENT_NAMESPACE}\","
     echo "  \"creationInfo\": {"
     echo "    \"created\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","

@@ -16,6 +16,10 @@ def cmd_fetch(args: argparse.Namespace) -> None:
 
 def cmd_install(args: argparse.Namespace) -> None:
     path = validation.safe_path(args.path, must_exist=True)
+    if args.checksum:
+        image.verify_sha256(path, args.checksum)
+    else:
+        rc.warn("No --checksum provided; installing an UNVERIFIED image.")
     roots_mount = validation.safe_path(args.roots_mount, must_be_absolute=True)
     if args.ab:
         from regicide_update import boot_entry
@@ -47,7 +51,15 @@ def main() -> None:
     install = sub.add_parser("install", help="Install a tarball into ROOTS")
     install.add_argument("path")
     install.add_argument("--roots-mount", default="/roots")
-    install.add_argument("--reseed", action="store_true", default=True)
+    install.add_argument(
+        "--reseed",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run seed-overlays.sh after extraction (use --no-reseed to skip)",
+    )
+    install.add_argument(
+        "--checksum", help="Expected SHA256 of the image; verified before install"
+    )
     install.add_argument(
         "--ab", action="store_true", help="Install into the inactive A/B root slot"
     )

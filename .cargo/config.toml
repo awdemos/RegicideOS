@@ -1,3 +1,6 @@
 # managed-by: awdemos-cargo-target-provision
 [build]
-target-dir = "/.cargo-targets/targets/RegicideOS/main/target"
+# Repo-relative target dir. The previous absolute path "/.cargo-targets/..." is
+# read-only on hosts without a provisioned root directory, which broke every
+# cargo invocation (build/test/clippy) out of the box.
+target-dir = ".cargo-targets/target"

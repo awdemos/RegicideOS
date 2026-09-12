@@ -17,7 +17,10 @@ class ImageTests(unittest.TestCase):
         self.cache_patch = mock.patch.object(image, "CACHE_DIR", Path(self.tmpdir.name))
         self.cache_patch.start()
         self.addCleanup(self.cache_patch.stop)
+
+        self._orig_pretend = rc.PRETEND
         rc.PRETEND = True
+        self.addCleanup(setattr, rc, "PRETEND", self._orig_pretend)
 
     def _serve(self, path_map: dict[str, bytes]) -> str:
         """Start a thread-local HTTP server and return its base URL."""
@@ -92,6 +95,18 @@ class ImageTests(unittest.TestCase):
     def test_verify_checksum_skips_when_url_none(self):
         image_file = image.CACHE_DIR / "release.tar.xz"
         self.assertTrue(image.verify_checksum(image_file, None))
+
+    def test_verify_sha256_matches(self):
+        image_file = image.CACHE_DIR / "release.tar.xz"
+        image_file.write_bytes(b"image data")
+        expected = hashlib.sha256(image_file.read_bytes()).hexdigest()
+        self.assertTrue(image.verify_sha256(image_file, expected))
+
+    def test_verify_sha256_mismatch_dies(self):
+        image_file = image.CACHE_DIR / "release.tar.xz"
+        image_file.write_bytes(b"image data")
+        with self.assertRaises(SystemExit):
+            image.verify_sha256(image_file, "0" * 64)
 
     def test_install_tarball_dies_when_not_btrfs(self):
         roots_mount = self.tmpdir.name

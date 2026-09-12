@@ -325,8 +325,15 @@ async def build_iso(
     tarball: dagger.File,
     compression_level: int = 15,
     processors: int = 4,
-) -> dagger.File:
-    """Create a SquashFS image from a stage4 tarball for live ISO use."""
+) -> dagger.Container:
+    """Create a SquashFS image from a stage4 tarball for live ISO use.
+
+    Returns the builder container with the image at /tmp/regicide-cosmic.img so
+    callers can reference it in-engine or chunk-export it to the host.  The
+    mksquashfs output path and the exported path must be identical: /var/tmp is
+    a real directory in the alpine image, not a symlink to /tmp, so the
+    previous /var/tmp write paired with a /tmp lookup could never be found.
+    """
 
     builder = (
         client.container()
@@ -338,13 +345,13 @@ async def build_iso(
             "tar", "-C", "/var/tmp/rootfs", "-xpJf", "/var/tmp/stage4.tar.xz",
         ])
         .with_exec([
-            "mksquashfs", "/var/tmp/rootfs", "/var/tmp/regicide-cosmic.img",
+            "mksquashfs", "/var/tmp/rootfs", "/tmp/regicide-cosmic.img",
             "-comp", "zstd", "-Xcompression-level", str(compression_level),
             "-processors", str(processors),
         ])
     )
 
-    return builder.file("/tmp/regicide-cosmic.img")
+    return builder
 
 
 async def build_live_iso(
@@ -372,10 +379,21 @@ async def build_live_iso(
         .from_(base_image)
         .with_file("/var/tmp/stage4.tar.xz", tarball)
         .with_exec(["sh", "-c", "tar -C / -xpJf /var/tmp/stage4.tar.xz --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./opt --exclude=./etc/hosts --exclude=./etc/resolv.conf && rm /var/tmp/stage4.tar.xz"])
+        # Pick the newest /lib/modules entry and require a kernel image that
+        # matches it: pairing /boot/vmlinuz (newest symlink) with an initramfs
+        # built for a different kver produced unbootable ISOs whenever the
+        # stage4 shipped more than one kernel.
         .with_exec([
             "sh", "-c",
-            "set -e; mkdir -p /work; kver=$(ls /lib/modules | head -1); "
-            "cp /boot/vmlinuz /work/vmlinuz; "
+            "set -e; mkdir -p /work; "
+            "kver=$(ls /lib/modules | sort -V | tail -1); "
+            "if [ -f /boot/vmlinuz-${kver} ]; then "
+            "  cp /boot/vmlinuz-${kver} /work/vmlinuz; "
+            "elif [ \"$(ls /lib/modules | wc -l)\" -eq 1 ] && [ -e /boot/vmlinuz ]; then "
+            "  cp /boot/vmlinuz /work/vmlinuz; "
+            "else "
+            "  echo \"ERROR: no kernel image matching /lib/modules/${kver}\" >&2; exit 1; "
+            "fi; "
             "dracut --force --no-hostonly --add 'dmsquash-live' /work/initramfs.img ${kver}",
         ], insecure_root_capabilities=True)
     )
@@ -786,15 +804,23 @@ async def export_tarball_in_chunks(
         await _export_file_with_retry(split_container.file(f"{chunk_dir}/{name}"), local_chunk)
         chunk_files.append(local_chunk)
 
-    # Reassemble on the host in a streaming fashion.
-    with local_path.open("wb") as out:
+    # Reassemble on the host in a streaming fashion. On failure, remove the
+    # partial output and any chunks already exported so the next run starts
+    # clean instead of reusing stale pieces.
+    try:
+        with local_path.open("wb") as out:
+            for chunk in chunk_files:
+                with chunk.open("rb") as src:
+                    while True:
+                        data = src.read(8 * 1024 * 1024)
+                        if not data:
+                            break
+                        out.write(data)
+    except BaseException:
         for chunk in chunk_files:
-            with chunk.open("rb") as src:
-                while True:
-                    data = src.read(8 * 1024 * 1024)
-                    if not data:
-                        break
-                    out.write(data)
+            chunk.unlink(missing_ok=True)
+        local_path.unlink(missing_ok=True)
+        raise
 
     # Clean up chunk files once the tarball is complete and verified.
     total_size = local_path.stat().st_size
@@ -924,20 +950,25 @@ async def main() -> None:
     _check_container_runtime()
 
     config = dagger.Config(log_output=sys.stdout)
-    os.environ.setdefault("DAGGER_CLOUD_ORG", _dagger_cloud_org())
-    # DAGGER_CLOUD_TOKEN selects the Dagger Cloud organization; ensure it points
-    # to the RegicideOS org rather than any previously-configured org.
+    # Default the Cloud org for trace metadata; whether traces upload at all
+    # is still governed by DAGGER_CLOUD_TOKEN below.
+    os.environ.setdefault("DAGGER_CLOUD_ORG", "RegicideOS")
     if "DAGGER_CLOUD_TOKEN" not in os.environ:
         print(
             "WARNING: DAGGER_CLOUD_TOKEN is not set; Dagger Cloud traces will not be sent.",
             file=sys.stderr,
         )
+    # The stage scripts name the tarball stage4-<arch>-systemd[-cosmic].tar.xz;
+    # compute the same name here so COSMIC and headless builds both line up.
+    tarball_variant = "" if os.environ.get("REGICIDE_SKIP_COSMIC", "0") == "1" else "-cosmic"
+    tarball_name = f"stage4-{args.arch}-systemd{tarball_variant}.tar.xz"
+
     async with dagger.Connection(config) as client:
         if tarball_path is None:
             print(f"Building RegicideOS COSMIC stage4 ({args.arch})...")
             build_container = await build_cosmic(client, arch=args.arch)
             tarball = build_container.file(
-                f"/src/build-system/catalyst/output/stage4-{args.arch}-systemd-cosmic.tar.xz"
+                f"/src/build-system/catalyst/output/{tarball_name}"
             )
         else:
             print(f"Using existing stage4 tarball: {tarball_path}")
@@ -951,14 +982,20 @@ async def main() -> None:
             print("Exporting stage4 tarball (chunked)...")
             tarball_path = await export_tarball_in_chunks(
                 build_container,
-                f"/src/build-system/catalyst/output/stage4-{args.arch}-systemd-cosmic.tar.xz",
-                out_dir / f"stage4-{args.arch}-systemd-cosmic.tar.xz",
+                f"/src/build-system/catalyst/output/{tarball_name}",
+                out_dir / tarball_name,
             )
-            print(f"Output: build-system/catalyst/output/stage4-{args.arch}-systemd-cosmic.tar.xz")
+            print(f"Output: build-system/catalyst/output/{tarball_name}")
 
         print("Loading SBOM for signing...")
         sbom_env = os.environ.copy()
+        # Never propagate CI secrets into stage scripts.
+        sbom_env.pop("REGICIDE_LUKS_PASSPHRASE", None)
+        sbom_env.pop("COSIGN_PASSWORD", None)
         sbom_env["REGICIDE_ARCH"] = args.arch
+        # Describe the exact tarball this run uses (--from-tarball may point
+        # elsewhere), not a same-named stale file left in OUTPUT_DIR.
+        sbom_env["REGICIDE_TARBALL"] = str(tarball_path)
         subprocess.run(
             ["./build-system/catalyst/stages/stage7-sbom.sh"],
             check=True,
@@ -966,11 +1003,14 @@ async def main() -> None:
         )
         sbom_path = out_dir / "sbom.spdx.json"
 
-        squashfs_path = out_dir / "regicide-cosmic.img"
+        # Resolve so the --from-squashfs comparison below compares like with
+        # like (an unresolved relative path would never equal a resolved one,
+        # and the pipeline would cp the file onto itself and fail).
+        squashfs_path = (out_dir / "regicide-cosmic.img").resolve()
         squashfs_file: dagger.File | None = None
         if squashfs_input is not None:
             print(f"Using existing SquashFS image: {squashfs_input}")
-            if squashfs_input.resolve() != squashfs_path.resolve():
+            if squashfs_input != squashfs_path:
                 subprocess.run(
                     ["cp", "-f", str(squashfs_input), str(squashfs_path)],
                     check=True,
@@ -983,13 +1023,20 @@ async def main() -> None:
                 # is privileged) instead of requiring passwordless host sudo.
                 # This matches the RegicideOSArch pipeline flow.
                 print("Creating SquashFS image in Dagger (not running as root)...")
-                squashfs_file = await build_iso(
+                squashfs_container = await build_iso(
                     client,
                     tarball,
                     compression_level=args.squashfs_compression_level,
                     processors=args.squashfs_processors,
                 )
-                await squashfs_file.export(str(squashfs_path))
+                # Chunked export: a single multi-GB File.export() triggers
+                # '502 Bad Gateway' under Podman/BuildKit (same as the tarball).
+                await export_tarball_in_chunks(
+                    squashfs_container,
+                    "/tmp/regicide-cosmic.img",
+                    squashfs_path,
+                )
+                squashfs_file = squashfs_container.file("/tmp/regicide-cosmic.img")
             else:
                 print("Creating SquashFS image locally...")
                 if shutil.which("mksquashfs") is None:
@@ -1032,51 +1079,16 @@ async def main() -> None:
 
         print("Running stage7 verification on host artifacts...")
         verify_env = os.environ.copy()
+        # Never propagate CI secrets into stage scripts.
+        verify_env.pop("REGICIDE_LUKS_PASSPHRASE", None)
+        verify_env.pop("COSIGN_PASSWORD", None)
         verify_env["REGICIDE_ARCH"] = args.arch
+        verify_env["REGICIDE_TARBALL"] = str(tarball_path)
         subprocess.run(
             ["./build-system/catalyst/stages/stage7-verify.sh"],
             check=True,
             env=verify_env,
         )
-
-        if not args.skip_sign:
-            identity = os.environ.get(
-                "REGICIDE_SIGN_IDENTITY",
-                "https://github.com/RegicideOS/RegicideOS/.github/workflows/release.yml@refs/heads/main",
-            )
-            print(f"Signing artifacts with identity: {identity}")
-            iso_image = client.host().file(str(out_dir / "regicide-cosmic.img"))
-            sbom_file = client.host().file(str(sbom_path))
-            (
-                img_sig,
-                img_cert,
-                img_bundle,
-                sbom_sig,
-                sbom_cert,
-                sbom_bundle,
-                attestation,
-            ) = await sign_artifacts(client, iso_image, sbom_file, identity)
-
-            await img_sig.export(str(out_dir / "regicide-cosmic.img.sig"))
-            await img_bundle.export(str(out_dir / "regicide-cosmic.img.bundle"))
-            await sbom_sig.export(str(out_dir / "sbom.spdx.json.sig"))
-            await sbom_bundle.export(str(out_dir / "sbom.spdx.json.bundle"))
-            await attestation.export(str(out_dir / "regicide-cosmic.img.att"))
-            if img_cert is not None:
-                await img_cert.export(str(out_dir / "regicide-cosmic.img.cert"))
-                await sbom_cert.export(str(out_dir / "sbom.spdx.json.cert"))
-
-            print("Output: build-system/catalyst/output/regicide-cosmic.img.sig")
-            print("Output: build-system/catalyst/output/regicide-cosmic.img.bundle")
-            if img_cert is not None:
-                print("Output: build-system/catalyst/output/regicide-cosmic.img.cert")
-            print("Output: build-system/catalyst/output/sbom.spdx.json.sig")
-            print("Output: build-system/catalyst/output/sbom.spdx.json.bundle")
-            if sbom_cert is not None:
-                print("Output: build-system/catalyst/output/sbom.spdx.json.cert")
-            print("Output: build-system/catalyst/output/regicide-cosmic.img.att")
-        else:
-            print("Skipping Sigstore signing (--skip-sign)")
 
         if args.encrypt:
             await build_qcow2_locally(
@@ -1107,6 +1119,55 @@ async def main() -> None:
                 ["./build-system/catalyst/stages/stage8-vm-test.sh", str(qcow2_path)],
                 check=True,
             )
+
+        # Sign only after every artifact-consuming step above has succeeded, so
+        # a failed image test cannot leave behind freshly signed artifacts.
+        if not args.skip_sign:
+            # cosign sign-blob (blob, not OCI image) cannot take
+            # --certificate-identity; in keyless mode the identity claims are
+            # embedded in the Fulcio-issued certificate instead.
+            if os.environ.get("COSIGN_KEY_PATH"):
+                print(f"Signing artifacts with key: {os.environ['COSIGN_KEY_PATH']}")
+            else:
+                print(
+                    "Signing artifacts keyless; identity: "
+                    + os.environ.get(
+                        "REGICIDE_SIGN_IDENTITY",
+                        "https://github.com/RegicideOS/RegicideOS/.github/workflows/release.yml@refs/heads/main",
+                    )
+                )
+            iso_image = client.host().file(str(out_dir / "regicide-cosmic.img"))
+            sbom_file = client.host().file(str(sbom_path))
+            (
+                img_sig,
+                img_cert,
+                img_bundle,
+                sbom_sig,
+                sbom_cert,
+                sbom_bundle,
+                attestation,
+            ) = await sign_artifacts(client, iso_image, sbom_file, "unused-by-sign-blob")
+
+            await img_sig.export(str(out_dir / "regicide-cosmic.img.sig"))
+            await img_bundle.export(str(out_dir / "regicide-cosmic.img.bundle"))
+            await sbom_sig.export(str(out_dir / "sbom.spdx.json.sig"))
+            await sbom_bundle.export(str(out_dir / "sbom.spdx.json.bundle"))
+            await attestation.export(str(out_dir / "regicide-cosmic.img.att"))
+            if img_cert is not None:
+                await img_cert.export(str(out_dir / "regicide-cosmic.img.cert"))
+                await sbom_cert.export(str(out_dir / "sbom.spdx.json.cert"))
+
+            print("Output: build-system/catalyst/output/regicide-cosmic.img.sig")
+            print("Output: build-system/catalyst/output/regicide-cosmic.img.bundle")
+            if img_cert is not None:
+                print("Output: build-system/catalyst/output/regicide-cosmic.img.cert")
+            print("Output: build-system/catalyst/output/sbom.spdx.json.sig")
+            print("Output: build-system/catalyst/output/sbom.spdx.json.bundle")
+            if sbom_cert is not None:
+                print("Output: build-system/catalyst/output/sbom.spdx.json.cert")
+            print("Output: build-system/catalyst/output/regicide-cosmic.img.att")
+        else:
+            print("Skipping Sigstore signing (--skip-sign)")
 
 
 if __name__ == "__main__":

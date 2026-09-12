@@ -183,6 +183,79 @@ class TestISOChecksumValidation(unittest.TestCase):
         error_messages = [str(error) for error in validator.errors]
         self.assertTrue(any("mismatch" in msg for msg in error_messages))
 
+class TestRealChecksumVerification(unittest.TestCase):
+    """Exercise the REAL verify_checksum() from src/regicide_update/image.py
+    against local fixtures. The download and cache dir are stubbed so no
+    network or /var/cache access is needed."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.project_root = Path(__file__).parent.parent.parent.parent
+        src_path = cls.project_root / "src"
+        if str(src_path) not in sys.path:
+            sys.path.insert(0, str(src_path))
+        try:
+            from regicide_update import image as image_module
+        except ImportError as exc:
+            raise unittest.SkipTest(f"regicide_update.image not importable: {exc}")
+        cls.image_module = image_module
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.image = Path(self.temp_dir) / "regicide-test.img"
+        self.image.write_bytes(b"fake rootfs bytes for checksum testing")
+        self.expected_checksum = hashlib.sha256(self.image.read_bytes()).hexdigest()
+        self.sums = Path(self.temp_dir) / "checksums.txt"
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _verify(self):
+        """Run the real verify_checksum with the download stubbed locally."""
+        return self.image_module.verify_checksum(
+            self.image, "https://example.com/checksums.txt"
+        )
+
+    def _patch_io(self):
+        """Patch the network download and cache dir onto local fixtures."""
+        return patch.multiple(
+            self.image_module,
+            CACHE_DIR=Path(self.temp_dir),
+            _download=lambda url, dest, timeout=60: shutil.copyfile(self.sums, dest),
+        )
+
+    def test_good_hash_verifies(self):
+        """A matching checksum entry must verify successfully."""
+        self.sums.write_text(f"{self.expected_checksum}  {self.image.name}\n")
+        with self._patch_io():
+            self.assertTrue(self._verify())
+
+    def test_bad_hash_is_rejected(self):
+        """A mismatching checksum must abort (rc.die -> SystemExit)."""
+        self.sums.write_text(f"{'0' * 64}  {self.image.name}\n")
+        with self._patch_io():
+            with self.assertRaises(SystemExit) as ctx:
+                self._verify()
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_missing_image_file_fails(self):
+        """A missing image file must raise instead of verifying."""
+        self.sums.write_text(f"{'a' * 64}  {self.image.name}\n")
+        self.image.unlink()
+        with self._patch_io():
+            with self.assertRaises(OSError):
+                self._verify()
+
+    def test_missing_checksum_entry_is_rejected(self):
+        """A checksum file without an entry for the image must abort."""
+        self.sums.write_text(f"{self.expected_checksum}  some-other.img\n")
+        with self._patch_io():
+            with self.assertRaises(SystemExit) as ctx:
+                self._verify()
+        self.assertEqual(ctx.exception.code, 1)
+
+
 class TestISOBootValidation(unittest.TestCase):
     """Test ISO boot validation."""
     

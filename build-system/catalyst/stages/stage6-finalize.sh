@@ -539,7 +539,12 @@ run_in_chroot bash <<'STAGE6CLEANEOF'
 STAGE6CLEANEOF
 
 echo "Creating stage4 tarball..."
-TARBALL_NAME="stage4-${REGICIDE_ARCH:-amd64}-systemd${REGICIDE_HEADLESS:--cosmic}.tar.xz"
+REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
+TARBALL_VARIANT=""
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    TARBALL_VARIANT="-cosmic"
+fi
+TARBALL_NAME="stage4-${REGICIDE_ARCH:-amd64}-systemd${TARBALL_VARIANT}.tar.xz"
 log_status "tarball" "creating ${TARBALL_NAME}"
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_FILE="${OUTPUT_DIR}/${TARBALL_NAME}"

@@ -59,6 +59,25 @@ class BootRevertTests(unittest.TestCase):
             self.assertFalse(boot_revert.apply_revert())
         self.assertFalse(os.path.exists(rc.REVERT_FLAG))
 
+    def _assert_malicious_flag_rejected(self, contents: str):
+        with open(rc.REVERT_FLAG, "w") as f:
+            f.write(contents)
+        with mock.patch.object(rc, "execute") as mock_execute:
+            with self.assertRaises(SystemExit):
+                boot_revert.apply_revert()
+        mock_execute.assert_not_called()
+        # The flag is left in place for inspection, not silently consumed.
+        self.assertTrue(os.path.exists(rc.REVERT_FLAG))
+
+    def test_apply_revert_rejects_parent_traversal_in_flag(self):
+        self._assert_malicious_flag_rejected("../outside-store")
+
+    def test_apply_revert_rejects_absolute_path_in_flag(self):
+        self._assert_malicious_flag_rejected("/tmp/evil-snapshot")
+
+    def test_apply_revert_rejects_empty_flag(self):
+        self._assert_malicious_flag_rejected("")
+
     def test_apply_revert_mounts_overlay_when_not_mounted(self):
         name = self._create_fake_snapshot_set("pre_update")
         self._create_live_subvolumes()

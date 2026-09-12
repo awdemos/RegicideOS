@@ -26,7 +26,8 @@ Write the RegicideOS live ISO to a USB device.
 
 OPTIONS:
     -h, --help          Show this help message
-    -f, --force         Skip confirmation prompt
+    -f, --force         Skip the confirmation prompt and the USB-transport
+                        refusal (use only for unattended flashing)
     -i, --iso PATH      Use a different ISO file
     -n, --no-verify     Skip post-write verification
 
@@ -37,14 +38,6 @@ EXAMPLES:
 
 WARNING: The target device will be completely overwritten.
 EOF
-}
-
-confirm() {
-    local prompt=$1
-    local response
-    printf '%b%s%b [y/N] ' "${REGICIDE_YELLOW}" "$prompt" "${REGICIDE_NC}"
-    read -r response
-    [[ "$response" =~ ^[Yy]$ ]]
 }
 
 # Defaults
@@ -134,10 +127,20 @@ if [[ ! -b "$DEVICE" ]]; then
     exit 1
 fi
 
-# Refuse to write to obvious system disks
-DEVICE_CANONICAL=$(readlink -f "$DEVICE")
-if [[ "$DEVICE_CANONICAL" == /dev/nvme* ]] || [[ "$DEVICE_CANONICAL" == /dev/sd[a-z] ]]; then
-    regicide_warn "$DEVICE looks like a fixed disk. Make sure it is the USB target."
+# Refuse non-USB targets unless forced. lsblk reports a transport (TRAN) for
+# devices it can classify; when TRAN is present it must be "usb". --force is
+# the single override: it skips this refusal and the typed confirmation.
+DEVICE_CANONICAL="$(readlink -f "$DEVICE")"
+DEVICE_TRAN="$(lsblk -dn -o TRAN "$DEVICE" 2>/dev/null | head -n1 || true)"
+if [[ -n "$DEVICE_TRAN" && "$DEVICE_TRAN" != "usb" ]]; then
+    if [[ "$FORCE" != true ]]; then
+        regicide_error "$DEVICE has transport '$DEVICE_TRAN' (not usb). Refusing to write."
+        regicide_error "Re-run with --force only if you are certain this is the intended target."
+        exit 1
+    fi
+    regicide_warn "$DEVICE has transport '$DEVICE_TRAN' (not usb); proceeding because --force was given"
+elif [[ -z "$DEVICE_TRAN" ]]; then
+    regicide_warn "Could not determine the transport type of $DEVICE; make sure it is the intended USB target"
 fi
 
 # Show device info
@@ -152,11 +155,17 @@ if [[ -n "$MOUNTED" ]]; then
     regicide_warn "They will be unmounted before writing."
 fi
 
-# Final confirmation
+# Final confirmation: show the resolved paths and require typing the device
+# path so the write cannot proceed on a stray keypress.
 if [[ "$FORCE" != true ]]; then
     echo
     regicide_error "ALL DATA ON $DEVICE WILL BE DESTROYED"
-    if ! confirm "Are you sure you want to write $ISO_NAME to $DEVICE?"; then
+    regicide_log "ISO:    $ISO_PATH"
+    regicide_log "Device: $DEVICE_CANONICAL"
+    printf '%bType the device path (%s) to continue: %b' "${REGICIDE_YELLOW}" "$DEVICE" "${REGICIDE_NC}"
+    TYPED_DEVICE=""
+    read -r TYPED_DEVICE || TYPED_DEVICE=""
+    if [[ "$TYPED_DEVICE" != "$DEVICE" && "$TYPED_DEVICE" != "$DEVICE_CANONICAL" ]]; then
         regicide_log "Aborted."
         exit 1
     fi
@@ -196,8 +205,30 @@ regicide_success "ISO written to $DEVICE"
 # Post-write verification
 if [[ "$VERIFY" == true ]]; then
     regicide_log "Verifying written image..."
-    ISO_SHA_WRITTEN=$(dd if="$DEVICE" bs=4M count=$(( (ISO_SIZE + 4194303) / 4194304 )) status=none | sha256sum | awk '{print $1}')
+    READ_BLOCKS=$(( (ISO_SIZE + 4194303) / 4194304 ))
     ISO_SHA_EXPECTED=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+
+    # Read back bypassing the page cache: a cached read can be satisfied from
+    # RAM and would not detect a bad flash. Prefer O_DIRECT on the device;
+    # fall back to dropping caches; as a last resort read plainly but say so.
+    ISO_SHA_WRITTEN=""
+    if ! ISO_SHA_WRITTEN=$(dd if="$DEVICE" bs=4M count="$READ_BLOCKS" iflag=direct status=none 2>/dev/null | sha256sum | awk '{print $1}'); then
+        regicide_warn "Direct I/O read-back failed; dropping caches instead"
+        sync
+        if echo 3 > /proc/sys/vm/drop_caches 2>/dev/null; then
+            if ! ISO_SHA_WRITTEN=$(dd if="$DEVICE" bs=4M count="$READ_BLOCKS" status=none 2>/dev/null | sha256sum | awk '{print $1}'); then
+                regicide_error "Could not read back from $DEVICE"
+                exit 1
+            fi
+        else
+            regicide_warn "Cannot drop caches (requires root); verification read may be satisfied from the page cache"
+            if ! ISO_SHA_WRITTEN=$(dd if="$DEVICE" bs=4M count="$READ_BLOCKS" status=none 2>/dev/null | sha256sum | awk '{print $1}'); then
+                regicide_error "Could not read back from $DEVICE"
+                exit 1
+            fi
+        fi
+    fi
+
     if [[ "$ISO_SHA_WRITTEN" == "$ISO_SHA_EXPECTED" ]]; then
         regicide_success "Post-write verification passed"
     else

@@ -4,6 +4,13 @@
 
 set -euo pipefail
 
+# Anchor everything to the repository root so the runner works no matter where
+# it is invoked from (the globs and pytest paths below are all relative to it).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+shopt -s globstar nullglob
+
 echo "=== RegicideOS ISO Creation Safety Test Suite ==="
 echo
 
@@ -23,50 +30,87 @@ FAILED_TESTS=0
 run_test_category() {
     local category=$1
     local description=$2
-    
+
     echo -e "${BLUE}Running $category tests...${NC}"
     echo "Description: $description"
     echo
-    
+
     local test_files=()
     case $category in
         "Unit")
-            test_files=(tests/iso/unit/test_*.py)
+            test_files=("$REPO_ROOT"/tests/iso/unit/test_*.py)
             ;;
         "Integration")
-            test_files=(tests/iso/integration/test_*.py)
+            test_files=("$REPO_ROOT"/tests/iso/integration/test_*.py)
             ;;
         "Validation")
-            test_files=(tests/iso/validation/test_*.py)
+            test_files=("$REPO_ROOT"/tests/iso/validation/test_*.py)
+            ;;
+        "Safety")
+            test_files=("$REPO_ROOT"/tests/iso/safety/test_*.py)
             ;;
         "All")
-            test_files=(tests/iso/**/test_*.py)
+            test_files=("$REPO_ROOT"/tests/iso/**/test_*.py)
             ;;
         *)
             echo "Unknown test category: $category"
             return 1
             ;;
     esac
-    
-    for test_file in ${test_files[@]}; do
+
+    local matched=0
+    for test_file in "${test_files[@]}"; do
         if [[ -f "$test_file" ]]; then
-            echo -e "${YELLOW}Testing: $(basename $test_file)${NC}"
-            
+            matched=$((matched + 1))
+            echo -e "${YELLOW}Testing: $(basename "$test_file")${NC}"
+
             # Run the test and capture output
             local test_output
-            if test_output=$(python3 -m pytest "$test_file" -v 2>&1); then
+            if test_output=$(python3 -m pytest "$test_file" -q 2>&1); then
                 echo -e "  ${GREEN}✓ PASSED${NC}"
-                ((PASSED_TESTS++))
+                PASSED_TESTS=$((PASSED_TESTS + 1))
             else
                 echo -e "  ${RED}✗ FAILED${NC}"
-                echo "$test_output" | head -20
-                ((FAILED_TESTS++))
+                echo "$test_output" | tail -20
+                FAILED_TESTS=$((FAILED_TESTS + 1))
             fi
-            ((TOTAL_TESTS++))
+            TOTAL_TESTS=$((TOTAL_TESTS + 1))
         fi
     done
-    
+
+    if [[ $matched -eq 0 ]]; then
+        echo -e "${RED}✗ No test files found for category '$category' under $REPO_ROOT/tests/iso${NC}"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    fi
+
     echo
+}
+
+# Run one pytest target (file or file::Class) and record the outcome.
+run_test_target() {
+    local description=$1
+    local target=$2
+
+    echo -e "${YELLOW}Testing $description...${NC}"
+
+    if [[ ! -f "${target%%::*}" ]]; then
+        echo -e "  ${RED}✗ FAILED${NC} (test file not found: ${target%%::*})"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        TOTAL_TESTS=$((TOTAL_TESTS + 1))
+        return 1
+    fi
+
+    local test_output
+    if test_output=$(python3 -m pytest "$target" -q 2>&1); then
+        echo -e "  ${GREEN}✓ PASSED${NC}"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+    else
+        echo -e "  ${RED}✗ FAILED${NC}"
+        echo "$test_output" | tail -20
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+    fi
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
 }
 
 # Function to check ISO creation dependencies
@@ -102,141 +146,36 @@ check_dependencies() {
 # Function to test ISO build process
 test_iso_build_process() {
     echo -e "${BLUE}Testing ISO build process...${NC}"
-    
-    # Test configuration validation
-    echo -e "${YELLOW}Testing ISO configuration validation...${NC}"
-    if python3 -c "
-import sys
-sys.path.insert(0, '.')
-from tests.iso.unit.test_iso_config import TestISOConfig
-import unittest
-suite = unittest.TestLoader().loadTestsFromTestCase(TestISOConfig)
-runner = unittest.TextTestRunner(verbosity=2)
-result = runner.run(suite)
-sys.exit(0 if result.wasSuccessful() else 1)
-    "; then
-        echo -e "  ${GREEN}✓ ISO configuration validation passed${NC}"
-        ((PASSED_TESTS++))
-    else
-        echo -e "  ${RED}✗ ISO configuration validation failed${NC}"
-        ((FAILED_TESTS++))
-    fi
-    ((TOTAL_TESTS++))
-    
-    # Test build script validation
-    echo -e "${YELLOW}Testing ISO build script validation...${NC}"
-    if python3 -c "
-import sys
-sys.path.insert(0, '.')
-from tests.iso.unit.test_iso_build import TestISOBuild
-import unittest
-suite = unittest.TestLoader().loadTestsFromTestCase(TestISOBuild)
-runner = unittest.TextTestRunner(verbosity=2)
-result = runner.run(suite)
-sys.exit(0 if result.wasSuccessful() else 1)
-    "; then
-        echo -e "  ${GREEN}✓ ISO build script validation passed${NC}"
-        ((PASSED_TESTS++))
-    else
-        echo -e "  ${RED}✗ ISO build script validation failed${NC}"
-        ((FAILED_TESTS++))
-    fi
-    ((TOTAL_TESTS++))
-    
+
+    run_test_target "ISO configuration validation" \
+        "$REPO_ROOT/tests/iso/unit/test_iso_config.py::TestISOConfig"
+    run_test_target "ISO build script validation" \
+        "$REPO_ROOT/tests/iso/unit/test_iso_build.py::TestISOBuild"
+
     echo
 }
 
 # Function to test ISO validation
 test_iso_validation() {
     echo -e "${BLUE}Testing ISO validation...${NC}"
-    
-    # Test checksum validation
-    echo -e "${YELLOW}Testing ISO checksum validation...${NC}"
-    if python3 -c "
-import sys
-sys.path.insert(0, '.')
-from tests.iso.validation.test_iso_checksums import TestISOChecksums
-import unittest
-suite = unittest.TestLoader().loadTestsFromTestCase(TestISOChecksums)
-runner = unittest.TextTestRunner(verbosity=2)
-result = runner.run(suite)
-sys.exit(0 if result.wasSuccessful() else 1)
-    "; then
-        echo -e "  ${GREEN}✓ ISO checksum validation passed${NC}"
-        ((PASSED_TESTS++))
-    else
-        echo -e "  ${RED}✗ ISO checksum validation failed${NC}"
-        ((FAILED_TESTS++))
-    fi
-    ((TOTAL_TESTS++))
-    
-    # Test boot validation
-    echo -e "${YELLOW}Testing ISO boot validation...${NC}"
-    if python3 -c "
-import sys
-sys.path.insert(0, '.')
-from tests.iso.validation.test_iso_boot import TestISOBootValidation
-import unittest
-suite = unittest.TestLoader().loadTestsFromTestCase(TestISOBootValidation)
-runner = unittest.TextTestRunner(verbosity=2)
-result = runner.run(suite)
-sys.exit(0 if result.wasSuccessful() else 1)
-    "; then
-        echo -e "  ${GREEN}✓ ISO boot validation passed${NC}"
-        ((PASSED_TESTS++))
-    else
-        echo -e "  ${RED}✗ ISO boot validation failed${NC}"
-        ((FAILED_TESTS++))
-    fi
-    ((TOTAL_TESTS++))
-    
+
+    run_test_target "ISO checksum validation" \
+        "$REPO_ROOT/tests/iso/validation/test_iso_validation.py::TestISOChecksumValidation"
+    run_test_target "ISO boot validation" \
+        "$REPO_ROOT/tests/iso/validation/test_iso_validation.py::TestISOBootValidation"
+
     echo
 }
 
 # Function to test ISO safety
 test_iso_safety() {
     echo -e "${BLUE}Testing ISO safety...${NC}"
-    
-    # Test secure boot validation
-    echo -e "${YELLOW}Testing secure boot validation...${NC}"
-    if python3 -c "
-import sys
-sys.path.insert(0, '.')
-from tests.iso.safety.test_iso_security import TestISOSecurity
-import unittest
-suite = unittest.TestLoader().loadTestsFromTestCase(TestISOSecurity)
-runner = unittest.TextTestRunner(verbosity=2)
-result = runner.run(suite)
-sys.exit(0 if result.wasSuccessful() else 1)
-    "; then
-        echo -e "  ${GREEN}✓ Secure boot validation passed${NC}"
-        ((PASSED_TESTS++))
-    else
-        echo -e "  ${RED}✗ Secure boot validation failed${NC}"
-        ((FAILED_TESTS++))
-    fi
-    ((TOTAL_TESTS++))
-    
-    # Test artifact validation
-    echo -e "${YELLOW}Testing ISO artifact validation...${NC}"
-    if python3 -c "
-import sys
-sys.path.insert(0, '.')
-from tests.iso.safety.test_iso_artifacts import TestISOArtifacts
-import unittest
-suite = unittest.TestLoader().loadTestsFromTestCase(TestISOArtifacts)
-runner = unittest.TextTestRunner(verbosity=2)
-result = runner.run(suite)
-sys.exit(0 if result.wasSuccessful() else 1)
-    "; then
-        echo -e "  ${GREEN}✓ ISO artifact validation passed${NC}"
-        ((PASSED_TESTS++))
-    else
-        echo -e "  ${RED}✗ ISO artifact validation failed${NC}"
-        ((FAILED_TESTS++))
-    fi
-    ((TOTAL_TESTS++))
-    
+
+    run_test_target "secure boot validation" \
+        "$REPO_ROOT/tests/iso/safety/test_iso_safety.py::TestISOCreationSafety"
+    run_test_target "ISO artifact validation" \
+        "$REPO_ROOT/tests/iso/safety/test_iso_safety.py::TestISOBuildProcessSafety"
+
     echo
 }
 
@@ -246,7 +185,15 @@ generate_report() {
     echo "Total tests run: $TOTAL_TESTS"
     echo "Tests passed: $PASSED_TESTS"
     echo "Tests failed: $FAILED_TESTS"
-    
+
+    # Zero tests collected is a failure, not a success: it means the suite
+    # exercised nothing and any "pass" would be vacuous.
+    if [[ $TOTAL_TESTS -eq 0 ]]; then
+        echo -e "${RED}✗ No tests were collected!${NC}"
+        echo -e "${RED}ISO creation process is NOT SAFE for production use!${NC}"
+        return 1
+    fi
+
     if [[ $FAILED_TESTS -eq 0 ]]; then
         echo -e "${GREEN}✓ All tests passed!${NC}"
         echo -e "${GREEN}ISO creation process is safe for production use.${NC}"
@@ -286,9 +233,10 @@ main() {
     
     # Run safety tests
     test_iso_safety
-    
-    # Generate final report
+
+    # Generate final report (non-zero exit if any category failed or nothing ran)
     generate_report
+    exit $?
 }
 
 # Parse command line arguments
@@ -297,26 +245,31 @@ case "${1:-}" in
         check_dependencies
         run_test_category "Unit" "Unit tests for ISO creation components"
         generate_report
+        exit $?
         ;;
     "integration")
         check_dependencies
         run_test_category "Integration" "Integration tests for complete ISO workflows"
         generate_report
+        exit $?
         ;;
     "validation")
         check_dependencies
         test_iso_validation
         generate_report
+        exit $?
         ;;
     "safety")
         check_dependencies
         test_iso_safety
         generate_report
+        exit $?
         ;;
     "build")
         check_dependencies
         test_iso_build_process
         generate_report
+        exit $?
         ;;
     *)
         main

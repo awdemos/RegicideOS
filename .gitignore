@@ -2,6 +2,7 @@
 target/
 */target/
 **/target/
+/.cargo-targets/
 
 # Rust
 Cargo.lock

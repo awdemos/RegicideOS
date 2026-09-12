@@ -86,6 +86,51 @@ class CliImageTests(unittest.TestCase):
         mock_install_and_sync.assert_called_once_with(image_path.resolve())
 
     @mock.patch("os.geteuid", return_value=0)
+    @mock.patch("regicide_update.image.install_tarball")
+    def test_install_without_checksum_warns_and_proceeds(self, mock_install, _mock_root):
+        image_path = Path(self.tmpdir.name) / "release.tar.xz"
+        image_path.write_text("")
+        with mock.patch.object(cli_image.rc, "warn") as mock_warn:
+            with mock.patch.object(sys, "argv", ["regicide-image", "install", str(image_path)]):
+                cli_image.main()
+        mock_warn.assert_called_once()
+        self.assertIn("UNVERIFIED", mock_warn.call_args[0][0])
+        mock_install.assert_called_once()
+
+    @mock.patch("os.geteuid", return_value=0)
+    @mock.patch("regicide_update.image.install_tarball")
+    def test_install_with_checksum_verifies_before_installing(self, mock_install, _mock_root):
+        import hashlib
+        image_path = Path(self.tmpdir.name) / "release.tar.xz"
+        image_path.write_bytes(b"image data")
+        expected = hashlib.sha256(b"image data").hexdigest()
+        argv = ["regicide-image", "install", str(image_path), "--checksum", expected]
+        with mock.patch.object(sys, "argv", argv):
+            cli_image.main()
+        mock_install.assert_called_once()
+
+    @mock.patch("os.geteuid", return_value=0)
+    @mock.patch("regicide_update.image.install_tarball")
+    def test_install_with_bad_checksum_aborts_before_installing(self, mock_install, _mock_root):
+        image_path = Path(self.tmpdir.name) / "release.tar.xz"
+        image_path.write_bytes(b"image data")
+        argv = ["regicide-image", "install", str(image_path), "--checksum", "0" * 64]
+        with mock.patch.object(sys, "argv", argv):
+            with self.assertRaises(SystemExit):
+                cli_image.main()
+        mock_install.assert_not_called()
+
+    @mock.patch("os.geteuid", return_value=0)
+    @mock.patch("regicide_update.image.install_tarball")
+    def test_install_no_reseed_disables_reseed(self, mock_install, _mock_root):
+        image_path = Path(self.tmpdir.name) / "release.tar.xz"
+        image_path.write_text("")
+        argv = ["regicide-image", "install", str(image_path), "--no-reseed"]
+        with mock.patch.object(sys, "argv", argv):
+            cli_image.main()
+        mock_install.assert_called_once_with(image_path.resolve(), "/roots", False)
+
+    @mock.patch("os.geteuid", return_value=0)
     @mock.patch("regicide_update.boot_entry.rollback_and_sync")
     def test_rollback_command_calls_rollback_and_sync(self, mock_rollback, _mock_root):
         mock_rollback.return_value = "a"
