@@ -128,6 +128,8 @@ DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 > sudo systemctl enable --now podman.socket
 > DOCKER_HOST=unix:///run/podman/podman.sock sudo -E dagger run python build-system/dagger_pipeline.py --plain
 > ```
+>
+> **Note:** when the pipeline runs as root (including under `sudo` with a rootful Podman socket), the host must have `mksquashfs` installed to create the SquashFS image. On Gentoo install `sys-fs/squashfs-tools`; on Fedora/Arch install `squashfs-tools`.
 
 The Dagger pipeline splits the build into six cacheable stages in `build-system/catalyst/stages/`. The COSMIC stage compiles many Rust packages from source, so the first run can take several hours; subsequent runs reuse cached stages and the `distfiles`/`binpkgs` cache volumes and can take 99% less time. Use `--plain` (or set `DAGGER_PROGRESS=plain`) to stream plain text logs instead of the interactive TUI.
 
@@ -140,6 +142,13 @@ DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 # From-source pipeline: full recompile; still populates the binpkg cache volume
 REGICIDE_USE_BINPKGS=0 DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain
 ```
+
+> **Tip:** for faster local builds without Sigstore signing, add `--skip-sign`:
+> ```bash
+> DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py --plain --skip-sign
+> ```
+> This skips cosign artifact signing, which requires interactive browser authentication
+> for keyless mode or a cosign key pair for local signing.
 
 Both methods produce:
 - `build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz`
@@ -179,11 +188,35 @@ cat regicide-arch.iso.part* > regicide-arch.iso
 sha256sum -c regicide-arch.iso.sha256
 ```
 
-Both ISOs boot under UEFI in QEMU/virt-manager or can be written to a USB drive with `dd` or `cp` to boot on bare metal.
+Both ISOs boot under UEFI in QEMU/virt-manager or can be written to a USB drive to boot on bare metal. Identify the USB device (`/dev/sdX`), unmount any partitions on it, and write the ISO:
+
+```bash
+sudo umount /dev/sdX*
+sudo dd if=regicide-cosmic-amd64.iso of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+Or use the helper script in the repo, which defaults to the built ISO and verifies the write:
+
+```bash
+./scripts/flash-usb.sh /dev/sdX
+```
+
+**Regenerate the live ISO from an existing build:**
+
+If you already rebuilt the SquashFS (`regicide-cosmic.img`) and want a matching bootable ISO without recompiling the entire stage4, reuse the existing tarball and SquashFS:
+
+```bash
+DAGGER_PROGRESS=plain dagger run python build-system/dagger_pipeline.py \
+  --plain \
+  --iso \
+  --from-tarball build-system/catalyst/output/stage4-amd64-systemd-cosmic.tar.xz \
+  --from-squashfs build-system/catalyst/output/regicide-cosmic.img \
+  --skip-sign
+```
 
 #### 4. Install to bare metal
 
-Boot an existing Linux live environment, clone the repo, build the installer, and point it at the local SquashFS image:
+Boot an existing Linux live environment, clone the repo, build the installer, and point it at the local SquashFS image (`regicide-cosmic.img`). The `.img` is **not** a bootable USB image; it is the ROOTS filesystem that the installer deploys:
 
 ```bash
 cd installer

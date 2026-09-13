@@ -119,6 +119,15 @@ mksquashfs /tmp/cosmic root-cosmic.img -comp zstd -Xcompression-level 19
 
 ## Deployment
 
+The SquashFS image (`root-cosmic.img` / `regicide-cosmic.img`) is a filesystem image, not a bootable USB image. To boot from a USB drive, write the bootable live ISO (`regicide-cosmic-amd64.iso`) to the device instead:
+
+```bash
+sudo umount /dev/sdX*
+sudo dd if=regicide-cosmic-amd64.iso of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+The SquashFS image is used for ROOTS deployment or by the installer, as described below.
+
 ### 1. On Existing RegicideOS Installation
 
 ```bash
