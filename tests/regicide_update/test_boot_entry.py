@@ -1,4 +1,3 @@
-import glob
 import os
 import tempfile
 import unittest
@@ -47,7 +46,6 @@ class BootEntryTests(unittest.TestCase):
     def test_ensure_grub_cfg_is_idempotent(self):
         boot_entry.ensure_grub_cfg()
         cfg = boot_entry._grub_cfg()
-        first = cfg.read_text()
         # Manually append noise; ensure_grub_cfg should leave it alone.
         with open(cfg, "a") as f:
             f.write("# extra\n")
