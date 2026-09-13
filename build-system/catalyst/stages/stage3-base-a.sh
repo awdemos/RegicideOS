@@ -16,6 +16,12 @@ PACKAGES=(
     dev-util/wayland-scanner
     dev-vcs/git
     media-fonts/fonts-meta
+    # NetworkManager must be a base package, not a desktop transitive dep:
+    # stage6 enables it unconditionally and stage7 checks the unit in ALL
+    # variants (desktop headless alike).  Desktop builds only had it because
+    # cosmic-settings IUSE defaults +networkmanager; headless builds dropped
+    # the whole COSMIC stack and NM vanished with it (dangling wants symlink).
+    net-misc/networkmanager
     sys-apps/iproute2
     sys-apps/lsb-release
     sys-apps/mlocate

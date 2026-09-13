@@ -75,3 +75,10 @@ legacy_installer.py
 regicideos_poster.png
 scorecard.png
 session-*.md
+
+# Local Dagger build scratch: verification trees, logs, rendered configs.
+# (Dagger build logs use a .frozen/.log.attemptN suffix so *.log misses them.)
+.verify-*/
+build-dagger*.frozen
+build-dagger*.log.attempt*
+build-system/catalyst/generated/
