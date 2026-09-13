@@ -64,10 +64,11 @@ class RootAbRealBtrfsIntegrationTest(unittest.TestCase):
         rc.ROOTS_DIR = mount_point
         root_ab.CURRENT_FILE = Path(mount_point) / ".regicide-root-current"
 
-        # Seed the current (top-level) root with a minimal /boot so the
-        # snapshot created for slot A during the first update is bootable.
+        # Seed the current (top-level) root with a minimal bootable layout so
+        # the snapshot created for slot A during the first update is bootable.
+        for d in ("usr", "bin", "lib", "etc", "var", "boot"):
+            os.makedirs(os.path.join(mount_point, d), exist_ok=True)
         current_boot_dir = os.path.join(mount_point, "boot")
-        os.makedirs(current_boot_dir, exist_ok=True)
         Path(os.path.join(current_boot_dir, "vmlinuz")).touch()
         Path(os.path.join(current_boot_dir, "initramfs.img")).touch()
 
@@ -95,14 +96,26 @@ class RootAbRealBtrfsIntegrationTest(unittest.TestCase):
             os.path.isfile(os.path.join(mount_point, "roots_b", "boot", "vmlinuz"))
         )
 
-        # Verify boot entries point at the actual files in each slot.
+        # Verify GRUB state points at the actual files in each slot: grubenv
+        # selects the active slot and the managed dispatch config contains a
+        # menuentry per slot with the discovered kernel/initrd names.
         boot_entry.sync_entries()
-        b_entry = (boot_entry.ESP_BOOT_DIR / "loader" / "entries" / "regicide-b.conf").read_text()
-        self.assertIn("linux /vmlinuz", b_entry)
-        self.assertIn("initrd /initramfs.img", b_entry)
-        self.assertIn("root=LABEL=ROOTS ro rootflags=subvol=roots_b", b_entry)
-        loader_conf = (boot_entry.ESP_BOOT_DIR / "loader" / "loader.conf").read_text()
-        self.assertIn("default regicide-b", loader_conf)
+        grubenv_text = (
+            boot_entry.ESP_BOOT_DIR / "grub" / "grubenv"
+        ).read_text(errors="replace")
+        self.assertIn("regicide_slot=b", grubenv_text)
+        grub_cfg_text = (
+            boot_entry.ESP_BOOT_DIR / "grub" / "grub.cfg"
+        ).read_text(errors="replace")
+        self.assertIn("source $prefix/regicide.cfg", grub_cfg_text)
+        dispatch = (
+            boot_entry.ESP_BOOT_DIR / "grub" / "regicide.cfg"
+        ).read_text(errors="replace")
+        self.assertIn("insmod btrfs", dispatch)
+        self.assertIn("search --label ROOTS --set=root", dispatch)
+        self.assertIn("linux /roots_b/boot/vmlinuz", dispatch)
+        self.assertIn("initrd /roots_b/boot/initramfs.img", dispatch)
+        self.assertIn("root=LABEL=ROOTS ro rootflags=subvol=roots_b", dispatch)
 
         # Roll back to the previous slot.
         previous = root_ab.rollback()
@@ -110,8 +123,15 @@ class RootAbRealBtrfsIntegrationTest(unittest.TestCase):
         boot_entry.sync_entries()
         self.assertTrue(os.path.isdir(os.path.join(mount_point, "roots_a")))
         self.assertEqual(root_ab.read_active_slot(), "a")
-        loader_conf = (boot_entry.ESP_BOOT_DIR / "loader" / "loader.conf").read_text()
-        self.assertIn("default regicide-a", loader_conf)
+        grubenv_text = (
+            boot_entry.ESP_BOOT_DIR / "grub" / "grubenv"
+        ).read_text(errors="replace")
+        self.assertIn("regicide_slot=a", grubenv_text)
+        dispatch = (
+            boot_entry.ESP_BOOT_DIR / "grub" / "regicide.cfg"
+        ).read_text(errors="replace")
+        self.assertIn("linux /roots_a/boot/vmlinuz", dispatch)
+        self.assertIn("initrd /roots_a/boot/initramfs.img", dispatch)
 
 
 if __name__ == "__main__":

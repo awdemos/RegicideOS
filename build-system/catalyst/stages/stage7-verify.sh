@@ -8,7 +8,15 @@ STAGE_NAME="stage7-verify"
 
 REGICIDE_ARCH="${REGICIDE_ARCH:-amd64}"
 REGICIDE_HEADLESS="${REGICIDE_SKIP_COSMIC:-0}"
-TARBALL="${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd${REGICIDE_HEADLESS:--cosmic}.tar.xz"
+# Headless images drop the "-cosmic" suffix; COSMIC images keep it.
+# (REGICIDE_HEADLESS is always "0" or "1" here, so ${VAR:--cosmic} can never
+# produce the suffix — it must be derived from the value, not its non-emptiness.)
+TARBALL_VARIANT=""
+if [[ "${REGICIDE_HEADLESS}" != "1" ]]; then
+    TARBALL_VARIANT="-cosmic"
+fi
+# REGICIDE_TARBALL pins the exact tarball to verify; see stage7-sbom.sh.
+TARBALL="${REGICIDE_TARBALL:-${OUTPUT_DIR}/stage4-${REGICIDE_ARCH}-systemd${TARBALL_VARIANT}.tar.xz}"
 SQUASHFS="${OUTPUT_DIR}/regicide-cosmic.img"
 VERIFY_SCRATCH_DIR="${REGICIDE_VERIFY_DIR:-/var/tmp}"
 mkdir -p "${VERIFY_SCRATCH_DIR}"
@@ -24,6 +32,17 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 OWNER_DUMP=""
+# Fail fast on missing artifacts before doing any work (previously the
+# unprivileged metadata dump ran first and reported a misleading error).
+if [[ ! -f "${TARBALL}" ]]; then
+    echo "ERROR: stage4 tarball missing: ${TARBALL}"
+    exit 1
+fi
+if [[ ! -f "${SQUASHFS}" ]]; then
+    echo "ERROR: live SquashFS missing: ${SQUASHFS}"
+    exit 1
+fi
+
 if [[ ${UNPRIVILEGED} -eq 1 ]]; then
     OWNER_DUMP="$(mktemp -p "${VERIFY_SCRATCH_DIR}" -t regicide-owners-XXXXXX)"
     tar --numeric-owner -tvf "${TARBALL}" > "${OWNER_DUMP}" 2>/dev/null || true
@@ -37,15 +56,6 @@ trap 'chmod -R +w "${ROOTS_DIR}" 2>/dev/null || true; rm -rf "${ROOTS_DIR}" "${O
 
 log_status "start" "verifying stage4 tarball and SquashFS"
 echo "Stage 7: verifying built artifacts..."
-
-if [[ ! -f "${TARBALL}" ]]; then
-    echo "ERROR: stage4 tarball missing: ${TARBALL}"
-    exit 1
-fi
-if [[ ! -f "${SQUASHFS}" ]]; then
-    echo "ERROR: live SquashFS missing: ${SQUASHFS}"
-    exit 1
-fi
 
 echo "Extracting tarball for verification..."
 tar -C "${ROOTS_DIR}" -xpJf "${TARBALL}" --overwrite --exclude='./var/cache/distfiles/*' --exclude='./var/cache/binpkgs/*' --exclude='./var/tmp/*' --exclude='./tmp/*' .

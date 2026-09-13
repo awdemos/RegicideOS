@@ -145,20 +145,6 @@ fn find_crypto_luks_device() -> Result<String> {
     Ok(device)
 }
 
-fn execute_with_output(command: &str) -> Result<String> {
-    let output = ProcessCommand::new("sh")
-        .args(["-c", command])
-        .output()
-        .with_context(|| format!("Failed to execute command: {command}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Command failed: {}\nError: {}", command, stderr);
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
 // Safe command execution with strict allowlist
 fn execute(command: &str) -> Result<String> {
     // Check for heredoc patterns that need special handling
@@ -798,8 +784,13 @@ fn set_efi_boot_flag(partition: &str) -> Result<()> {
     // actually uses; the legacy "boot" attribute is not required and
     // sgdisk `--set-flag` with a non-attribute name fails, so just refresh.
     if execute("which sgdisk").is_ok() {
-        let drive = if partition.contains("nvme") && partition.contains("p") {
-            partition.rsplit_once("p").unwrap().0
+        let drive = if let Some((base, _num)) = partition.rsplit_once('p') {
+            // /dev/nvme0n1p1 and /dev/mmcblk0p1 both end in p<digits>.
+            if base.starts_with("/dev/nvme") || base.starts_with("/dev/mmcblk") {
+                base
+            } else {
+                partition.trim_end_matches(char::is_numeric)
+            }
         } else {
             partition.trim_end_matches(char::is_numeric)
         };
@@ -1065,12 +1056,10 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
             bail!("Partition {} does not exist", current_name);
         }
 
-        // Check if partition is in use before formatting
+        // A partition still in use at this point would be formatted around
+        // live mounts; abort instead of silently installing onto an old filesystem.
         if is_partition_in_use(current_name) {
-            warn(&format!(
-                "Partition {current_name} is in use, skipping formatting"
-            ));
-            continue;
+            bail!("Partition {current_name} is in use; aborting rather than skipping formatting");
         }
 
         // Simple cleanup before formatting
@@ -1159,41 +1148,49 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("DEBUG: Entering ext4 case for partition {current_name}");
                 info(&format!("Formatting {current_name} as ext4"));
 
-                // Use a more robust approach for ext4 formatting
-                let cmd = if let Some(ref label) = partition.label {
-                    format!("mkfs.ext4 -F -L {label} {current_name}")
-                } else {
-                    format!("mkfs.ext4 -F {current_name}")
-                };
+                // Build the mkfs argv explicitly via the shared helper; the
+                // label was validated above and no shell is involved at all.
+                let label = partition.label.as_deref().unwrap_or("");
+                let args = mkfs_args("mkfs.ext4", current_name, Some(label));
+                let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+                let success = matches!(run_cmd("mkfs.ext4", &arg_refs), Ok(o) if o.status.success());
 
-                // Execute with full error output
-                match execute_with_output(&cmd) {
-                    Ok(_) => {
-                        info(&format!("Successfully formatted {current_name} as ext4"));
-                    }
-                    Err(_) => {
-                        // If formatting fails, try a more aggressive approach
-                        warn("Standard ext4 formatting failed, trying alternative approach...");
+                if !success {
+                    // If formatting fails, try a more aggressive approach
+                    warn("Standard ext4 formatting failed, trying alternative approach...");
 
-                        // Try with different options
-                        let alt_cmd = if let Some(ref label) = partition.label {
-                            format!("mkfs.ext4 -F -L {label} -E lazy_itable_init {current_name}")
-                        } else {
-                            format!("mkfs.ext4 -F -E lazy_itable_init {current_name}")
-                        };
+                    // Try with different options
+                    let mut alt_args = mkfs_args("mkfs.ext4", current_name, Some(label));
+                    alt_args.push("-E".to_string());
+                    alt_args.push("lazy_itable_init".to_string());
+                    let alt_refs: Vec<&str> =
+                        alt_args.iter().map(String::as_str).collect();
 
-                        if execute_with_output(&alt_cmd).is_err() {
-                            warn("Alternative ext4 formatting also failed. You may need to reboot and try again.");
-                            bail!(
-                                "Failed to format {} as ext4 after multiple attempts",
-                                current_name
-                            );
-                        } else {
+                    match run_cmd("mkfs.ext4", &alt_refs) {
+                        Ok(o) if o.status.success() => {
                             info(&format!(
                                 "Successfully formatted {current_name} as ext4 with alternative method"
                             ));
                         }
+                        Ok(o) => {
+                            warn("Alternative ext4 formatting also failed. You may need to reboot and try again.");
+                            bail!(
+                                "Failed to format {} as ext4 after multiple attempts: {}",
+                                current_name,
+                                String::from_utf8_lossy(&o.stderr)
+                            );
+                        }
+                        Err(e) => {
+                            warn("Alternative ext4 formatting also failed. You may need to reboot and try again.");
+                            bail!(
+                                "Failed to format {} as ext4 after multiple attempts: {}",
+                                current_name,
+                                e
+                            );
+                        }
                     }
+                } else {
+                    info(&format!("Successfully formatted {current_name} as ext4"));
                 }
 
                 // Verify filesystem
@@ -1274,10 +1271,7 @@ fn format_drive(drive: &str, layout: &[Partition]) -> Result<()> {
                 println!("Setting up LUKS encryption. You will be prompted to enter a password.");
 
                 if is_partition_in_use(current_name) {
-                    warn(&format!(
-                        "Partition {current_name} is in use, skipping LUKS format"
-                    ));
-                    continue;
+                    bail!("Partition {current_name} is in use; aborting rather than skipping LUKS setup");
                 }
 
                 let _ = execute(&format!("umount -f {current_name}"));
@@ -1590,29 +1584,18 @@ async fn get_url(config: &Config) -> Result<String> {
     }
 }
 
-fn find_partition_by_label(label: &str) -> Result<String> {
-    let label_path = format!("/dev/disk/by-label/{label}");
+fn find_partition_by_label(label: &str, drive: &str) -> Result<String> {
+    // Only search partitions of the selected drive. A same-labelled filesystem
+    // on another disk (e.g. an existing RegicideOS install) must never satisfy
+    // this lookup, or the installer would mount and overwrite that disk.
+    validate_block_device_path(drive)?;
+    let drive_base = drive.rsplit('/').next().unwrap_or(drive);
 
-    // Method 1: Try by-label first
-    if Path::new(&label_path).exists() {
-        return Ok(format!("LABEL={label}"));
-    }
-
-    // Method 2: Try to find via blkid
-    if execute("which blkid").is_ok() {
-        if let Ok(output) = execute(&format!("blkid -L {label}")) {
-            let device = output.trim();
-            if !device.is_empty() && Path::new(device).exists() {
-                return Ok(device.to_string());
-            }
-        }
-    }
-
-    // Method 3: Search through all block devices
-    if let Ok(output) = execute("lsblk -fn -o NAME,LABEL") {
+    if let Ok(output) = execute(&format!("lsblk -ln -o NAME,LABEL {drive}")) {
         for line in output.lines() {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 && parts[1] == label {
+            // Skip the drive itself (a whole-disk filesystem could carry the label).
+            if parts.len() >= 2 && parts[0] != drive_base && parts[1] == label {
                 let device = format!("/dev/{}", parts[0]);
                 if Path::new(&device).exists() {
                     return Ok(device);
@@ -1621,7 +1604,11 @@ fn find_partition_by_label(label: &str) -> Result<String> {
         }
     }
 
-    bail!("Could not find partition with label: {}", label);
+    bail!(
+        "Could not find partition with label {} on {}",
+        logging::sanitize_error_message(label),
+        logging::sanitize_error_message(drive)
+    );
 }
 
 fn mount_with_retry(
@@ -1682,11 +1669,11 @@ fn mount_with_retry(
 }
 
 #[allow(dead_code)]
-fn mount_roots() -> Result<()> {
+fn mount_roots(drive: &str) -> Result<()> {
     let mount_point = "/mnt/gentoo";
 
     info("Finding ROOTS partition...");
-    let roots_device = find_partition_by_label("ROOTS")?;
+    let roots_device = find_partition_by_label("ROOTS", drive)?;
 
     info("Mounting ROOTS partition on /mnt/gentoo");
     safe_create_dir_all(mount_point, "/mnt")?;
@@ -1695,11 +1682,11 @@ fn mount_roots() -> Result<()> {
     Ok(())
 }
 
-fn step3_native_mount() -> Result<()> {
+fn step3_native_mount(drive: &str) -> Result<()> {
     info("Step 3: Native root mount (skip squashfs)");
 
     // Skip root.img entirely - mount native ROOTS/LUKS directly
-    let roots_dev = find_partition_by_label("ROOTS")?; // ext4 unencrypted root
+    let roots_dev = find_partition_by_label("ROOTS", drive)?; // ext4 unencrypted root
     safe_create_dir_all("/mnt/root", "/mnt")?;
 
     // Mount native root RW (no squashfs)
@@ -1779,7 +1766,7 @@ fn step3_native_mount() -> Result<()> {
     // Mount EFI partition - directories already created above
     if is_efi() {
         info("Finding and mounting EFI partition...");
-        let efi_device = find_partition_by_label("EFI")?;
+        let efi_device = find_partition_by_label("EFI", drive)?;
         info(&format!("Found EFI partition: {efi_device}"));
 
         // Mount EFI to /mnt/root/boot/efi (GRUB expects --efi-directory="/boot/efi")
@@ -1844,7 +1831,7 @@ async fn download_root(url: &str) -> Result<()> {
     Ok(())
 }
 
-fn verify_grub_environment() -> Result<()> {
+fn verify_grub_environment(drive: &str) -> Result<()> {
     info("Verifying GRUB environment and dependencies...");
 
     // Check 1: Verify GRUB binaries are accessible in chroot environment
@@ -1999,7 +1986,7 @@ fn verify_grub_environment() -> Result<()> {
 
     // Check 8: Verify filesystem detection
     if is_efi() {
-        if let Ok(efi_device) = find_partition_by_label("EFI") {
+        if let Ok(efi_device) = find_partition_by_label("EFI", drive) {
             info(&format!("EFI partition found: {efi_device}"));
         }
     }
@@ -2386,7 +2373,7 @@ fn install_bootloader(platform: &str, device: &str) -> Result<()> {
 
             // Verify GRUB environment before running grub-mkconfig
             info("Verifying GRUB environment before config generation");
-            verify_grub_environment()?;
+            verify_grub_environment(device)?;
         }
 
         // Skip GRUB mkconfig since we created manual configuration
@@ -3392,15 +3379,21 @@ async fn main() -> Result<()> {
 
     if interactive {
         warn(&format!(
-            "Drive partitioning is about to start. After this process, drive {} will be erased. Press enter to continue.",
+            "Drive partitioning is about to start. After this process, drive {} will be erased.",
             config_parsed.drive
         ));
+        warn("Type the drive path to continue:");
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
+        if input.trim() != config_parsed.drive {
+            die("Drive confirmation did not match; aborting before any changes.");
+        }
     }
 
     let layouts = get_layouts();
-    let layout = layouts.get(&config_parsed.filesystem).unwrap();
+    let layout = layouts
+        .get(&config_parsed.filesystem)
+        .ok_or_else(|| anyhow::anyhow!("No partition layout for filesystem: {}", config_parsed.filesystem))?;
 
     info(&format!("Partitioning drive {}", config_parsed.drive));
     partition_drive(&config_parsed.drive, layout)?;
@@ -3412,13 +3405,13 @@ async fn main() -> Result<()> {
 
     // Simplified installation following Xenia manual pattern
     info("Step 1: Mount ROOTS partition");
-    let roots_device = find_partition_by_label("ROOTS")?;
+    let roots_device = find_partition_by_label("ROOTS", &config_parsed.drive)?;
     info(&format!("Found ROOTS partition: {roots_device}"));
     safe_create_dir_all("/mnt/gentoo", "/mnt")?;
     mount_with_retry(&roots_device, "/mnt/gentoo", None, None)?;
 
     info("Step 2: Mount native ROOTS filesystem");
-    step3_native_mount()?;
+    step3_native_mount(&config_parsed.drive)?;
 
     info("Step 3: Mount root image and overlays");
     mount_root_image(&config_parsed).await?;

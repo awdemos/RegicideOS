@@ -29,6 +29,8 @@ ISO_VERSION="${ISO_VERSION:-$(date +%Y%m%d-%H%M%S)}"
 ISO_LABEL="RegicideOS-${ISO_VERSION}"
 ISO_ARCH="${ISO_ARCH:-x86_64}"
 ISO_OUTPUT="${OUTPUT_DIR}/regicideos-${ISO_VERSION}-${ISO_ARCH}.iso"
+OUTPUT_FROM_CLI=false
+CONFIG_FILE="$ROOT_DIR/config/iso-config.toml"
 
 # Function to print usage
 usage() {
@@ -74,6 +76,30 @@ log() {
         "SUCCESS") echo -e "${GREEN}[SUCCESS]${NC} $timestamp - $message" ;;
         *)      echo "[UNKNOWN] $timestamp - $message" ;;
     esac
+}
+
+# Function to align the default output path with config/iso-config.toml.
+# An explicit -o/--output always wins; without the config we keep the
+# regicideos-<version>-<arch>.iso naming derived above.
+load_config_output() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        log "INFO" "No ISO configuration found at $CONFIG_FILE; using built-in defaults"
+        return 0
+    fi
+
+    local cfg_directory cfg_filename
+    cfg_directory=$(sed -n 's/^[[:space:]]*output_directory[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CONFIG_FILE" | head -n1)
+    cfg_filename=$(sed -n 's/^[[:space:]]*output_filename[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CONFIG_FILE" | head -n1)
+
+    if [[ -n "$cfg_directory" ]]; then
+        OUTPUT_DIR="$ROOT_DIR/$cfg_directory"
+    fi
+    if [[ -n "$cfg_filename" ]]; then
+        ISO_OUTPUT="$OUTPUT_DIR/$cfg_filename"
+    fi
+
+    log "INFO" "Output aligned with $CONFIG_FILE: $ISO_OUTPUT"
+    return 0
 }
 
 # Function to validate dependencies
@@ -267,7 +293,11 @@ prepare_bootloaders() {
     done
     
     if [[ "$bootloader_found" == "false" ]]; then
-        log "WARN" "No real bootloader files found. Creating minimal UEFI bootloader stubs."
+        if ! $DRY_RUN; then
+            log "ERROR" "No real bootloader files found; a bootable ISO requires a real PE32/EFI binary"
+            return 1
+        fi
+        log "WARN" "No real bootloader files found (dry-run; a real build would fail without one)"
         create_minimal_uefi_bootloader
     else
         copy_bootloader_files
@@ -284,8 +314,9 @@ create_minimal_uefi_bootloader() {
     if ! $DRY_RUN; then
         # Create bootia32.efi and bootx64.efi stubs
         # In a real implementation, these would be compiled or copied from GRUB
-        
-        cat > "$ISO_DIR/EFI/BOOT/BOOTX64.EFI" << 'EOF'
+        # (the build fails later if no real PE32/EFI binary is present).
+
+        cat > "$ISO_DIR/EFI/BOOT/BOOTX64.EFI" << EOF
 #!/bin/bash
 # Minimal UEFI bootloader stub
 # In real implementation, this would be compiled GRUB bootloader
@@ -293,17 +324,17 @@ echo "RegicideOS UEFI Bootloader"
 echo "This is a placeholder - real bootloader would be compiled"
 exit 1
 EOF
-        
-        cat > "$ISO_DIR/EFI/BOOT/BOOTIA32.EFI" << 'EOF'
+
+        cat > "$ISO_DIR/EFI/BOOT/BOOTIA32.EFI" << EOF
 #!/bin/bash
 # Minimal UEFI bootloader stub (32-bit)
 echo "RegicideOS UEFI Bootloader (32-bit)"
 echo "This is a placeholder - real bootloader would be compiled"
 exit 1
 EOF
-        
+
         # Create GRUB configuration
-        cat > "$ISO_DIR/boot/grub/grub.cfg" << 'EOF'
+        cat > "$ISO_DIR/boot/grub/grub.cfg" << EOF
 # RegicideOS GRUB Configuration
 set timeout=10
 set default=0
@@ -321,8 +352,8 @@ menuentry "RegicideOS Install" {
 menuentry "System Information" {
     echo "RegicideOS - AI-Powered Linux Distribution"
     echo "UEFI Only, Btrfs Only"
-    echo "Version: '$ISO_VERSION'
-    echo "Architecture: '$ISO_ARCH'
+    echo "Version: $ISO_VERSION"
+    echo "Architecture: $ISO_ARCH"
 }
 EOF
     fi
@@ -331,16 +362,37 @@ EOF
 # Function to copy bootloader files
 copy_bootloader_files() {
     log "INFO" "Copying bootloader files..."
-    
-    # This function would copy actual bootloader files
-    # For now, create placeholder files
-    
-    if ! $DRY_RUN; then
-        # Create placeholder bootloader files
-        touch "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
-        touch "$ISO_DIR/EFI/BOOT/BOOTIA32.EFI"
-        touch "$ISO_DIR/boot/grub/grub.cfg"
+
+    if $DRY_RUN; then
+        return 0
     fi
+
+    # Copy the real bootloader files found during preparation.
+    local search_paths=(
+        "$ROOT_DIR/bootloader"
+        "$ROOT_DIR/grub"
+        "$ROOT_DIR/EFI"
+        "/usr/share/grub"
+        "/boot"
+    )
+
+    local path file base
+    for path in "${search_paths[@]}"; do
+        [[ -d "$path" ]] || continue
+        while IFS= read -r file; do
+            base=$(basename "$file")
+            if [[ "$base" =~ \.efi$ ]]; then
+                cp "$file" "$ISO_DIR/EFI/BOOT/$base" && log "INFO" "Copied EFI binary: $base"
+            else
+                # GRUB images and module lists belong to the boot/grub tree
+                mkdir -p "$ISO_DIR/boot/grub"
+                cp "$file" "$ISO_DIR/boot/grub/$base" && log "INFO" "Copied GRUB file: $base"
+            fi
+        done < <(find "$path" -maxdepth 3 -type f \( -iname "*.efi" -o -iname "grub*.img" -o -iname "*.lst" \) 2>/dev/null | head -n5)
+    done
+
+    # A GRUB configuration is generated alongside; make sure the path exists.
+    [[ -f "$ISO_DIR/boot/grub/grub.cfg" ]] || touch "$ISO_DIR/boot/grub/grub.cfg"
 }
 
 # Function to create root filesystem
@@ -409,10 +461,10 @@ create_iso_image() {
             # Check if we have a real EFI boot image
             local efi_boot_file="$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
             local has_real_bootloader=false
-            if [[ -s "$efi_boot_file" ]] && file "$efi_boot_file" | grep -qiE "PE32\+|EFI application\|MS-DOS executable"; then
+            if [[ -s "$efi_boot_file" ]] && file "$efi_boot_file" | grep -qiE "PE32\+|EFI application|MS-DOS executable"; then
                 has_real_bootloader=true
             fi
-            
+
             if [[ "$has_real_bootloader" == "true" ]]; then
                 log "INFO" "Creating UEFI-bootable ISO with El Torito..."
                 xorriso -as mkisofs \
@@ -426,13 +478,9 @@ create_iso_image() {
                     -output "$ISO_OUTPUT" \
                     "$ISO_DIR"
             else
-                log "WARN" "No real bootloader found. Creating data-only ISO (not bootable)."
-                xorriso -as mkisofs \
-                    -iso-level 3 \
-                    -full-iso9660-filenames \
-                    -volid "$ISO_LABEL" \
-                    -output "$ISO_OUTPUT" \
-                    "$ISO_DIR"
+                log "ERROR" "No real UEFI bootloader (PE32/EFI application) found at $efi_boot_file"
+                log "ERROR" "Refusing to produce a data-only ISO that cannot boot"
+                return 1
             fi
         else
             log "ERROR" "xorriso not available for ISO creation"
@@ -456,10 +504,14 @@ create_iso_image() {
 # Function to validate ISO image
 validate_iso_image() {
     log "INFO" "Validating ISO image..."
-    
+
     if [[ ! -f "$ISO_OUTPUT" ]]; then
-        log "ERROR" "ISO file not found: $ISO_OUTPUT"
-        return 1
+        if $DRY_RUN; then
+            log "INFO" "Dry-run: no ISO file was created, skipping existence check"
+        else
+            log "ERROR" "ISO file not found: $ISO_OUTPUT"
+            return 1
+        fi
     fi
     
     # Check file size
@@ -600,6 +652,7 @@ main() {
                 ;;
             -o|--output)
                 ISO_OUTPUT="$2"
+                OUTPUT_FROM_CLI=true
                 shift 2
                 ;;
             -V|--validate-only)
@@ -614,6 +667,11 @@ main() {
         esac
     done
     
+    # Align default output path with config/iso-config.toml unless -o was given
+    if [[ "$OUTPUT_FROM_CLI" != true ]]; then
+        load_config_output
+    fi
+
     # Validate dependencies
     if ! validate_dependencies; then
         log "ERROR" "Dependency validation failed"

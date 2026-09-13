@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch, MagicMock, call
 import tempfile
 import os
 import sys
+import re
 import subprocess
 from pathlib import Path
 import shutil
@@ -648,6 +649,91 @@ echo "ISO build completed successfully"
         result = safety.validate_build_script(dangerous_script)
         self.assertFalse(result)
         self.assertGreater(len(safety.safety_violations), 0)
+
+class TestRealScriptSafety(unittest.TestCase):
+    """Run lightweight safety assertions against the REAL repo scripts
+    (scripts/build-iso.sh and scripts/flash-usb.sh) instead of only testing
+    self-made fixtures."""
+
+    PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+    BUILD_SCRIPT = PROJECT_ROOT / "scripts" / "build-iso.sh"
+    FLASH_SCRIPT = PROJECT_ROOT / "scripts" / "flash-usb.sh"
+
+    SCRIPTS = (BUILD_SCRIPT, FLASH_SCRIPT)
+
+    # Patterns that must never appear in these scripts (outside comments).
+    DANGEROUS_PATTERNS = (
+        "rm -rf /",
+        "dd if=/dev/zero",
+        "mkfs.",
+        "sudo rm",
+        "chmod 777",
+    )
+
+    def _read(self, script):
+        if not script.exists():
+            self.skipTest(f"script not found: {script}")
+        return script.read_text()
+
+    def test_scripts_use_strict_mode(self):
+        """Both scripts must run with set -euo pipefail."""
+        for script in self.SCRIPTS:
+            content = self._read(script)
+            self.assertIn(
+                "set -euo pipefail", content,
+                f"{script.name} must enable strict mode",
+            )
+
+    def test_scripts_have_no_dangerous_patterns(self):
+        """Scan the real scripts for dangerous unguarded command patterns."""
+        for script in self.SCRIPTS:
+            content = self._read(script)
+            for lineno, line in enumerate(content.splitlines(), 1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                lowered = stripped.lower()
+                for pattern in self.DANGEROUS_PATTERNS:
+                    self.assertNotIn(
+                        pattern, lowered,
+                        f"{script.name}:{lineno} contains dangerous pattern "
+                        f"{pattern!r}: {stripped}",
+                    )
+
+    def test_scripts_have_no_unquoted_rm_variables(self):
+        """rm -rf must never be given an unquoted $VAR (word-splitting risk)."""
+        unquoted_rm = re.compile(r'\brm\s+(-[a-zA-Z]*\s+)*-rf?\s+\$[A-Za-z_]')
+        for script in self.SCRIPTS:
+            content = self._read(script)
+            for lineno, line in enumerate(content.splitlines(), 1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                self.assertIsNone(
+                    unquoted_rm.search(line),
+                    f"{script.name}:{lineno} has unquoted rm target: {stripped}",
+                )
+
+    def test_flash_usb_quotes_device_in_dd(self):
+        """Every dd invocation in flash-usb.sh must quote "$DEVICE"."""
+        content = self._read(self.FLASH_SCRIPT)
+        dd_lines = [
+            line for line in content.splitlines()
+            if re.search(r'(^|\s|,)dd\s+(if|of)=', line)
+        ]
+        self.assertTrue(dd_lines, "expected dd invocations in flash-usb.sh")
+        for line in dd_lines:
+            self.assertIn(
+                '"$DEVICE"', line,
+                f"dd must quote \"$DEVICE\": {line.strip()}",
+            )
+
+    def test_flash_usb_refuses_non_usb_targets(self):
+        """The transport guard must consult lsblk TRAN and refuse non-usb."""
+        content = self._read(self.FLASH_SCRIPT)
+        self.assertIn("lsblk -dn -o TRAN", content)
+        self.assertIn("Refusing to write", content)
+
 
 if __name__ == '__main__':
     # Run tests with detailed output

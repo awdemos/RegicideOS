@@ -14,7 +14,10 @@ mkdir -p "${ROOTFS}/etc/portage"
 # Set REGICIDE_USE_BINPKGS=0 to force source builds.
 EMERGE_OPTS="--jobs --load-average"
 if [[ "${REGICIDE_USE_BINPKGS:-1}" != "0" ]]; then
-    EMERGE_OPTS="${EMERGE_OPTS} --usepkg --binpkg-respect-use=y"
+    # --rebuilt-binaries: without it, --usepkg silently installs a cached
+    # binpkg even when the ebuild changed but its version did not, so overlay
+    # edits would never reach the image while the cache stays "warm".
+    EMERGE_OPTS="${EMERGE_OPTS} --usepkg --rebuilt-binaries --binpkg-respect-use=y"
     log_status "binpkgs" "local binpkg reuse enabled (--usepkg)"
 else
     log_status "binpkgs" "local binpkg reuse disabled (REGICIDE_USE_BINPKGS=0)"

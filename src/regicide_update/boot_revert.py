@@ -24,8 +24,9 @@ the swap.
 
 import os
 import sys
+from pathlib import Path
 from regicide_update import common as rc
-from regicide_update import snapshots
+from regicide_update import snapshots, validation
 
 
 _LIVE_BACKUP_SUFFIX = ".regicide-revert-backup"
@@ -117,7 +118,11 @@ def apply_revert() -> bool:
     with open(rc.REVERT_FLAG) as f:
         target_name = f.read().strip()
 
+    # The flag is read back from disk here, so it must be re-validated: an
+    # absolute path or ../ traversal would escape the snapshot store.
+    target_name = validation.safe_snapshot_name(target_name)
     target = os.path.join(rc.SNAPSHOT_DIR, target_name)
+    validation.ensure_dir_under(Path(target), Path(rc.SNAPSHOT_DIR))
     if not os.path.isdir(target):
         rc.warn(f"Revert target '{target_name}' missing; cancelling revert.")
         os.remove(rc.REVERT_FLAG)

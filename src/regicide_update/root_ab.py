@@ -17,6 +17,7 @@ option `subvol=roots_a` or `subvol=roots_b`, or by Btrfs default subvolume.
 """
 
 import os
+import re
 from pathlib import Path
 from regicide_update import common as rc
 
@@ -25,6 +26,16 @@ SLOT_A = "a"
 SLOT_B = "b"
 ROOT_SLOT_SUBVOL = "roots_{slot}"
 CURRENT_FILE = Path(rc.ROOTS_DIR) / ".regicide-root-current"
+
+
+def version_segments(name: str) -> tuple[int, ...]:
+    """Extract numeric version segments for version-sort comparison.
+
+    Comparing these tuples orders kernel names numerically, so e.g.
+    vmlinuz-6.9.10 sorts above vmlinuz-6.9.9 (plain string sort gets this
+    wrong).
+    """
+    return tuple(int(s) for s in re.findall(r"\d+", name))
 
 
 def _slot_path(slot: str) -> str:
@@ -77,8 +88,33 @@ def _ensure_slots_exist() -> None:
         rc.execute("btrfs", ["subvolume", "create", other_path])
 
 
+def _reconcile_with_grubenv() -> None:
+    """Align the CURRENT_FILE marker with grubenv before destructive work.
+
+    CURRENT_FILE and grubenv can diverge if a crash lands between the two
+    writes during activation. GRUB boots whichever slot grubenv names, so
+    grubenv wins: the marker is rewritten to match before the wipe target
+    for an update is chosen. Aborts if grubenv cannot be read.
+    """
+    from regicide_update import boot_entry
+
+    boot_slot = boot_entry.read_slot_from_grubenv()
+    if boot_slot is None:
+        return
+    current = read_active_slot()
+    if boot_slot != current:
+        rc.warn(
+            f"Active-slot marker says '{current}' but GRUB boots slot "
+            f"'{boot_slot}'; trusting GRUB and updating the marker."
+        )
+        write_active_slot(boot_slot)
+
+
 def prepare_update_slot() -> str:
     """Return the inactive slot path ready to receive a new root image."""
+    # Reconcile first: slot creation/snapshotting below derives from the
+    # active slot, which must be the one GRUB actually boots.
+    _reconcile_with_grubenv()
     _ensure_slots_exist()
     inactive = _other_slot(read_active_slot())
     inactive_path = _slot_path(inactive)
@@ -95,6 +131,10 @@ def verify_root(path: str) -> bool:
     Checks for the existence of key directories needed by a Linux system and
     a kernel/initramfs under /boot. Kernel and initramfs names are matched with
     globs so Gentoo-style vmlinuz-<kver>/initramfs-<kver>.img names work too.
+    Versioned kernels are pair-checked: every vmlinuz-<ver> must have a
+    matching initramfs-<ver>.img. An unpaired older kernel only warns, but a
+    newest kernel without a matching initramfs means the slot cannot boot and
+    fails verification.
     Returns True if verification passes.
     """
     import glob
@@ -110,26 +150,35 @@ def verify_root(path: str) -> bool:
         return False
     # Match common kernel and initramfs naming conventions, including versioned
     # Gentoo filenames like vmlinuz-6.1.0 and initramfs-6.1.0.img.
-    has_kernel = any(
-        glob.glob(os.path.join(boot_dir, pattern))
-        for pattern in (
-            "vmlinuz*",
-            "vmlinuz-linux*",
-            "Image*",
-            "bzImage*",
-            "kernel*",
-        )
+    kernels = sorted(
+        {
+            os.path.basename(p)
+            for pattern in ("vmlinuz*", "vmlinuz-linux*", "Image*", "bzImage*", "kernel*")
+            for p in glob.glob(os.path.join(boot_dir, pattern))
+        },
+        key=version_segments,
     )
-    has_initrd = any(
-        glob.glob(os.path.join(boot_dir, pattern))
-        for pattern in (
-            "initramfs*",
-            "initrd*",
-        )
-    )
-    if not (has_kernel and has_initrd):
+    initrd_versions = {
+        version_segments(os.path.basename(p))
+        for pattern in ("initramfs*", "initrd*")
+        for p in glob.glob(os.path.join(boot_dir, pattern))
+    }
+    if not kernels or not initrd_versions:
         rc.warn(f"Verification failed: missing kernel/initramfs in {boot_dir}")
         return False
+    newest = kernels[-1]
+    if version_segments(newest) not in initrd_versions:
+        rc.warn(
+            f"Verification failed: newest kernel {newest} has no matching "
+            f"initramfs in {boot_dir}"
+        )
+        return False
+    for kernel in kernels:
+        if version_segments(kernel) not in initrd_versions:
+            rc.warn(
+                f"Verification warning: kernel {kernel} has no matching "
+                f"initramfs in {boot_dir}; it will be ignored"
+            )
     rc.info(f"Root verification passed for {path}")
     return True
 
@@ -148,21 +197,41 @@ def activate_slot(slot: str) -> None:
 
 
 def rollback() -> str:
-    """Switch back to the previously active slot and return its name."""
+    """Switch back to the previously active slot and return its name.
+
+    The previous slot is fully verified (kernel/initramfs discovery plus the
+    root checks) BEFORE any state is flipped, so a rollback onto an
+    empty/partial slot aborts with the current slot still active.
+    """
+    from regicide_update import boot_entry
+
     current = read_active_slot()
     previous = _other_slot(current)
     previous_path = _slot_path(previous)
     if not os.path.isdir(previous_path):
         rc.die(f"Cannot rollback to slot {previous}: subvolume missing")
+    try:
+        boot_entry.discover_kernel_initrd(previous)
+    except SystemExit:
+        rc.die(
+            f"Cannot rollback to slot {previous}: no bootable "
+            f"kernel/initramfs found; keeping slot {current} active"
+        )
+    if not verify_root(previous_path):
+        rc.die(
+            f"Cannot rollback to slot {previous}: slot failed verification; "
+            f"keeping slot {current} active"
+        )
     activate_slot(previous)
     return previous
 
 
-def install_and_activate(image: Path) -> str:
-    """Install a tarball into the inactive slot, verify it, and activate it.
+def install_image(image: Path) -> str:
+    """Install a tarball into the inactive slot and verify it.
 
-    Returns the newly active slot name. The previous slot remains intact and
-    can be rolled back to later.
+    Returns the slot name. Does NOT change the active slot or the bootloader;
+    callers promote the slot only after GRUB has been pointed at it (see
+    boot_entry.install_and_sync).
     """
     from regicide_update import image as img
 
@@ -172,6 +241,18 @@ def install_and_activate(image: Path) -> str:
     img.install_tarball(image, inactive_path)
     if not verify_root(inactive_path):
         rc.die("New root failed verification; keeping current root active")
-    slot = os.path.basename(inactive_path).replace("roots_", "")
+    return os.path.basename(inactive_path).replace("roots_", "")
+
+
+def install_and_activate(image: Path) -> str:
+    """Install a tarball into the inactive slot, verify it, and activate it.
+
+    Returns the newly active slot name. The previous slot remains intact and
+    can be rolled back to later. Note: this writes the CURRENT_FILE marker
+    without touching GRUB; bootloader-aware callers should use
+    boot_entry.install_and_sync, which orders the writes so a crash fails
+    safe toward the previously verified slot.
+    """
+    slot = install_image(image)
     activate_slot(slot)
     return slot

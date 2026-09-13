@@ -55,7 +55,7 @@ installer/
 - Sanitize all error messages with `sanitize_error_message()`
 
 ### Security Requirements
-- All external commands must use `execute()` or `execute_safe_command()`
+- All external commands must use `execute()`, `execute_safe_command()`, or the argv-based `run_cmd()`/`chroot_cmd()` helpers in `commands.rs` (preferred for fixed argument lists — no shell parsing at all)
 - Validate all user inputs with regex patterns
 - Use path traversal protection for file operations
 - No hardcoded secrets or credentials

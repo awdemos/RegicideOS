@@ -252,8 +252,33 @@ mksquashfs "${DATA_STAGING}" "${DATA_SQUASHFS}" -comp zstd -Xcompression-level 1
 echo "Extracting kernel/initramfs from SquashFS..."
 unsquashfs -no-xattrs -f -d "${WORK_DIR}/sq" "${SQUASHFS}" boot 2>/dev/null
 
-KERNEL_SRC=$(find "${WORK_DIR}/sq/boot" -maxdepth 1 \( -name 'kernel-*' -o -name 'vmlinuz-*' \) -type f | sort | head -n1 || true)
-INITRD_SRC=$(find "${WORK_DIR}/sq/boot" -maxdepth 1 \( -name 'initramfs-*.img' -o -name 'initrd-*.img' \) -type f | sort | head -n1 || true)
+KERNEL_SRC=$(find "${WORK_DIR}/sq/boot" -maxdepth 1 \( -name 'kernel-*' -o -name 'vmlinuz-*' \) -type f | sort -V | tail -n1 || true)
+
+# The initramfs must match the selected kernel's version: both picks used to
+# be independent `sort | head -1`, which pairs the alphabetically-first of
+# each and mismatches when the image ships more than one kernel.
+INITRD_SRC=""
+kver_guess=""
+if [[ "${KERNEL_SRC}" =~ kernel-([0-9]+\.[0-9]+\.[0-9]+[^/]*)$ ]]; then
+    kver_guess="${BASH_REMATCH[1]}"
+elif [[ "${KERNEL_SRC}" =~ vmlinuz-([0-9]+\.[0-9]+\.[0-9]+[^/]*)$ ]]; then
+    kver_guess="${BASH_REMATCH[1]}"
+fi
+if [[ -n "${kver_guess}" ]]; then
+    for candidate in "initramfs-${kver_guess}.img" "initrd-${kver_guess}.img"; do
+        if [[ -f "${WORK_DIR}/sq/boot/${candidate}" ]]; then
+            INITRD_SRC="${WORK_DIR}/sq/boot/${candidate}"
+            break
+        fi
+    done
+fi
+if [[ -z "${INITRD_SRC}" ]]; then
+    kernel_count=$(find "${WORK_DIR}/sq/boot" -maxdepth 1 \( -name 'kernel-*' -o -name 'vmlinuz-*' \) -type f | wc -l)
+    initrd_count=$(find "${WORK_DIR}/sq/boot" -maxdepth 1 \( -name 'initramfs-*.img' -o -name 'initrd-*.img' \) -type f | wc -l)
+    if [[ "${kernel_count}" -eq 1 && "${initrd_count}" -eq 1 ]]; then
+        INITRD_SRC=$(find "${WORK_DIR}/sq/boot" -maxdepth 1 \( -name 'initramfs-*.img' -o -name 'initrd-*.img' \) -type f | sort -V | tail -n1 || true)
+    fi
+fi
 
 # Extract the modules tree so we can inject the squashfs module (and any
 # future required modules) into the unified initramfs.
@@ -526,7 +551,8 @@ if [[ "${ENCRYPT}" == true && -n "${FW_CFG_PASSPHRASE_FILE}" ]]; then
 fi
 
 if [[ "${REGICIDE_ARCH}" == "arm64" ]]; then
-    "${QEMU_BIN}" \
+    # Same watchdog as the amd64 branch: a wedged guest must not hang the build.
+    timeout 900 "${QEMU_BIN}" \
         -machine virt,gic-version=3,accel=kvm \
         -enable-kvm \
         -cpu host \
